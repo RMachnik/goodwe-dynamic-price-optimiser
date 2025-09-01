@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GoodWe Dynamic Price Optimiser - Enhanced Data Collector
+Enhanced Data Collector for GoodWe Inverter
 Phase 1, Task 1.1: Add PV production monitoring to data collection
 
 This script extends the basic GoodWe monitoring to collect comprehensive data
@@ -36,7 +36,14 @@ project_root = Path(__file__).parent.parent
 logs_dir = project_root / "logs"
 logs_dir.mkdir(exist_ok=True)
 
-# Logging configuration moved to main application to avoid duplication
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(logs_dir / 'enhanced_data_collector.log'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 class EnhancedDataCollector:
@@ -58,12 +65,12 @@ class EnhancedDataCollector:
         self.daily_stats: Dict[str, Any] = {}
         
         # Monitoring intervals
-        self.monitoring_interval = 20  # seconds
+        self.monitoring_interval = 60  # seconds
         self.data_save_interval = 300  # 5 minutes
         
     async def initialize(self) -> bool:
         """Initialize the system and connect to inverter"""
-        logger.info("Initializing GoodWe Dynamic Price Optimiser...")
+        logger.info("Initializing Enhanced Data Collector...")
         
         # Connect to GoodWe inverter
         if not await self.goodwe_charger.connect_inverter():
@@ -155,13 +162,9 @@ class EnhancedDataCollector:
                 'grid': {
                     'power_w': sensor_data.get('meter_active_power_total', {}).get('value', 'Unknown'),
                     'power_kw': self._convert_to_kw(sensor_data.get('meter_active_power_total', {}).get('value', 0)),
-                    'voltage': sensor_data.get('vgrid', {}).get('value', 'Unknown'),  # Add grid voltage for safety checks
                     'flow_direction': self._determine_grid_flow(sensor_data.get('meter_active_power_total', {}).get('value', 0)),
                     'import_rate': self._get_import_rate(sensor_data.get('meter_active_power_total', {}).get('value', 0)),
                     'export_rate': self._get_export_rate(sensor_data.get('meter_active_power_total', {}).get('value', 0)),
-                    'l1_current_a': sensor_data.get('igrid', {}).get('value', 'Unknown'),
-                    'l2_current_a': sensor_data.get('igrid2', {}).get('value', 'Unknown'),
-                    'l3_current_a': sensor_data.get('igrid3', {}).get('value', 'Unknown'),
                     'l1_power': sensor_data.get('meter_active_power1', {}).get('value', 'Unknown'),
                     'l2_power': sensor_data.get('meter_active_power2', {}).get('value', 'Unknown'),
                     'l3_power': sensor_data.get('meter_active_power3', {}).get('value', 'Unknown'),
@@ -190,30 +193,6 @@ class EnhancedDataCollector:
                 }
             }
             
-            # Add compatibility aliases for backward compatibility
-            # Map 'system' to 'inverter' for battery_selling_monitor
-            if 'system' in comprehensive_data:
-                comprehensive_data['inverter'] = comprehensive_data['system'].copy()
-                # Initialize error_codes list if not present
-                if 'error_codes' not in comprehensive_data['inverter']:
-                    comprehensive_data['inverter']['error_codes'] = []
-            
-            # Map 'photovoltaic' to 'pv' for backward compatibility
-            if 'photovoltaic' in comprehensive_data and 'pv' not in comprehensive_data:
-                comprehensive_data['pv'] = {
-                    'power': comprehensive_data['photovoltaic'].get('current_power_w', 0),
-                    'power_w': comprehensive_data['photovoltaic'].get('current_power_w', 0),
-                    'total_power': comprehensive_data['photovoltaic'].get('current_power_w', 0)
-                }
-            
-            # Map 'house_consumption' to 'consumption' for backward compatibility
-            if 'house_consumption' in comprehensive_data and 'consumption' not in comprehensive_data:
-                comprehensive_data['consumption'] = {
-                    'house_consumption': comprehensive_data['house_consumption'].get('current_power_w', 0),
-                    'power_w': comprehensive_data['house_consumption'].get('current_power_w', 0),
-                    'current_power_w': comprehensive_data['house_consumption'].get('current_power_w', 0)
-                }
-            
             # Store current data
             self.current_data = comprehensive_data
             
@@ -223,9 +202,9 @@ class EnhancedDataCollector:
             # Update daily statistics
             self._update_daily_stats(comprehensive_data)
             
-            # Limit historical data to last 24 hours (4320 data points at 20-second intervals)
-            if len(self.historical_data) > 4320:
-                self.historical_data = self.historical_data[-4320:]
+            # Limit historical data to last 24 hours (1440 data points at 1-minute intervals)
+            if len(self.historical_data) > 1440:
+                self.historical_data = self.historical_data[-1440:]
             
             logger.info(f"Data collected successfully at {comprehensive_data['time']}")
             return comprehensive_data
@@ -254,8 +233,8 @@ class EnhancedDataCollector:
             for data in daily_data:
                 pv_power = data.get('photovoltaic', {}).get('current_power_kw', 0.0)
                 if isinstance(pv_power, (int, float)) and pv_power > 0:
-                    # Convert power to energy (assuming 20-second intervals)
-                    total_production += pv_power / 180.0  # kWh per 20-second interval
+                    # Convert power to energy (assuming 1-minute intervals)
+                    total_production += pv_power / 60.0  # kWh per minute
             
             return round(total_production, 3)
         except Exception as e:
@@ -338,8 +317,8 @@ class EnhancedDataCollector:
             for data in daily_data:
                 consumption = data.get('house_consumption', {}).get('calculated_power_kw', 0.0)
                 if isinstance(consumption, (int, float)) and consumption > 0:
-                    # Convert power to energy (assuming 20-second intervals)
-                    total_consumption += consumption / 180.0  # kWh per 20-second interval
+                    # Convert power to energy (assuming 1-minute intervals)
+                    total_consumption += consumption / 60.0  # kWh per minute
             
             return round(total_consumption, 3)
         except Exception as e:
@@ -352,15 +331,15 @@ class EnhancedDataCollector:
             # PV Production stats
             pv_power = data.get('photovoltaic', {}).get('current_power_kw', 0.0)
             if isinstance(pv_power, (int, float)) and pv_power > 0:
-                self.daily_stats['pv_production']['total_kwh'] += pv_power / 180.0  # kWh per 20-second interval
+                self.daily_stats['pv_production']['total_kwh'] += pv_power / 60.0  # kWh per minute
                 if pv_power > self.daily_stats['pv_production']['peak_power']:
                     self.daily_stats['pv_production']['peak_power'] = pv_power
                     self.daily_stats['pv_production']['peak_time'] = data.get('time')
                 
                 if pv_power > 1.0:
-                    self.daily_stats['pv_production']['hours_above_1kw'] += 1/180
+                    self.daily_stats['pv_production']['hours_above_1kw'] += 1/60
                 if pv_power > 5.0:
-                    self.daily_stats['pv_production']['hours_above_5kw'] += 1/180
+                    self.daily_stats['pv_production']['hours_above_5kw'] += 1/60
             
             # Battery stats
             battery_soc = data.get('battery', {}).get('soc_percent', 0)
@@ -374,19 +353,19 @@ class EnhancedDataCollector:
             battery_power = data.get('battery', {}).get('power_kw', 0.0)
             if isinstance(battery_power, (int, float)):
                 if battery_power > 0:  # Charging
-                    self.daily_stats['battery']['total_charge_kwh'] += battery_power / 180.0
+                    self.daily_stats['battery']['total_charge_kwh'] += battery_power / 60.0
                 elif battery_power < 0:  # Discharging
-                    self.daily_stats['battery']['total_discharge_kwh'] += abs(battery_power) / 180.0
+                    self.daily_stats['battery']['total_discharge_kwh'] += abs(battery_power) / 60.0
             
             # Grid stats
             grid_power = data.get('grid', {}).get('power_kw', 0.0)
             if isinstance(grid_power, (int, float)):
                 if grid_power > 0:  # Import
-                    self.daily_stats['grid']['total_import_kwh'] += grid_power / 180.0
+                    self.daily_stats['grid']['total_import_kwh'] += grid_power / 60.0
                     if grid_power > self.daily_stats['grid']['peak_import']:
                         self.daily_stats['grid']['peak_import'] = grid_power
                 elif grid_power < 0:  # Export
-                    self.daily_stats['grid']['total_export_kwh'] += abs(grid_power) / 180.0
+                    self.daily_stats['grid']['total_export_kwh'] += abs(grid_power) / 60.0
                     if abs(grid_power) > self.daily_stats['grid']['peak_export']:
                         self.daily_stats['grid']['peak_export'] = abs(grid_power)
                 
@@ -396,7 +375,7 @@ class EnhancedDataCollector:
             # House consumption stats
             house_power = data.get('house_consumption', {}).get('current_power_kw', 0.0)
             if isinstance(house_power, (int, float)) and house_power > 0:
-                self.daily_stats['house_consumption']['total_kwh'] += house_power / 180.0
+                self.daily_stats['house_consumption']['total_kwh'] += house_power / 60.0
                 if house_power > self.daily_stats['house_consumption']['peak_power']:
                     self.daily_stats['house_consumption']['peak_power'] = house_power
                     self.daily_stats['house_consumption']['peak_time'] = data.get('time')
@@ -429,10 +408,6 @@ class EnhancedDataCollector:
         except Exception as e:
             logger.error(f"Failed to save data to files: {e}")
     
-    def get_current_data(self) -> Dict[str, Any]:
-        """Get current system data"""
-        return self.current_data.copy() if self.current_data else {}
-    
     def print_current_status(self):
         """Print current system status"""
         if not self.current_data:
@@ -442,7 +417,7 @@ class EnhancedDataCollector:
         data = self.current_data
         
         print("\n" + "="*80)
-        print("GOODWE DYNAMIC PRICE OPTIMISER - CURRENT STATUS")
+        print("ENHANCED GOODWE INVERTER DATA COLLECTOR - CURRENT STATUS")
         print("="*80)
         print(f"Timestamp: {data.get('timestamp', 'Unknown')}")
         print(f"Inverter: {data.get('system', {}).get('inverter_model', 'Unknown')}")
@@ -476,9 +451,6 @@ class EnhancedDataCollector:
         grid = data.get('grid', {})
         print("⚡ GRID STATUS:")
         print(f"  Total Power: {grid.get('power_w', 'Unknown')} W ({grid.get('power_kw', 'Unknown')} kW)")
-        print(f"  L1 Current: {grid.get('l1_current_a', 'Unknown')} A")
-        print(f"  L2 Current: {grid.get('l2_current_a', 'Unknown')} A")
-        print(f"  L3 Current: {grid.get('l3_current_a', 'Unknown')} A")
         print(f"  L1 Power: {grid.get('l1_power', 'Unknown')} W")
         print(f"  L2 Power: {grid.get('l2_power', 'Unknown')} W")
         print(f"  L3 Power: {grid.get('l3_power', 'Unknown')} W")
@@ -551,7 +523,7 @@ class EnhancedDataCollector:
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
-        description='GoodWe Dynamic Price Optimiser - Enhanced Data Collector',
+        description='Enhanced Data Collector for GoodWe Inverter',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -574,8 +546,8 @@ Examples:
     
     parser.add_argument(
         '--config', '-c',
-        default='config/master_coordinator_config.yaml',
-        help='Configuration file path (default: config/master_coordinator_config.yaml)'
+        default='config/fast_charge_config.yaml',
+        help='Configuration file path (default: config/fast_charge_config.yaml)'
     )
     
     parser.add_argument(
@@ -623,11 +595,11 @@ async def main():
     collector = EnhancedDataCollector(config_file)
     
     if not await collector.initialize():
-        print("Failed to initialize GoodWe Dynamic Price Optimiser")
+        print("Failed to initialize enhanced data collector")
         return
     
     # Show current status
-    print("GoodWe Dynamic Price Optimiser initialized successfully!")
+    print("Enhanced Data Collector initialized successfully!")
     print("Collecting initial data...")
     
     # Collect initial data

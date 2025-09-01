@@ -1,65 +1,72 @@
 #!/usr/bin/env python3
 """
-Unit tests for the IP scanner helpers.
-
-These tests mock the `goodwe.connect` call so they do not require
-network access or hardware. They exercise the `check_ip_address`
-helper behaviour for success and failure.
+Simple IP testing script for GoodWe inverters
+Tests common IP addresses where inverters might be located
 """
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+import goodwe
+import ipaddress
 
-import pytest
-
-try:
-    import goodwe  # pragma: no cover - may be patched in tests
-except Exception:
-    goodwe = None
-
-
-async def check_ip_address(ip):
-    """Helper that tries to connect to an inverter IP using `goodwe`.
-
-    Kept in-module so unit tests can import and patch `goodwe`.
-    """
+async def test_ip(ip):
+    """Test if a specific IP responds to GoodWe protocol"""
     try:
-        inverter = await goodwe.connect(host=ip, family="ET", timeout=2, retries=1)
+        print(f"Testing {ip}...", end=" ")
+        inverter = await goodwe.connect(
+            host=ip,
+            family="ET",  # Try ET family first
+            timeout=2,
+            retries=1
+        )
+        print(f"✅ SUCCESS! Found {inverter.model_name} (Serial: {inverter.serial_number})")
         return True
-    except Exception:
+    except Exception as e:
+        print(f"❌ Failed: {str(e)[:50]}...")
         return False
 
-
-@patch("test_ips.goodwe", create=True)
-@pytest.mark.asyncio
-async def test_check_ip_address_success(mock_goodwe):
-    """`check_ip_address` returns True when `goodwe.connect` succeeds."""
-    # Arrange: mock goodwe.connect to return a mock inverter
-    mock_inverter = AsyncMock()
-    mock_inverter.model_name = "GW-TEST"
-    mock_inverter.serial_number = "SN123"
-    mock_goodwe.connect = AsyncMock(return_value=mock_inverter)
-
-    from test_ips import check_ip_address
-
-    # Act
-    result = await check_ip_address("192.0.2.1")
-
-    # Assert
-    assert result is True
-
-
-@patch("test_ips.goodwe", create=True)
-@pytest.mark.asyncio
-async def test_check_ip_address_failure(mock_goodwe):
-    """`check_ip_address` returns False when `goodwe.connect` raises."""
-    mock_goodwe.connect = AsyncMock(side_effect=Exception("connect error"))
-
-    from test_ips import check_ip_address
-
-    result = await check_ip_address("192.0.2.2")
-
-    assert result is False
+async def main():
+    """Test common IP addresses"""
+    print("Testing common GoodWe inverter IP addresses...")
+    print("=" * 50)
+    
+    # Common IP ranges to test
+    test_ips = [
+        "192.168.1.100",
+        "192.168.1.101", 
+        "192.168.1.102",
+        "192.168.1.200",
+        "192.168.1.201",
+        "192.168.2.100",
+        "192.168.2.101",
+        "192.168.2.200",
+        "192.168.68.50",
+        "192.168.68.51",
+        "192.168.68.100",
+        "192.168.68.101",
+        "192.168.68.200",
+        "10.0.0.100",
+        "10.0.0.101",
+        "10.0.0.200"
+    ]
+    
+    found_inverters = []
+    
+    for ip in test_ips:
+        if await test_ip(ip):
+            found_inverters.append(ip)
+    
+    print("\n" + "=" * 50)
+    if found_inverters:
+        print(f"✅ Found {len(found_inverters)} inverter(s) at:")
+        for ip in found_inverters:
+            print(f"   - {ip}")
+    else:
+        print("❌ No inverters found in common IP ranges")
+        print("\nSuggestions:")
+        print("1. Check your router's DHCP client list")
+        print("2. Look at your GoodWe app for the IP address")
+        print("3. Check if the inverter is powered on")
+        print("4. Verify network connectivity")
 
 if __name__ == "__main__":
     asyncio.run(main())

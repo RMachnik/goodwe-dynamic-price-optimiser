@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GoodWe Dynamic Price Optimiser - Fast Charging Script
+GoodWe Inverter Fast Charging Script
 
 This script triggers fast charging on GoodWe inverters with safety checks
 and monitoring capabilities.
@@ -61,84 +61,61 @@ class GoodWeFastCharger:
             raise ValueError(f"Invalid YAML configuration: {e}")
     
     def _setup_logging(self):
-        """Setup logging configuration - avoid duplicate handlers"""
+        """Setup logging configuration"""
         log_config = self.config.get('logging', {})
         log_level = getattr(logging, log_config.get('level', 'INFO'))
         
-        # Get the root logger
-        root_logger = logging.getLogger()
+        # Create formatter
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
         
-        # Only setup logging if it hasn't been configured yet
-        if not root_logger.handlers:
-            # Create formatter
-            formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        # Setup root logger
+        root_logger = logging.getLogger()
+        root_logger.setLevel(log_level)
+        
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(log_level)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+        
+        # File handler if enabled
+        if log_config.get('log_to_file', False):
+            # Get the project root directory (parent of src)
+            project_root = Path(__file__).parent.parent
+            logs_dir = project_root / "logs"
+            logs_dir.mkdir(exist_ok=True)
+            
+            log_file = log_config.get('log_file', str(logs_dir / 'fast_charge.log'))
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setLevel(log_level)
+            file_handler.setFormatter(formatter)
+            root_logger.addHandler(file_handler)
+    
+    async def connect_inverter(self) -> bool:
+        """Connect to the GoodWe inverter"""
+        try:
+            inverter_config = self.config['inverter']
+            
+            self.logger.info(f"Connecting to inverter at {inverter_config['ip_address']}")
+            
+            self.inverter = await goodwe.connect(
+                host=inverter_config['ip_address'],
+                family=inverter_config['family'],
+                timeout=inverter_config['timeout'],
+                retries=inverter_config['retries']
             )
             
-            root_logger.setLevel(log_level)
+            self.logger.info(
+                f"Connected to inverter: {self.inverter.model_name} "
+                f"(Serial: {self.inverter.serial_number})"
+            )
+            return True
             
-            # Console handler
-            console_handler = logging.StreamHandler()
-            console_handler.setLevel(log_level)
-            console_handler.setFormatter(formatter)
-            root_logger.addHandler(console_handler)
-            
-            # File handler if enabled
-            if log_config.get('log_to_file', False):
-                # Get the project root directory (parent of src)
-                project_root = Path(__file__).parent.parent
-                logs_dir = project_root / "logs"
-                logs_dir.mkdir(exist_ok=True)
-                
-                log_file = log_config.get('log_file', str(logs_dir / 'fast_charge.log'))
-                file_handler = logging.FileHandler(log_file)
-                file_handler.setLevel(log_level)
-                file_handler.setFormatter(formatter)
-                root_logger.addHandler(file_handler)
-        else:
-            # Just set the log level if handlers already exist
-            root_logger.setLevel(log_level)
-    
-    async def connect_inverter(self, max_retries: int = None, retry_delay: float = None) -> bool:
-        """Connect to the GoodWe inverter with retry logic and delays"""
-        inverter_config = self.config['inverter']
-        
-        # Use configuration values or defaults
-        max_retries = max_retries or inverter_config.get('max_retries', 3)
-        retry_delay = retry_delay or inverter_config.get('retry_delay', 2.0)
-        
-        for attempt in range(max_retries):
-            try:
-                if attempt > 0:
-                    self.logger.info(f"Retry attempt {attempt + 1}/{max_retries} for inverter connection...")
-                    await asyncio.sleep(retry_delay)  # Add delay between retries
-                else:
-                    self.logger.info(f"Connecting to inverter at {inverter_config['ip_address']}")
-                
-                self.inverter = await goodwe.connect(
-                    host=inverter_config['ip_address'],
-                    family=inverter_config['family'],
-                    timeout=inverter_config['timeout'],
-                    retries=inverter_config['retries']
-                )
-                
-                self.logger.debug(
-                    f"Connected to inverter: {self.inverter.model_name} "
-                    f"(Serial: {self.inverter.serial_number})"
-                )
-                return True
-                
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    self.logger.warning(f"Connection attempt {attempt + 1} failed: {e}. Retrying in {retry_delay}s...")
-                else:
-                    self.logger.error(f"Failed to connect to inverter after {max_retries} attempts: {e}")
-        
-        return False
-    
-    def is_connected(self) -> bool:
-        """Check if inverter is connected"""
-        return self.inverter is not None
+        except Exception as e:
+            self.logger.error(f"Failed to connect to inverter: {e}")
+            return False
     
     async def get_inverter_status(self) -> Dict[str, Any]:
         """Get current inverter status and sensor data"""
@@ -283,37 +260,16 @@ class GoodWeFastCharger:
             fast_charging_power = await self.inverter.read_setting('fast_charging_power')
             fast_charging_soc = await self.inverter.read_setting('fast_charging_soc')
             
-            # Determine if actually charging based on inverter state
-            # Check if fast charging is enabled (primary indicator)
-            is_actually_charging = (fast_charging_enabled == 1)
-            
-            # If we can get battery current, use it as additional confirmation
-            # Battery current is in 'ibattery1' field
-            # Negative current means charging, positive means discharging
-            battery_current = status.get('ibattery1', {}).get('value', 0)
-            if battery_current != 'Unknown' and battery_current is not None:
-                try:
-                    current_value = float(battery_current)
-                    # If we have current data, use it to confirm charging
-                    # Negative current means charging, positive means discharging
-                    is_actually_charging = is_actually_charging and current_value < 0
-                except (ValueError, TypeError):
-                    # If current data is invalid, rely on fast_charging_enabled
-                    pass
-            
-            # Update our internal charging state
-            self.is_charging = is_actually_charging
-            
             charging_info = {
-                'is_charging': is_actually_charging,
+                'is_charging': self.is_charging,
                 'fast_charging_enabled': fast_charging_enabled == 1,
                 'charging_power_percentage': fast_charging_power,
                 'target_soc_percentage': fast_charging_soc,
                 'current_battery_soc': status.get('battery_soc', {}).get('value', 'Unknown'),
-                'battery_voltage': status.get('vbattery1', {}).get('value', 'Unknown'),
-                'battery_current': status.get('ibattery1', {}).get('value', 'Unknown'),
-                'grid_power': status.get('pgrid', {}).get('value', 'Unknown'),
-                'pv_power': status.get('ppv', {}).get('value', 'Unknown'),
+                'battery_voltage': status.get('battery_voltage', {}).get('value', 'Unknown'),
+                'battery_current': status.get('battery_current', {}).get('value', 'Unknown'),
+                'grid_power': status.get('grid_power', {}).get('value', 'Unknown'),
+                'pv_power': status.get('pv_power', {}).get('value', 'Unknown'),
                 'timestamp': datetime.now().isoformat()
             }
             
@@ -396,9 +352,9 @@ class GoodWeFastCharger:
 
 async def main():
     """Main function"""
-    parser = argparse.ArgumentParser(description='GoodWe Dynamic Price Optimiser - Fast Charging Control')
-    parser.add_argument('--config', '-c', default='config/master_coordinator_config.yaml',
-                       help='Configuration file path (default: config/master_coordinator_config.yaml)')
+    parser = argparse.ArgumentParser(description='GoodWe Inverter Fast Charging Control')
+    parser.add_argument('--config', '-c', default='../config/fast_charge_config.yaml',
+                       help='Configuration file path (default: ../config/fast_charge_config.yaml)')
     parser.add_argument('--start', action='store_true', help='Start fast charging')
     parser.add_argument('--stop', action='store_true', help='Stop fast charging')
     parser.add_argument('--status', action='store_true', help='Show charging status')

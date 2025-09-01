@@ -1,13 +1,11 @@
-# GoodWe Dynamic Price Optimiser - Automated Charging System
+# Automated Price-Based Charging System for GoodWe Inverter
 
 This system automatically controls your GoodWe inverter's battery charging based on real-time Polish electricity market prices, optimizing costs and maximizing savings.
 
 ## 🎯 **What It Does**
 
-- **✅ VALIDATED**: Real-time Price Monitoring from Polish market (PSE CSDAC-PLN API)
-- **✅ EFFICIENT**: Smart scheduled charging (no more redundant API calls)
-- **✅ ACCURATE**: 95-98% price accuracy validated against Gadek.pl
-- **✅ RELIABLE**: 100% API uptime confirmed for last 14 days
+- **Real-time Price Monitoring**: Fetches live electricity prices from Polish market (PSE)
+- **Smart Charging Decisions**: Automatically starts/stops charging based on price thresholds
 - **Cost Optimization**: Finds optimal charging windows to minimize electricity costs
 - **Full Integration**: Works seamlessly with your existing GoodWe inverter setup
 
@@ -19,11 +17,8 @@ This system automatically controls your GoodWe inverter's battery charging based
 - Identifies optimal charging windows based on price thresholds
 - Calculates potential savings for each charging period
 
-### **✅ EFFICIENT Automated Control (UPDATED)**
-- **✅ FIXED**: Fetches prices once per day (not every 15 minutes)
-- **✅ SMART**: Schedules charging for optimal windows (e.g., 11:15-15:15)
-- **✅ RELIABLE**: Uses validated CSDAC-PLN API with 100% uptime
-- **✅ ACCURATE**: 95-98% price accuracy vs Gadek.pl reference
+### **Automated Control**
+- Monitors prices every 15 minutes (configurable)
 - Automatically starts charging when prices are low
 - Stops charging when prices become high
 - Respects maximum charging time limits
@@ -34,20 +29,6 @@ This system automatically controls your GoodWe inverter's battery charging based
 - Ensures no overlap between charging periods
 - Prioritizes windows with highest savings
 - Adapts to daily price variations
-
-## 🇵🇱 **Polish Electricity Market Integration (NEW)**
-
-### **✅ SC Component Implementation**
-- **Składnik cenotwórczy (SC)**: 0.0892 PLN/kWh added to market prices
-- **Final Price**: Market price + SC component = Total cost
-- **Minimum Price Floor**: 0.0050 PLN/kWh (Polish regulations)
-- **Price Threshold**: 25th percentile for charging decisions
-
-### **✅ API Validation Results**
-- **CSDAC-PLN API**: 100% data availability last 14 days
-- **Price Accuracy**: 95-98% match with Gadek.pl reference
-- **Data Quality**: Complete 96 records per day (15-minute intervals)
-- **Timing**: Prices available same day for next-day planning
 
 ## 📊 **Polish Electricity Market Analysis (August 31, 2025)**
 
@@ -87,31 +68,27 @@ pip3 install requests PyYAML
 python3 fast_charge.py --status
 ```
 
-## 🎮 **Usage (UPDATED)**
+## 🎮 **Usage**
 
 ### **1. Run the Automated System**
 ```bash
 python3 automated_price_charging.py
 ```
 
-### **2. Choose Your Option (NEW INTERFACE)**
+### **2. Choose Your Option**
 The system will show you today's electricity prices and optimal charging windows, then offer:
 
-1. **Schedule charging for today** - Smart scheduling for today's optimal window
-2. **Schedule charging for tomorrow** - Plan ahead for tomorrow's optimal window
-3. **Show current status** - Check inverter and battery status
-4. **Start charging now** - Manual start if price is optimal
-5. **Stop charging** - Manual stop if active
-6. **Exit** - Close the system
+1. **Start monitoring and automatic charging** - Full automation
+2. **Show current status** - Check inverter and battery status
+3. **Start charging now** - Manual start if price is optimal
+4. **Stop charging** - Manual stop if active
+5. **Exit** - Close the system
 
-### **3. ✅ EFFICIENT Automated Operation (FIXED)**
-When you choose option 1 or 2, the system will:
-- **✅ FIXED**: Fetch prices once (not every 15 minutes)
-- **✅ SMART**: Schedule charging for optimal windows (e.g., 11:15-15:15)
-- **✅ EFFICIENT**: Monitor only battery SoC and system health
-- **✅ RELIABLE**: Use validated CSDAC-PLN API with retry strategy
-- Automatically start charging during scheduled low-price periods
-- Stop charging when targets are met or time limits reached
+### **3. Automated Operation**
+When you choose option 1, the system will:
+- Check prices every 15 minutes
+- Automatically start charging during low-price periods
+- Stop charging when prices rise or targets are met
 - Log all activities for monitoring
 
 ## ⚙️ **Configuration**
@@ -122,10 +99,8 @@ The system automatically calculates optimal price thresholds:
 - **Customizable**: Set your own threshold in the code
 - **Dynamic**: Adapts to daily price variations
 
-### **✅ EFFICIENT Charging Parameters (UPDATED)**
-- **✅ FIXED**: Price Check: Once per day (not every 15 minutes)
-- **✅ SMART**: Retry Strategy: 13:00-14:00 CET with 15-minute intervals
-- **✅ RELIABLE**: Fallback: Previous day's prices if current unavailable
+### **Charging Parameters**
+- **Check Interval**: 15 minutes (configurable)
 - **Max Charging Time**: 4 hours (configurable)
 - **Target Duration**: 4-hour charging windows
 - **Savings Threshold**: 15% minimum savings
@@ -144,11 +119,10 @@ The system automatically calculates optimal price thresholds:
 
 ## 🔍 **Monitoring & Logs**
 
-### **✅ EFFICIENT Real-time Monitoring (UPDATED)**
-- **✅ FIXED**: Price checks once per day (not every 15 minutes)
-- **✅ SMART**: Scheduled charging for optimal windows
-- **✅ EFFICIENT**: Battery SoC and system health monitoring only
+### **Real-time Monitoring**
+- Price checks every 15 minutes
 - Charging status updates
+- Battery SoC monitoring
 - Cost savings calculations
 
 ### **Logging**
@@ -212,14 +186,11 @@ Enable detailed logging by modifying the logging level in the script.
 
 ## 📊 **API Documentation**
 
-### **✅ VALIDATED Polish Electricity Market API**
-- **✅ CORRECT Endpoint**: `https://api.raporty.pse.pl/api/csdac-pln` (not RCE-PLN)
-- **✅ RELIABLE**: 100% uptime confirmed for last 14 days
-- **✅ ACCURATE**: 95-98% match with Gadek.pl reference data
+### **Polish Electricity Market API**
+- **Endpoint**: `https://api.raporty.pse.pl/api/csdac-pln`
 - **Format**: JSON with 15-minute intervals
 - **Data**: Price in PLN/MWh, timestamps, periods
-- **✅ TIMING**: SDAC publication ~12:42 CET/CEST daily
-- **✅ RETRY**: 13:00-14:00 CET retry window with fallback strategy
+- **Update Frequency**: Real-time market data
 
 ### **Data Structure**
 ```json

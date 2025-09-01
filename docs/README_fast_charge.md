@@ -1,4 +1,4 @@
-# GoodWe Dynamic Price Optimiser - Fast Charging Script
+# GoodWe Inverter Fast Charging Script
 
 This Python script provides a command-line interface to control fast charging on GoodWe inverters with safety features and monitoring capabilities.
 
@@ -11,8 +11,6 @@ This Python script provides a command-line interface to control fast charging on
 - **Notifications**: Optional webhook and email notifications
 - **Logging**: Comprehensive logging to console and file
 - **Safety Features**: Automatic stopping when conditions are met
-- **✅ NEW**: Integration with Polish electricity price optimization
-- **✅ NEW**: Smart scheduling based on market prices
 
 ## Requirements
 
@@ -26,7 +24,7 @@ This Python script provides a command-line interface to control fast charging on
    ```bash
    # Make sure you have the following files:
    # - fast_charge.py
-   # - master_coordinator_config.yaml (unified configuration)
+   # - fast_charge_config.yaml
    # - requirements.txt
    ```
 
@@ -44,13 +42,13 @@ This Python script provides a command-line interface to control fast charging on
 
 1. **Edit the configuration file:**
    ```bash
-   nano config/master_coordinator_config.yaml
+   nano fast_charge_config.yaml
    ```
 
 2. **Update inverter settings:**
    ```yaml
    inverter:
-     ip_address: "192.168.33.15"  # Your inverter's IP address
+     ip_address: "192.168.2.14"  # Your inverter's IP address
      family: "ET"                 # Your inverter family (ET, ES, DT)
      timeout: 1
      retries: 3
@@ -107,15 +105,6 @@ python fast_charge.py --start --monitor
 python fast_charge.py --monitor
 ```
 
-**✅ NEW: Schedule charging for optimal price windows:**
-```bash
-# Schedule charging for today's optimal window
-python automated_price_charging.py --schedule-today
-
-# Schedule charging for tomorrow's optimal window  
-python automated_price_charging.py --schedule-tomorrow
-```
-
 **Use custom config file:**
 ```bash
 python fast_charge.py --config my_config.yaml --start
@@ -148,15 +137,6 @@ python fast_charge.py --status
 ```bash
 # Stop charging immediately
 python fast_charge.py --stop
-```
-
-### Example 4: ✅ NEW - Smart Price-Based Charging
-```bash
-# Let the system find and schedule optimal charging windows
-python automated_price_charging.py --schedule-today
-
-# Check what the system found for today
-python automated_price_charging.py --interactive
 ```
 
 ## Safety Features
@@ -238,26 +218,6 @@ tail -f fast_charge.log
 ### Custom Safety Rules
 
 Add custom safety checks by modifying the `check_safety_conditions` method in the script.
-
-### ✅ NEW: Integration with Automated Price Charging
-
-The fast charging script now integrates with the automated price charging system:
-
-```yaml
-# In fast_charge_config.yaml
-electricity_pricing:
-  # Polish Electricity Market Configuration
-  sc_component_net: 0.0892  # Net price (without VAT)
-  sc_component_gross: 0.1097  # Gross price (with VAT)
-  minimum_price_floor: 0.0050
-  charging_threshold_percentile: 0.25
-```
-
-**Benefits:**
-- **Cost Optimization**: Only charge during low-price periods
-- **Smart Scheduling**: Automatic scheduling for optimal windows
-- **API Integration**: Real-time Polish electricity market data
-- **Validated Accuracy**: 95-98% price accuracy confirmed
 
 ### Integration with Home Assistant
 
