@@ -1,0 +1,23 @@
+{
+  "date": "2025-08-31",
+  "analysis": {
+    "min_price": 116.83,
+    "max_price": 687.04,
+    "avg_price": 426.43791666666664,
+    "median_price": 440.175,
+    "std_dev": 120.28105794711482,
+    "total_periods": 96,
+    "price_25th_percentile": 403.62,
+    "price_75th_percentile": 453.18
+  },
+  "charging_windows": [
+    {
+      "start_time": "2025-08-31T11:15:00",
+      "end_time": "2025-08-31T15:15:00",
+      "duration_minutes": 240,
+      "avg_price": 227.22,
+      "total_cost_per_mwh": 908.88,
+      "savings_per_mwh": 199.21791666666664
+    }
+  ]
+}

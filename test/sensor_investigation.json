@@ -1,0 +1,736 @@
+{
+  "inverter_info": {
+    "model": "GW10KN-ET",
+    "serial": "9010KETU232W0885",
+    "firmware": "04029-12-S11",
+    "rated_power": 10000
+  },
+  "available_sensors": [
+    {
+      "id": "timestamp",
+      "name": "Timestamp",
+      "unit": ""
+    },
+    {
+      "id": "vpv1",
+      "name": "PV1 Voltage",
+      "unit": "V"
+    },
+    {
+      "id": "ipv1",
+      "name": "PV1 Current",
+      "unit": "A"
+    },
+    {
+      "id": "ppv1",
+      "name": "PV1 Power",
+      "unit": "W"
+    },
+    {
+      "id": "vpv2",
+      "name": "PV2 Voltage",
+      "unit": "V"
+    },
+    {
+      "id": "ipv2",
+      "name": "PV2 Current",
+      "unit": "A"
+    },
+    {
+      "id": "ppv2",
+      "name": "PV2 Power",
+      "unit": "W"
+    },
+    {
+      "id": "ppv",
+      "name": "PV Power",
+      "unit": "W"
+    },
+    {
+      "id": "pv2_mode",
+      "name": "PV2 Mode code",
+      "unit": ""
+    },
+    {
+      "id": "pv2_mode_label",
+      "name": "PV2 Mode",
+      "unit": ""
+    },
+    {
+      "id": "pv1_mode",
+      "name": "PV1 Mode code",
+      "unit": ""
+    },
+    {
+      "id": "pv1_mode_label",
+      "name": "PV1 Mode",
+      "unit": ""
+    },
+    {
+      "id": "vgrid",
+      "name": "On-grid L1 Voltage",
+      "unit": "V"
+    },
+    {
+      "id": "igrid",
+      "name": "On-grid L1 Current",
+      "unit": "A"
+    },
+    {
+      "id": "fgrid",
+      "name": "On-grid L1 Frequency",
+      "unit": "Hz"
+    },
+    {
+      "id": "pgrid",
+      "name": "On-grid L1 Power",
+      "unit": "W"
+    },
+    {
+      "id": "vgrid2",
+      "name": "On-grid L2 Voltage",
+      "unit": "V"
+    },
+    {
+      "id": "igrid2",
+      "name": "On-grid L2 Current",
+      "unit": "A"
+    },
+    {
+      "id": "fgrid2",
+      "name": "On-grid L2 Frequency",
+      "unit": "Hz"
+    },
+    {
+      "id": "pgrid2",
+      "name": "On-grid L2 Power",
+      "unit": "W"
+    },
+    {
+      "id": "vgrid3",
+      "name": "On-grid L3 Voltage",
+      "unit": "V"
+    },
+    {
+      "id": "igrid3",
+      "name": "On-grid L3 Current",
+      "unit": "A"
+    },
+    {
+      "id": "fgrid3",
+      "name": "On-grid L3 Frequency",
+      "unit": "Hz"
+    },
+    {
+      "id": "pgrid3",
+      "name": "On-grid L3 Power",
+      "unit": "W"
+    },
+    {
+      "id": "grid_mode",
+      "name": "Grid Mode code",
+      "unit": ""
+    },
+    {
+      "id": "grid_mode_label",
+      "name": "Grid Mode",
+      "unit": ""
+    },
+    {
+      "id": "total_inverter_power",
+      "name": "Total Power",
+      "unit": "W"
+    },
+    {
+      "id": "active_power",
+      "name": "Active Power",
+      "unit": "W"
+    },
+    {
+      "id": "grid_in_out",
+      "name": "On-grid Mode code",
+      "unit": ""
+    },
+    {
+      "id": "grid_in_out_label",
+      "name": "On-grid Mode",
+      "unit": ""
+    },
+    {
+      "id": "reactive_power",
+      "name": "Reactive Power",
+      "unit": "var"
+    },
+    {
+      "id": "apparent_power",
+      "name": "Apparent Power",
+      "unit": "VA"
+    },
+    {
+      "id": "backup_v1",
+      "name": "Back-up L1 Voltage",
+      "unit": "V"
+    },
+    {
+      "id": "backup_i1",
+      "name": "Back-up L1 Current",
+      "unit": "A"
+    },
+    {
+      "id": "backup_f1",
+      "name": "Back-up L1 Frequency",
+      "unit": "Hz"
+    },
+    {
+      "id": "load_mode1",
+      "name": "Load Mode L1",
+      "unit": ""
+    },
+    {
+      "id": "backup_p1",
+      "name": "Back-up L1 Power",
+      "unit": "W"
+    },
+    {
+      "id": "backup_v2",
+      "name": "Back-up L2 Voltage",
+      "unit": "V"
+    },
+    {
+      "id": "backup_i2",
+      "name": "Back-up L2 Current",
+      "unit": "A"
+    },
+    {
+      "id": "backup_f2",
+      "name": "Back-up L2 Frequency",
+      "unit": "Hz"
+    },
+    {
+      "id": "load_mode2",
+      "name": "Load Mode L2",
+      "unit": ""
+    },
+    {
+      "id": "backup_p2",
+      "name": "Back-up L2 Power",
+      "unit": "W"
+    },
+    {
+      "id": "backup_v3",
+      "name": "Back-up L3 Voltage",
+      "unit": "V"
+    },
+    {
+      "id": "backup_i3",
+      "name": "Back-up L3 Current",
+      "unit": "A"
+    },
+    {
+      "id": "backup_f3",
+      "name": "Back-up L3 Frequency",
+      "unit": "Hz"
+    },
+    {
+      "id": "load_mode3",
+      "name": "Load Mode L3",
+      "unit": ""
+    },
+    {
+      "id": "backup_p3",
+      "name": "Back-up L3 Power",
+      "unit": "W"
+    },
+    {
+      "id": "load_p1",
+      "name": "Load L1",
+      "unit": "W"
+    },
+    {
+      "id": "load_p2",
+      "name": "Load L2",
+      "unit": "W"
+    },
+    {
+      "id": "load_p3",
+      "name": "Load L3",
+      "unit": "W"
+    },
+    {
+      "id": "backup_ptotal",
+      "name": "Back-up Load",
+      "unit": "W"
+    },
+    {
+      "id": "load_ptotal",
+      "name": "Load",
+      "unit": "W"
+    },
+    {
+      "id": "ups_load",
+      "name": "Ups Load",
+      "unit": "%"
+    },
+    {
+      "id": "temperature_air",
+      "name": "Inverter Temperature (Air)",
+      "unit": "C"
+    },
+    {
+      "id": "temperature_module",
+      "name": "Inverter Temperature (Module)",
+      "unit": "C"
+    },
+    {
+      "id": "temperature",
+      "name": "Inverter Temperature (Radiator)",
+      "unit": "C"
+    },
+    {
+      "id": "function_bit",
+      "name": "Function Bit",
+      "unit": ""
+    },
+    {
+      "id": "bus_voltage",
+      "name": "Bus Voltage",
+      "unit": "V"
+    },
+    {
+      "id": "nbus_voltage",
+      "name": "NBus Voltage",
+      "unit": "V"
+    },
+    {
+      "id": "vbattery1",
+      "name": "Battery Voltage",
+      "unit": "V"
+    },
+    {
+      "id": "ibattery1",
+      "name": "Battery Current",
+      "unit": "A"
+    },
+    {
+      "id": "pbattery1",
+      "name": "Battery Power",
+      "unit": "W"
+    },
+    {
+      "id": "battery_mode",
+      "name": "Battery Mode code",
+      "unit": ""
+    },
+    {
+      "id": "battery_mode_label",
+      "name": "Battery Mode",
+      "unit": ""
+    },
+    {
+      "id": "warning_code",
+      "name": "Warning code",
+      "unit": ""
+    },
+    {
+      "id": "safety_country",
+      "name": "Safety Country code",
+      "unit": ""
+    },
+    {
+      "id": "safety_country_label",
+      "name": "Safety Country",
+      "unit": ""
+    },
+    {
+      "id": "work_mode",
+      "name": "Work Mode code",
+      "unit": ""
+    },
+    {
+      "id": "work_mode_label",
+      "name": "Work Mode",
+      "unit": ""
+    },
+    {
+      "id": "operation_mode",
+      "name": "Operation Mode code",
+      "unit": ""
+    },
+    {
+      "id": "error_codes",
+      "name": "Error Codes",
+      "unit": ""
+    },
+    {
+      "id": "errors",
+      "name": "Errors",
+      "unit": ""
+    },
+    {
+      "id": "e_total",
+      "name": "Total PV Generation",
+      "unit": "kWh"
+    },
+    {
+      "id": "e_day",
+      "name": "Today's PV Generation",
+      "unit": "kWh"
+    },
+    {
+      "id": "e_total_exp",
+      "name": "Total Energy (export)",
+      "unit": "kWh"
+    },
+    {
+      "id": "h_total",
+      "name": "Hours Total",
+      "unit": "h"
+    },
+    {
+      "id": "e_day_exp",
+      "name": "Today Energy (export)",
+      "unit": "kWh"
+    },
+    {
+      "id": "e_total_imp",
+      "name": "Total Energy (import)",
+      "unit": "kWh"
+    },
+    {
+      "id": "e_day_imp",
+      "name": "Today Energy (import)",
+      "unit": "kWh"
+    },
+    {
+      "id": "e_load_total",
+      "name": "Total Load",
+      "unit": "kWh"
+    },
+    {
+      "id": "e_load_day",
+      "name": "Today Load",
+      "unit": "kWh"
+    },
+    {
+      "id": "e_bat_charge_total",
+      "name": "Total Battery Charge",
+      "unit": "kWh"
+    },
+    {
+      "id": "e_bat_charge_day",
+      "name": "Today Battery Charge",
+      "unit": "kWh"
+    },
+    {
+      "id": "e_bat_discharge_total",
+      "name": "Total Battery Discharge",
+      "unit": "kWh"
+    },
+    {
+      "id": "e_bat_discharge_day",
+      "name": "Today Battery Discharge",
+      "unit": "kWh"
+    },
+    {
+      "id": "diagnose_result",
+      "name": "Diag Status Code",
+      "unit": ""
+    },
+    {
+      "id": "diagnose_result_label",
+      "name": "Diag Status",
+      "unit": ""
+    },
+    {
+      "id": "house_consumption",
+      "name": "House Consumption",
+      "unit": "W"
+    },
+    {
+      "id": "commode",
+      "name": "Commode",
+      "unit": ""
+    },
+    {
+      "id": "rssi",
+      "name": "RSSI",
+      "unit": ""
+    },
+    {
+      "id": "manufacture_code",
+      "name": "Manufacture Code",
+      "unit": ""
+    },
+    {
+      "id": "meter_test_status",
+      "name": "Meter Test Status",
+      "unit": ""
+    },
+    {
+      "id": "meter_comm_status",
+      "name": "Meter Communication Status",
+      "unit": ""
+    },
+    {
+      "id": "active_power1",
+      "name": "Active Power L1",
+      "unit": "W"
+    },
+    {
+      "id": "active_power2",
+      "name": "Active Power L2",
+      "unit": "W"
+    },
+    {
+      "id": "active_power3",
+      "name": "Active Power L3",
+      "unit": "W"
+    },
+    {
+      "id": "active_power_total",
+      "name": "Active Power Total",
+      "unit": "W"
+    },
+    {
+      "id": "reactive_power_total",
+      "name": "Reactive Power Total",
+      "unit": "var"
+    },
+    {
+      "id": "meter_power_factor1",
+      "name": "Meter Power Factor L1",
+      "unit": ""
+    },
+    {
+      "id": "meter_power_factor2",
+      "name": "Meter Power Factor L2",
+      "unit": ""
+    },
+    {
+      "id": "meter_power_factor3",
+      "name": "Meter Power Factor L3",
+      "unit": ""
+    },
+    {
+      "id": "meter_power_factor",
+      "name": "Meter Power Factor",
+      "unit": ""
+    },
+    {
+      "id": "meter_freq",
+      "name": "Meter Frequency",
+      "unit": "Hz"
+    },
+    {
+      "id": "meter_e_total_exp",
+      "name": "Meter Total Energy (export)",
+      "unit": "kWh"
+    },
+    {
+      "id": "meter_e_total_imp",
+      "name": "Meter Total Energy (import)",
+      "unit": "kWh"
+    },
+    {
+      "id": "meter_active_power1",
+      "name": "Meter Active Power L1",
+      "unit": "W"
+    },
+    {
+      "id": "meter_active_power2",
+      "name": "Meter Active Power L2",
+      "unit": "W"
+    },
+    {
+      "id": "meter_active_power3",
+      "name": "Meter Active Power L3",
+      "unit": "W"
+    },
+    {
+      "id": "meter_active_power_total",
+      "name": "Meter Active Power Total",
+      "unit": "W"
+    },
+    {
+      "id": "meter_reactive_power1",
+      "name": "Meter Reactive Power L1",
+      "unit": "var"
+    },
+    {
+      "id": "meter_reactive_power2",
+      "name": "Meter Reactive Power L2",
+      "unit": "var"
+    },
+    {
+      "id": "meter_reactive_power3",
+      "name": "Meter Reactive Power L2",
+      "unit": "var"
+    },
+    {
+      "id": "meter_reactive_power_total",
+      "name": "Meter Reactive Power Total",
+      "unit": "var"
+    },
+    {
+      "id": "meter_apparent_power1",
+      "name": "Meter Apparent Power L1",
+      "unit": "VA"
+    },
+    {
+      "id": "meter_apparent_power2",
+      "name": "Meter Apparent Power L2",
+      "unit": "VA"
+    },
+    {
+      "id": "meter_apparent_power3",
+      "name": "Meter Apparent Power L3",
+      "unit": "VA"
+    },
+    {
+      "id": "meter_apparent_power_total",
+      "name": "Meter Apparent Power Total",
+      "unit": "VA"
+    },
+    {
+      "id": "meter_type",
+      "name": "Meter Type",
+      "unit": ""
+    },
+    {
+      "id": "meter_sw_version",
+      "name": "Meter Software Version",
+      "unit": ""
+    },
+    {
+      "id": "battery_bms",
+      "name": "Battery BMS",
+      "unit": ""
+    },
+    {
+      "id": "battery_index",
+      "name": "Battery Index",
+      "unit": ""
+    },
+    {
+      "id": "battery_status",
+      "name": "Battery Status",
+      "unit": ""
+    },
+    {
+      "id": "battery_temperature",
+      "name": "Battery Temperature",
+      "unit": "C"
+    },
+    {
+      "id": "battery_charge_limit",
+      "name": "Battery Charge Limit",
+      "unit": "A"
+    },
+    {
+      "id": "battery_discharge_limit",
+      "name": "Battery Discharge Limit",
+      "unit": "A"
+    },
+    {
+      "id": "battery_error_l",
+      "name": "Battery Error L",
+      "unit": ""
+    },
+    {
+      "id": "battery_soc",
+      "name": "Battery State of Charge",
+      "unit": "%"
+    },
+    {
+      "id": "battery_soh",
+      "name": "Battery State of Health",
+      "unit": "%"
+    },
+    {
+      "id": "battery_modules",
+      "name": "Battery Modules",
+      "unit": ""
+    },
+    {
+      "id": "battery_warning_l",
+      "name": "Battery Warning L",
+      "unit": ""
+    },
+    {
+      "id": "battery_protocol",
+      "name": "Battery Protocol",
+      "unit": ""
+    },
+    {
+      "id": "battery_error_h",
+      "name": "Battery Error H",
+      "unit": ""
+    },
+    {
+      "id": "battery_error",
+      "name": "Battery Error",
+      "unit": ""
+    },
+    {
+      "id": "battery_warning_h",
+      "name": "Battery Warning H",
+      "unit": ""
+    },
+    {
+      "id": "battery_warning",
+      "name": "Battery Warning",
+      "unit": ""
+    },
+    {
+      "id": "battery_sw_version",
+      "name": "Battery Software Version",
+      "unit": ""
+    },
+    {
+      "id": "battery_hw_version",
+      "name": "Battery Hardware Version",
+      "unit": ""
+    },
+    {
+      "id": "battery_max_cell_temp_id",
+      "name": "Battery Max Cell Temperature ID",
+      "unit": ""
+    },
+    {
+      "id": "battery_min_cell_temp_id",
+      "name": "Battery Min Cell Temperature ID",
+      "unit": ""
+    },
+    {
+      "id": "battery_max_cell_voltage_id",
+      "name": "Battery Max Cell Voltage ID",
+      "unit": ""
+    },
+    {
+      "id": "battery_min_cell_voltage_id",
+      "name": "Battery Min Cell Voltage ID",
+      "unit": ""
+    },
+    {
+      "id": "battery_max_cell_temp",
+      "name": "Battery Max Cell Temperature",
+      "unit": "C"
+    },
+    {
+      "id": "battery_min_cell_temp",
+      "name": "Battery Min Cell Temperature",
+      "unit": "C"
+    },
+    {
+      "id": "battery_max_cell_voltage",
+      "name": "Battery Max Cell Voltage",
+      "unit": "V"
+    },
+    {
+      "id": "battery_min_cell_voltage",
+      "name": "Battery Min Cell Voltage",
+      "unit": "V"
+    }
+  ],
+  "runtime_data": {
+    "timestamp": 
