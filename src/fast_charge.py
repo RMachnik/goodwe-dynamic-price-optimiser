@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GoodWe Inverter Fast Charging Script
+GoodWe Dynamic Price Optimiser - Fast Charging Script
 
 This script triggers fast charging on GoodWe inverters with safety checks
 and monitoring capabilities.
@@ -352,7 +352,7 @@ class GoodWeFastCharger:
 
 async def main():
     """Main function"""
-    parser = argparse.ArgumentParser(description='GoodWe Inverter Fast Charging Control')
+    parser = argparse.ArgumentParser(description='GoodWe Dynamic Price Optimiser - Fast Charging Control')
     parser.add_argument('--config', '-c', default='../config/fast_charge_config.yaml',
                        help='Configuration file path (default: ../config/fast_charge_config.yaml)')
     parser.add_argument('--start', action='store_true', help='Start fast charging')
