@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Polish Electricity Market Analyzer for GoodWe Inverter
+GoodWe Dynamic Price Optimiser - Polish Electricity Market Analyzer
 Analyzes electricity prices and creates optimal charging schedules
 """
 
@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 class PricePoint:
     """Represents a single price point"""
     time: datetime
-    price_pln: float
+    market_price_pln: float  # Raw market price from PSE API
+    final_price_pln: float   # Market price + SC component
     period: str
     is_charging_window: bool = False
 
@@ -39,10 +40,23 @@ class ChargingWindow:
 class PolishElectricityAnalyzer:
     """Analyzes Polish electricity prices and creates charging schedules"""
     
-    def __init__(self):
+    def __init__(self, sc_component_net: float = 0.0892):
         self.base_url = "https://api.raporty.pse.pl/api/csdac-pln"
         self.price_data: List[PricePoint] = []
         self.charging_windows: List[ChargingWindow] = []
+        # SC Component (Składnik cenotwórczy) from Polish electricity pricing
+        self.sc_component_net = sc_component_net
+        self.minimum_price_floor = 0.0050  # Minimum price floor as per Polish regulations
+    
+    def calculate_final_price(self, market_price: float) -> float:
+        """Calculate final price including SC component (Składnik cenotwórczy)"""
+        # According to Polish electricity pricing: Final Price = Market Price + SC Component
+        final_price = market_price + self.sc_component_net
+        return final_price
+    
+    def apply_minimum_price_floor(self, price: float) -> float:
+        """Apply minimum price floor as per Polish regulations"""
+        return max(price, self.minimum_price_floor)
         
     def fetch_price_data(self, date: str) -> List[PricePoint]:
         """Fetch electricity price data for a specific date"""
@@ -53,8 +67,9 @@ class PolishElectricityAnalyzer:
             else:
                 date_str = date
                 
+            # CSDAC-PLN API uses business_date field for filtering
             url = f"{self.base_url}?$filter=business_date%20eq%20'{date_str}'"
-            logger.info(f"Fetching price data for {date_str}")
+            logger.info(f"Fetching CSDAC price data for {date_str}")
             
             response = requests.get(url, timeout=30)
             response.raise_for_status()
@@ -65,20 +80,22 @@ class PolishElectricityAnalyzer:
             for item in data.get('value', []):
                 # Parse time (format: "2025-08-31 00:15")
                 time_str = item['dtime']
-                price = float(item['csdac_pln'])
+                market_price = float(item['csdac_pln'])
+                final_price = self.calculate_final_price(market_price)
                 period = item['period']
                 
-                # Convert to datetime
+                # Convert to datetime (CSDAC-PLN uses format: 2024-06-14 00:15)
                 dt = datetime.strptime(time_str, '%Y-%m-%d %H:%M')
                 
                 price_points.append(PricePoint(
                     time=dt,
-                    price_pln=price,
+                    market_price_pln=market_price,
+                    final_price_pln=final_price,
                     period=period
                 ))
             
             self.price_data = sorted(price_points, key=lambda x: x.time)
-            logger.info(f"Fetched {len(self.price_data)} price points for {date_str}")
+            logger.info(f"Fetched {len(self.price_data)} CSDAC price points for {date_str}")
             return self.price_data
             
         except Exception as e:
@@ -86,25 +103,31 @@ class PolishElectricityAnalyzer:
             return []
     
     def analyze_prices(self) -> Dict[str, float]:
-        """Analyze price statistics"""
+        """Analyze price statistics using final prices (market + SC component)"""
         if not self.price_data:
             return {}
         
-        prices = [p.price_pln for p in self.price_data]
+        # Use final prices (market price + SC component) for analysis
+        final_prices = [p.final_price_pln for p in self.price_data]
+        market_prices = [p.market_price_pln for p in self.price_data]
         
         analysis = {
-            'min_price': min(prices),
-            'max_price': max(prices),
-            'avg_price': statistics.mean(prices),
-            'median_price': statistics.median(prices),
-            'std_dev': statistics.stdev(prices) if len(prices) > 1 else 0,
-            'total_periods': len(prices)
+            'min_market_price': min(market_prices),
+            'max_market_price': max(market_prices),
+            'avg_market_price': statistics.mean(market_prices),
+            'min_final_price': min(final_prices),
+            'max_final_price': max(final_prices),
+            'avg_final_price': statistics.mean(final_prices),
+            'median_final_price': statistics.median(final_prices),
+            'std_dev_final_price': statistics.stdev(final_prices) if len(final_prices) > 1 else 0,
+            'total_periods': len(final_prices),
+            'sc_component': self.sc_component_net
         }
         
-        # Find price percentiles
-        sorted_prices = sorted(prices)
-        analysis['price_25th_percentile'] = sorted_prices[int(len(sorted_prices) * 0.25)]
-        analysis['price_75th_percentile'] = sorted_prices[int(len(sorted_prices) * 0.75)]
+        # Find price percentiles using final prices
+        sorted_final_prices = sorted(final_prices)
+        analysis['price_25th_percentile'] = sorted_final_prices[int(len(sorted_final_prices) * 0.25)]
+        analysis['price_75th_percentile'] = sorted_final_prices[int(len(sorted_final_prices) * 0.75)]
         
         return analysis
     
@@ -133,25 +156,26 @@ class PolishElectricityAnalyzer:
         # Slide through all possible windows
         for i in range(len(self.price_data) - window_size + 1):
             window_prices = self.price_data[i:i + window_size]
-            avg_price = statistics.mean([p.price_pln for p in window_prices])
+            # Use final prices (market price + SC component) for optimization
+            avg_final_price = statistics.mean([p.final_price_pln for p in window_prices])
             
             # Check if window meets criteria
-            if avg_price <= max_price_threshold:
+            if avg_final_price <= max_price_threshold:
                 start_time = window_prices[0].time
                 end_time = window_prices[-1].time + timedelta(minutes=15)
                 
-                # Calculate savings compared to average price
-                overall_avg = statistics.mean([p.price_pln for p in self.price_data])
-                savings_per_mwh = overall_avg - avg_price
-                savings_percent = (savings_per_mwh / overall_avg) * 100
+                # Calculate savings compared to average final price
+                overall_avg_final = statistics.mean([p.final_price_pln for p in self.price_data])
+                savings_per_mwh = overall_avg_final - avg_final_price
+                savings_percent = (savings_per_mwh / overall_avg_final) * 100
                 
                 if savings_percent >= min_savings_percent:
                     window = ChargingWindow(
                         start_time=start_time,
                         end_time=end_time,
                         duration_minutes=target_minutes,
-                        avg_price=avg_price,
-                        total_cost_per_mwh=avg_price * (target_minutes / 60),
+                        avg_price=avg_final_price,
+                        total_cost_per_mwh=avg_final_price * (target_minutes / 60),
                         savings_per_mwh=savings_per_mwh
                     )
                     charging_windows.append(window)
@@ -207,25 +231,32 @@ class PolishElectricityAnalyzer:
         
         analysis = self.analyze_prices()
         
-        print("\n" + "="*60)
-        print("POLISH ELECTRICITY MARKET ANALYSIS")
-        print("="*60)
+        print("\n" + "="*80)
+        print("POLISH ELECTRICITY MARKET ANALYSIS (with SC Component)")
+        print("="*80)
         print(f"Date: {self.price_data[0].time.strftime('%Y-%m-%d')}")
         print(f"Total periods: {analysis['total_periods']} (15-minute intervals)")
         print(f"Time range: {self.price_data[0].time.strftime('%H:%M')} - {self.price_data[-1].time.strftime('%H:%M')}")
+        print(f"SC Component: {analysis['sc_component']} PLN/kWh (Składnik cenotwórczy)")
         print()
         
-        print("PRICE STATISTICS (PLN/MWh):")
-        print(f"  Minimum:     {analysis['min_price']:8.2f}")
-        print(f"  Maximum:     {analysis['max_price']:8.2f}")
-        print(f"  Average:     {analysis['avg_price']:8.2f}")
-        print(f"  Median:      {analysis['median_price']:8.2f}")
+        print("MARKET PRICE STATISTICS (PLN/MWh):")
+        print(f"  Minimum:     {analysis['min_market_price']:8.2f}")
+        print(f"  Maximum:     {analysis['max_market_price']:8.2f}")
+        print(f"  Average:     {analysis['avg_market_price']:8.2f}")
+        print()
+        
+        print("FINAL PRICE STATISTICS (Market + SC Component):")
+        print(f"  Minimum:     {analysis['min_final_price']:8.2f}")
+        print(f"  Maximum:     {analysis['max_final_price']:8.2f}")
+        print(f"  Average:     {analysis['avg_final_price']:8.2f}")
+        print(f"  Median:      {analysis['median_final_price']:8.2f}")
         print(f"  25th %ile:   {analysis['price_25th_percentile']:8.2f}")
         print(f"  75th %ile:   {analysis['price_75th_percentile']:8.2f}")
-        print(f"  Std Dev:     {analysis['std_dev']:8.2f}")
+        print(f"  Std Dev:     {analysis['std_dev_final_price']:8.2f}")
         
-        # Price distribution
-        print("\nPRICE DISTRIBUTION:")
+        # Price distribution using final prices
+        print("\nFINAL PRICE DISTRIBUTION:")
         price_ranges = [
             (0, 200, "Very Low (0-200 PLN/MWh)"),
             (200, 400, "Low (200-400 PLN/MWh)"),
@@ -235,7 +266,7 @@ class PolishElectricityAnalyzer:
         ]
         
         for min_price, max_price, label in price_ranges:
-            count = sum(1 for p in self.price_data if min_price <= p.price_pln < max_price)
+            count = sum(1 for p in self.price_data if min_price <= p.final_price_pln < max_price)
             percentage = (count / len(self.price_data)) * 100
             print(f"  {label:25} {count:3d} periods ({percentage:5.1f}%)")
     
@@ -245,21 +276,23 @@ class PolishElectricityAnalyzer:
             print("No optimal charging windows found")
             return
         
-        print("\n" + "="*60)
-        print("OPTIMAL CHARGING WINDOWS")
-        print("="*60)
+        print("\n" + "="*80)
+        print("OPTIMAL CHARGING WINDOWS (using Final Prices with SC Component)")
+        print("="*80)
+        print(f"SC Component: {self.sc_component_net} PLN/kWh (Składnik cenotwórczy)")
+        print("="*80)
         
         for i, window in enumerate(windows, 1):
             print(f"\nWindow {i}:")
             print(f"  Time:        {window.start_time.strftime('%H:%M')} - {window.end_time.strftime('%H:%M')}")
             print(f"  Duration:    {window.duration_minutes} minutes ({window.duration_minutes/60:.1f} hours)")
-            print(f"  Avg Price:   {window.avg_price:.2f} PLN/MWh")
+            print(f"  Avg Price:   {window.avg_price:.2f} PLN/MWh (Final: Market + SC)")
             print(f"  Total Cost:  {window.total_cost_per_mwh:.2f} PLN/MWh")
             print(f"  Savings:     {window.savings_per_mwh:.2f} PLN/MWh")
             
-            # Calculate percentage savings
-            overall_avg = statistics.mean([p.price_pln for p in self.price_data])
-            savings_percent = (window.savings_per_mwh / overall_avg) * 100
+            # Calculate percentage savings using final prices
+            overall_avg_final = statistics.mean([p.final_price_pln for p in self.price_data])
+            savings_percent = (window.savings_per_mwh / overall_avg_final) * 100
             print(f"  Savings %:   {savings_percent:.1f}%")
     
     def export_schedule_to_json(self, filename: str, windows: List[ChargingWindow]):
@@ -288,7 +321,7 @@ class PolishElectricityAnalyzer:
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
-        description='Polish Electricity Market Analyzer for GoodWe Inverter',
+        description='GoodWe Dynamic Price Optimiser - Polish Electricity Market Analyzer',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

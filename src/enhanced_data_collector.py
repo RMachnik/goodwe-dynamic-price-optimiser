@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Enhanced Data Collector for GoodWe Inverter
+GoodWe Dynamic Price Optimiser - Enhanced Data Collector
 Phase 1, Task 1.1: Add PV production monitoring to data collection
 
 This script extends the basic GoodWe monitoring to collect comprehensive data
@@ -70,7 +70,7 @@ class EnhancedDataCollector:
         
     async def initialize(self) -> bool:
         """Initialize the system and connect to inverter"""
-        logger.info("Initializing Enhanced Data Collector...")
+        logger.info("Initializing GoodWe Dynamic Price Optimiser...")
         
         # Connect to GoodWe inverter
         if not await self.goodwe_charger.connect_inverter():
@@ -417,7 +417,7 @@ class EnhancedDataCollector:
         data = self.current_data
         
         print("\n" + "="*80)
-        print("ENHANCED GOODWE INVERTER DATA COLLECTOR - CURRENT STATUS")
+        print("GOODWE DYNAMIC PRICE OPTIMISER - CURRENT STATUS")
         print("="*80)
         print(f"Timestamp: {data.get('timestamp', 'Unknown')}")
         print(f"Inverter: {data.get('system', {}).get('inverter_model', 'Unknown')}")
@@ -523,7 +523,7 @@ class EnhancedDataCollector:
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
-        description='Enhanced Data Collector for GoodWe Inverter',
+        description='GoodWe Dynamic Price Optimiser - Enhanced Data Collector',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -595,11 +595,11 @@ async def main():
     collector = EnhancedDataCollector(config_file)
     
     if not await collector.initialize():
-        print("Failed to initialize enhanced data collector")
+        print("Failed to initialize GoodWe Dynamic Price Optimiser")
         return
     
     # Show current status
-    print("Enhanced Data Collector initialized successfully!")
+    print("GoodWe Dynamic Price Optimiser initialized successfully!")
     print("Collecting initial data...")
     
     # Collect initial data
