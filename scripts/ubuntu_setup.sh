@@ -45,23 +45,9 @@ log "Starting Ubuntu server setup for GoodWe services..."
 log "Updating system packages..."
 sudo apt update && sudo apt upgrade -y
 
-# Step 2: Install Docker and required packages
-log "Installing Docker and required packages..."
-
-# Install Docker
-log "Installing Docker..."
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-sudo usermod -aG docker $USER
-
-# Install Docker Compose
-log "Installing Docker Compose..."
-sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-
-# Install other required packages
-log "Installing other required packages..."
-sudo apt install -y python3 python3-pip python3-venv git curl wget jq
+# Step 2: Install required packages
+log "Installing required packages..."
+sudo apt install -y python3 python3-pip python3-venv git curl wget
 
 # Step 3: Create application directory
 log "Setting up application directory..."

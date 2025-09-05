@@ -1,19 +1,17 @@
 [Unit]
 Description=GoodWe Master Coordinator Service
-Documentation=https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser
+Documentation=https://github.com/your-username/goodwe-dynamic-price-optimiser
 After=network.target network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-User=rmachnik
-Group=rmachnik
-WorkingDirectory=/home/rmachnik/sources/goodwe-dynamic-price-optimiser
-ExecStart=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/run_master_coordinator.sh
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/goodwe-dynamic-price-optimiser/src
+ExecStart=/opt/goodwe-dynamic-price-optimiser/venv/bin/python /opt/goodwe-dynamic-price-optimiser/src/master_coordinator.py --non-interactive
 ExecStop=/bin/kill -TERM $MAINPID
-KillMode=mixed
-KillSignal=TERM
 Restart=always
 RestartSec=30
 StandardOutput=journal
@@ -21,25 +19,18 @@ StandardError=journal
 SyslogIdentifier=goodwe-master-coordinator
 
 # Environment variables
-Environment=PYTHONPATH=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/src:/home/rmachnik/sources/goodwe-dynamic-price-optimiser/venv/lib/python3.12/site-packages
+Environment=PYTHONPATH=/opt/goodwe-dynamic-price-optimiser/src
 Environment=PYTHONUNBUFFERED=1
-Environment=HOME=/home/rmachnik
-Environment=USER=rmachnik
+Environment=HOME=/home/ubuntu
 
-# Security settings (simplified for development)
-# NoNewPrivileges=true
-# PrivateTmp=true
-# ProtectSystem=strict
-# ProtectHome=false
-# ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/logs
-# ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/out
-# ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/config
-
-# Network access for web server
-IPAddressAllow=localhost
-IPAddressAllow=10.0.0.0/8
-IPAddressAllow=172.16.0.0/12
-IPAddressAllow=192.168.0.0/16
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/goodwe-dynamic-price-optimiser/logs
+ReadWritePaths=/opt/goodwe-dynamic-price-optimiser/out
+ReadWritePaths=/opt/goodwe-dynamic-price-optimiser/config
 
 # Resource limits
 LimitNOFILE=65536

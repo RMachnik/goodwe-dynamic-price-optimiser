@@ -6,7 +6,7 @@ This document outlines the safety features and compliance measures implemented i
 
 ### **Technical Specifications**
 - **Model**: GoodWe Lynx-D LX-D5.0-10
-- **Capacity**: 20 kWh (2x 10 kWh units)
+- **Capacity**: 10 kWh
 - **Battery Technology**: Lithium Iron Phosphate (LFP)
 - **Operating Voltage Range**: 320V - 480V
 - **Operating Temperature Range**:
