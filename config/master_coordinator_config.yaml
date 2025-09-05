@@ -1,0 +1,163 @@
+# Master Coordinator Configuration for GoodWe Enhanced Energy Management System
+# This configuration orchestrates all components of the energy management system
+
+# Inverter Configuration
+inverter:
+  ip_address: "192.168.68.51"  # Your inverter IP
+  port: 8899
+  timeout: 1
+  retries: 3
+  family: "ET"  # Inverter family (ET, ES, DT, or null for auto-detect)
+  comm_addr: 0xf7  # Communication address (usually 0xf7 for ET/ES, 0x7f for DT)
+
+# Charging Configuration
+charging:
+  max_power: 5000  # Maximum charging power in Watts
+  safety_voltage_min: 320.0  # Minimum safe battery voltage (GoodWe Lynx-D spec)
+  safety_voltage_max: 480.0  # Maximum safe battery voltage (GoodWe Lynx-D spec)
+  safety_current_max: 32.0   # Maximum safe charging current
+  safety_temp_max: 53.0      # Maximum safe battery temperature (GoodWe Lynx-D spec)
+  safety_temp_min: 0.0       # Minimum safe battery temperature for charging (GoodWe Lynx-D spec)
+
+# Coordinator Configuration
+coordinator:
+  # Decision making intervals
+  decision_interval_minutes: 15        # How often to make charging decisions
+  health_check_interval_minutes: 5     # How often to perform health checks
+  data_collection_interval_seconds: 60 # How often to collect data
+  
+  # Data management
+  data_retention_days: 30              # How long to keep historical data
+  max_charging_sessions_per_day: 4     # Maximum charging sessions per day
+  
+  # Decision engine weights (from project plan)
+  decision_weights:
+    price: 0.40        # 40% weight for electricity prices
+    battery: 0.25      # 25% weight for battery state
+    pv: 0.20          # 20% weight for PV production
+    consumption: 0.15  # 15% weight for house consumption
+  
+  # Emergency stop conditions (GoodWe Lynx-D compliant)
+  emergency_stop_conditions:
+    battery_temp_max: 53.0      # Stop if battery temperature exceeds this (GoodWe Lynx-D max)
+    battery_temp_min: 0.0       # Stop charging if battery temperature below this (GoodWe Lynx-D min for charging)
+    battery_voltage_min: 320.0  # Stop if battery voltage below this (GoodWe Lynx-D min)
+    battery_voltage_max: 480.0  # Stop if battery voltage above this (GoodWe Lynx-D max)
+    grid_voltage_min: 200.0     # Stop if grid voltage below this
+    grid_voltage_max: 250.0     # Stop if grid voltage above this
+    # Additional GoodWe Lynx-D safety conditions
+    battery_temp_warning: 50.0  # Warning if battery temperature exceeds this
+    undervoltage_reboot: true   # Enable auto-reboot after undervoltage (GoodWe Lynx-D feature)
+  
+  # Charging decision thresholds
+  charging_thresholds:
+    start_charging_score: 70    # Start charging if total score >= this
+    stop_charging_score: 30     # Stop charging if total score <= this
+    continue_charging_min: 30   # Continue charging if score >= this
+    continue_charging_max: 70   # Continue charging if score <= this
+
+# Price Analysis Configuration
+price_analysis:
+  api_url: "https://api.raporty.pse.pl/api/csdac-pln"
+  update_interval_minutes: 60
+  price_thresholds:
+    very_low: 200    # PLN/MWh - very low price threshold
+    low: 400         # PLN/MWh - low price threshold
+    medium: 600      # PLN/MWh - medium price threshold
+    high: 800        # PLN/MWh - high price threshold
+
+# PV Production Configuration
+pv_monitoring:
+  strings: 2                    # Number of PV strings (PV1 + PV2)
+  max_power: 6800              # Maximum expected PV power in Watts
+  production_thresholds:
+    high: 3000                 # High production threshold
+    medium: 1000               # Medium production threshold
+    low: 100                   # Low production threshold
+
+# Battery Management Configuration (GoodWe Lynx-D compliant)
+battery_management:
+  capacity_kwh: 10             # Battery capacity in kWh (GoodWe Lynx-D LX-D5.0-10)
+  battery_type: "LFP"          # Lithium Iron Phosphate (GoodWe Lynx-D technology)
+  voltage_range:
+    min: 320.0                 # Minimum operating voltage (GoodWe Lynx-D spec)
+    max: 480.0                 # Maximum operating voltage (GoodWe Lynx-D spec)
+  soc_thresholds:
+    critical: 20               # Critical level - charge immediately
+    low: 40                    # Low level - charge during low/medium prices
+    medium: 70                 # Medium level - charge during low prices only
+    high: 90                   # High level - charge during very low prices only
+  temperature_thresholds:
+    charging_min: 0.0          # Minimum temperature for charging (GoodWe Lynx-D spec)
+    charging_max: 53.0         # Maximum temperature for charging (GoodWe Lynx-D spec)
+    discharging_min: -20.0     # Minimum temperature for discharging (GoodWe Lynx-D spec)
+    discharging_max: 53.0      # Maximum temperature for discharging (GoodWe Lynx-D spec)
+    normal_max: 45.0           # Normal operating temperature
+    warning_max: 50.0          # Warning temperature
+    critical_max: 53.0         # Critical temperature - stop all operations
+  # GoodWe Lynx-D specific features
+  auto_reboot_undervoltage: true  # Auto-reboot after undervoltage (GoodWe Lynx-D feature)
+  bms_integration: true           # Battery Management System integration
+  vde_2510_50_compliance: true    # VDE 2510-50 safety standard compliance
+
+# Grid Flow Configuration
+grid_flow:
+  phases: 3                    # Number of grid phases
+  max_import: 14000           # Maximum grid import power in Watts
+  max_export: 14000           # Maximum grid export power in Watts
+  voltage_thresholds:
+    min: 200                   # Minimum safe grid voltage
+    max: 250                   # Maximum safe grid voltage
+
+# Consumption Monitoring Configuration
+consumption_monitoring:
+  expected_daily_kwh: 30       # Expected daily consumption in kWh
+  peak_hours: [18, 19, 20, 21] # Peak consumption hours
+  consumption_thresholds:
+    high: 3000                 # High consumption threshold in Watts
+    medium: 1000               # Medium consumption threshold in Watts
+    low: 100                   # Low consumption threshold in Watts
+
+# Logging Configuration
+logging:
+  level: "INFO"                # Logging level: DEBUG, INFO, WARNING, ERROR
+  file: "/opt/goodwe-dynamic-price-optimiser/logs/master_coordinator.log"
+  max_file_size: "10MB"        # Maximum log file size
+  backup_count: 5              # Number of backup log files
+  console_output: true         # Enable console output
+
+# Data Storage Configuration
+data_storage:
+  energy_data_dir: "/opt/goodwe-dynamic-price-optimiser/out/energy_data"
+  charging_schedules_dir: "/opt/goodwe-dynamic-price-optimiser/out/charging_schedules"
+  system_state_dir: "/opt/goodwe-dynamic-price-optimiser/out/system_state"
+  backup_interval_hours: 24    # How often to backup data
+
+# Performance Monitoring Configuration
+performance_monitoring:
+  metrics_collection: true     # Enable performance metrics collection
+  metrics_interval_minutes: 5  # How often to collect metrics
+  alert_thresholds:
+    high_cpu_usage: 80         # Alert if CPU usage exceeds this %
+    high_memory_usage: 80      # Alert if memory usage exceeds this %
+    long_decision_time: 30     # Alert if decision takes longer than this seconds
+
+# Notification Configuration (optional)
+notifications:
+  enabled: false               # Enable notifications
+  email:
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    username: "your-email@gmail.com"
+    password: "your-app-password"
+    to_addresses: ["admin@example.com"]
+  webhook:
+    url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+    enabled: false
+
+# Development/Debug Configuration
+debug:
+  enabled: false               # Enable debug mode
+  verbose_logging: false       # Enable verbose logging
+  test_mode: false             # Enable test mode (no actual charging)
+  simulation_mode: false       # Enable simulation mode (fake data)

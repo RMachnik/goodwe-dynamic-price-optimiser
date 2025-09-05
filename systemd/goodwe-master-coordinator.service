@@ -1,0 +1,41 @@
+[Unit]
+Description=GoodWe Master Coordinator Service
+Documentation=https://github.com/your-username/goodwe-dynamic-price-optimiser
+After=network.target network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/goodwe-dynamic-price-optimiser/src
+ExecStart=/opt/goodwe-dynamic-price-optimiser/venv/bin/python /opt/goodwe-dynamic-price-optimiser/src/master_coordinator.py --non-interactive
+ExecStop=/bin/kill -TERM $MAINPID
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=goodwe-master-coordinator
+
+# Environment variables
+Environment=PYTHONPATH=/opt/goodwe-dynamic-price-optimiser/src
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/home/ubuntu
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/goodwe-dynamic-price-optimiser/logs
+ReadWritePaths=/opt/goodwe-dynamic-price-optimiser/out
+ReadWritePaths=/opt/goodwe-dynamic-price-optimiser/config
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

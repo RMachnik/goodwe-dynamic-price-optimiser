@@ -408,6 +408,10 @@ class EnhancedDataCollector:
         except Exception as e:
             logger.error(f"Failed to save data to files: {e}")
     
+    def get_current_data(self) -> Dict[str, Any]:
+        """Get current system data"""
+        return self.current_data.copy() if self.current_data else {}
+    
     def print_current_status(self):
         """Print current system status"""
         if not self.current_data:

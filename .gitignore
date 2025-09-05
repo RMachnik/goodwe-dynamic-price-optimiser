@@ -53,6 +53,9 @@ ehthumbs.db
 Thumbs.db
 
 # Configuration files with sensitive data
-*_config.yaml
-config.yaml
+# Allow template config files but ignore user-specific ones
+config/*_local.yaml
+config/*_production.yaml
+config/*_secrets.yaml
+config/user_*.yaml
 .env
