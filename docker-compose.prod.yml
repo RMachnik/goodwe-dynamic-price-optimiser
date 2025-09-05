@@ -1,0 +1,76 @@
+services:
+  goodwe-optimiser:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: goodwe-dynamic-price-optimiser-prod
+    restart: unless-stopped
+    
+    # Environment variables for production
+    environment:
+      - PYTHONPATH=/app/src
+      - TZ=Europe/Warsaw
+      - LOG_LEVEL=WARNING
+      - CONFIG_PATH=/app/config/master_coordinator_config.yaml
+    
+    # Production volume mounts
+    volumes:
+      # Configuration files (read-only)
+      - /opt/goodwe-dynamic-price-optimiser/config:/app/config:ro
+      
+      # Persistent data storage
+      - goodwe_data:/app/data
+      - goodwe_logs:/app/logs
+      - goodwe_out:/app/out
+    
+    # Network configuration
+    network_mode: host
+    
+    # Production resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 60s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    
+    # Production logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    
+    # Production command
+    command: ["python", "src/master_coordinator.py", "--daemon"]
+
+# Production volumes
+volumes:
+  goodwe_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/goodwe-dynamic-price-optimiser/data
+  goodwe_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/goodwe-dynamic-price-optimiser/logs
+  goodwe_out:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/goodwe-dynamic-price-optimiser/out

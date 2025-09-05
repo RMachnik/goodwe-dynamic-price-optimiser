@@ -1,0 +1,70 @@
+services:
+  goodwe-optimiser:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: goodwe-dynamic-price-optimiser
+    restart: unless-stopped
+    
+    # Environment variables
+    environment:
+      - PYTHONPATH=/app/src
+      - TZ=Europe/Warsaw
+      - LOG_LEVEL=INFO
+      - CONFIG_PATH=/app/config/master_coordinator_config.yaml
+    
+    # Host directory mounts for persistent data
+    volumes:
+      # Configuration files (read-only)
+      - ./config:/app/config:ro
+      
+      # Persistent data storage
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./out:/app/out
+      
+      # Optional: Mount source code for development
+      # - ./src:/app/src:ro
+    
+    # Network configuration
+    network_mode: host
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Command override for different modes
+    # Uncomment one of the following:
+    # command: ["python", "src/master_coordinator.py", "--test"]
+    # command: ["python", "src/master_coordinator.py", "--daemon"]
+    # command: ["python", "src/fast_charge.py", "--test"]
+
+# Named volumes for data persistence (optional)
+volumes:
+  goodwe_data:
+    driver: local
+  goodwe_logs:
+    driver: local
+  goodwe_config:
+    driver: local
