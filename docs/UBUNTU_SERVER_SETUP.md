@@ -32,7 +32,7 @@ sudo usermod -aG sudo goodwe
 ### 2.1 Clone or upload your project
 ```bash
 # If using git
-sudo git clone https://github.com/your-username/goodwe-dynamic-price-optimiser.git /opt/goodwe-dynamic-price-optimiser
+sudo git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git /opt/goodwe-dynamic-price-optimiser
 
 # Or if uploading files
 sudo mkdir -p /opt/goodwe-dynamic-price-optimiser
