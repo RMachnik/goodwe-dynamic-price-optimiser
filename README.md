@@ -102,7 +102,7 @@ goodwe-dynamic-price-optimiser/
 #### **Option 1: Automated Setup (Recommended for Ubuntu)**
 ```bash
 # Clone and run automated setup
-git clone https://github.com/your-username/goodwe-dynamic-price-optimiser.git
+git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git
 cd goodwe-dynamic-price-optimiser
 chmod +x scripts/ubuntu_setup.sh
 ./scripts/ubuntu_setup.sh
@@ -111,7 +111,7 @@ chmod +x scripts/ubuntu_setup.sh
 #### **Option 2: Manual Setup**
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/your-username/goodwe-dynamic-price-optimiser.git
+   git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git
    cd goodwe-dynamic-price-optimiser
    ```
 

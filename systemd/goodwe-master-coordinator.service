@@ -1,6 +1,6 @@
 [Unit]
 Description=GoodWe Master Coordinator Service
-Documentation=https://github.com/your-username/goodwe-dynamic-price-optimiser
+Documentation=https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser
 After=network.target network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0
