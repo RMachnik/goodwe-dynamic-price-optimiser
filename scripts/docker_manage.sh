@@ -52,7 +52,7 @@ build_image() {
     log "Building Docker image with BuildKit..."
     export DOCKER_BUILDKIT=1
     export COMPOSE_DOCKER_CLI_BUILD=1
-    docker build -t $PROJECT_NAME:latest .
+    docker buildx build --platform linux/arm64 -t $PROJECT_NAME:latest .
     success "Docker image built successfully"
 }
 
@@ -66,21 +66,8 @@ start_container() {
         return 0
     fi
     
-    # Use the working docker run approach instead of docker-compose
-    docker run -d \
-        --name $CONTAINER_NAME \
-        --restart unless-stopped \
-        -e PYTHONPATH=/app/src \
-        -e TZ=Europe/Warsaw \
-        -e LOG_LEVEL=INFO \
-        -e CONFIG_PATH=/app/config/master_coordinator_config.yaml \
-        -v "$(pwd)/config:/app/config:ro" \
-        -v "$(pwd)/data:/app/data" \
-        -v "$(pwd)/logs:/app/logs" \
-        -v "$(pwd)/out:/app/out" \
-        --network host \
-        $PROJECT_NAME:latest
-    
+    # Start with docker-compose
+    docker-compose up -d
     success "Container started successfully"
     
     # Show status
@@ -90,8 +77,7 @@ start_container() {
 # Stop the container
 stop_container() {
     log "Stopping container..."
-    docker stop $CONTAINER_NAME 2>/dev/null || true
-    docker rm $CONTAINER_NAME 2>/dev/null || true
+    docker-compose down
     success "Container stopped"
 }
 

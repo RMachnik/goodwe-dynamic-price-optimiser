@@ -16,15 +16,13 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Create non-root user for security
-RUN useradd -m -u 1000 goodwe && \
-    mkdir -p /app/data /app/logs /app/out /app/config
-
-# Install Python dependencies globally (accessible to all users)
+# Install Python dependencies globally
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Set ownership after package installation
-RUN chown -R goodwe:goodwe /app
+# Create non-root user for security
+RUN useradd -m -u 1000 goodwe && \
+    mkdir -p /app/data /app/logs /app/out /app/config && \
+    chown -R goodwe:goodwe /app
 
 # Copy application code
 COPY src/ ./src/
@@ -50,12 +48,12 @@ USER goodwe
 # Expose port for health checks
 EXPOSE 8080
 
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
 # Set entrypoint
 ENTRYPOINT ["./docker-entrypoint.sh"]
 
 # Default command
 CMD ["python", "src/master_coordinator.py"]
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1

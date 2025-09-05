@@ -54,9 +54,15 @@ goodwe-dynamic-price-optimiser/
 │   └── fast_charge_config.yaml            # Legacy configuration template
 ├── systemd/                                # Systemd service files
 │   └── goodwe-master-coordinator.service  # 🎯 Single systemd service (orchestrates everything)
+├── docker-compose.yml                      # 🐳 Docker Compose configuration
+├── docker-compose.prod.yml                 # 🐳 Production Docker Compose
+├── Dockerfile                              # 🐳 Docker image definition (BuildKit optimized)
+├── docker-entrypoint.sh                    # 🐳 Docker entrypoint script
+├── .dockerignore                           # 🐳 Docker ignore file
 ├── scripts/                                # Management and setup scripts
 │   ├── ubuntu_setup.sh                    # 🚀 Automated Ubuntu setup
-│   └── manage_services.sh                 # Service management script
+│   ├── manage_services.sh                 # Service management script
+│   └── docker_manage.sh                   # 🐳 Docker management script
 ├── examples/                               # Example scripts and usage
 │   ├── example_usage.sh                   # Shell script examples
 ├── logs/                                   # Application logs
@@ -74,11 +80,23 @@ goodwe-dynamic-price-optimiser/
 │   ├── README_fast_charging.md
 │   ├── README_automated_charging.md
 │   ├── README_MASTER_COORDINATOR.md
-│   └── GOODWE_LYNX_D_SAFETY_COMPLIANCE.md
+│   ├── GOODWE_LYNX_D_SAFETY_COMPLIANCE.md
+│   └── DOCKER_DEPLOYMENT.md                # 🐳 Comprehensive Docker guide
 ├── custom_components/                      # Home Assistant integration
 │   └── goodwe/                            # GoodWe custom component
 ├── requirements.txt                        # Python dependencies
 └── README.md                               # This file
+```
+
+## 🐳 **Docker Deployment**
+
+For comprehensive Docker setup, configuration, and troubleshooting, see [Docker Deployment Guide](docs/DOCKER_DEPLOYMENT.md).
+
+**Quick Docker Start:**
+```bash
+# Prerequisites: Install Colima + Buildx (see Docker guide)
+./scripts/docker_manage.sh build
+./scripts/docker_manage.sh start
 ```
 
 ## 🔧 **Installation & Setup**
@@ -99,7 +117,27 @@ goodwe-dynamic-price-optimiser/
 
 ### **Quick Start**
 
-#### **Option 1: Automated Setup (Recommended for Ubuntu)**
+#### **Option 1: Docker Setup (Recommended)**
+```bash
+# Clone the repository
+git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git
+cd goodwe-dynamic-price-optimiser
+
+# Prerequisites: Install Colima + Buildx (see Docker Deployment section)
+# Or use Docker Desktop with BuildKit enabled
+
+# Build and start with Docker
+./scripts/docker_manage.sh build
+./scripts/docker_manage.sh start
+
+# Check status
+./scripts/docker_manage.sh status
+
+# View logs
+./scripts/docker_manage.sh logs
+```
+
+#### **Option 2: Automated Setup (Ubuntu)**
 ```bash
 # Clone and run automated setup
 git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git
@@ -108,7 +146,7 @@ chmod +x scripts/ubuntu_setup.sh
 ./scripts/ubuntu_setup.sh
 ```
 
-#### **Option 2: Manual Setup**
+#### **Option 3: Manual Setup**
 1. **Clone the repository**
    ```bash
    git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git

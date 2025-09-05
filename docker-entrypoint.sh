@@ -33,7 +33,8 @@ if [ ! -f "/app/config/master_coordinator_config.yaml" ]; then
     echo "   Example: -v /host/path/config:/app/config"
 fi
 
-# Python path is set by docker-compose environment variables
+# Set Python path
+export PYTHONPATH="/app/src:$PYTHONPATH"
 
 # Log startup information
 echo "📁 Working directory: $(pwd)"
@@ -45,4 +46,8 @@ echo "📦 Python path: $PYTHONPATH"
 
 # Start the main application
 echo "🚀 Starting master coordinator..."
-exec "$@"
+exec "$@" &
+child=$!
+
+# Wait for the main process
+wait "$child"

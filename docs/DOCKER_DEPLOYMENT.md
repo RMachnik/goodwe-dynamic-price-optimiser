@@ -16,10 +16,7 @@ This guide covers deploying the GoodWe Dynamic Price Optimiser using Docker cont
 git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git
 cd goodwe-dynamic-price-optimiser
 
-# Simple setup (recommended for development)
-docker compose -f docker-compose.simple.yml up --build
-
-# Or use the management script
+# Build the Docker image
 ./scripts/docker_manage.sh build
 ```
 
@@ -70,8 +67,9 @@ Place your configuration files in the `config/` directory:
 
 ```bash
 config/
-├── master_coordinator_config.yaml    # Main configuration (includes all settings)
-└── user_*.yaml                       # User-specific overrides (optional)
+├── master_coordinator_config.yaml    # Main configuration
+├── fast_charge_config.yaml           # Fast charge settings
+└── user_*.yaml                       # User-specific overrides
 ```
 
 ### **Background Operation & SSH Safety**
@@ -247,10 +245,10 @@ ls -la data/ logs/ out/
 #### **Network Issues**
 ```bash
 # Test inverter connectivity
-docker exec -it goodwe-optimiser ping 192.168.33.15
+docker exec -it goodwe-optimiser ping 192.168.68.51
 
 # Check port access
-docker exec -it goodwe-optimiser nc -zv 192.168.33.15 8899
+docker exec -it goodwe-optimiser nc -zv 192.168.68.51 8899
 ```
 
 ### **Debug Mode**

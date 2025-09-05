@@ -8,10 +8,10 @@ services:
     
     # Environment variables
     environment:
-      PYTHONPATH: /app/src
-      TZ: Europe/Warsaw
-      LOG_LEVEL: INFO
-      CONFIG_PATH: /app/config/master_coordinator_config.yaml
+      - PYTHONPATH=/app/src
+      - TZ=Europe/Warsaw
+      - LOG_LEVEL=INFO
+      - CONFIG_PATH=/app/config/master_coordinator_config.yaml
     
     # Host directory mounts for persistent data
     volumes:
