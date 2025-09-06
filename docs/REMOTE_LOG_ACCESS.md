@@ -1,17 +1,16 @@
 # Remote Log Access Guide
 
-This guide explains how to access your GoodWe Master Coordinator logs remotely via HTTP and use the enhanced dashboard.
+This guide explains how to access your GoodWe Master Coordinator logs remotely via HTTP.
 
-## 🌐 **Enhanced Dashboard Overview**
+## 🌐 **Web Dashboard**
 
-The Master Coordinator includes a comprehensive web dashboard that provides:
+The Master Coordinator now includes a built-in web server that provides:
 
-- **Decision Intelligence**: Real-time charging decision monitoring and analysis
-- **Performance Metrics**: Cost savings, efficiency scoring, and system health
-- **Interactive Analytics**: Charts and visualizations for data analysis
-- **System Monitoring**: Real-time status, logs, and health indicators
-
-> **📖 For detailed dashboard information, see the [Enhanced Dashboard Documentation](ENHANCED_DASHBOARD.md)**
+- **Real-time log viewing** with live streaming
+- **System status monitoring**
+- **Log file management** and downloads
+- **Filtering by log level** (ERROR, WARNING, INFO, DEBUG)
+- **Multiple log file support** (Master Coordinator, Data Collector, Fast Charge)
 
 ## 🚀 **Quick Start**
 
@@ -42,26 +41,10 @@ Open your web browser and navigate to:
 http://your-server-ip:8080
 ```
 
-## 🎯 **Dashboard Features**
-
-The enhanced dashboard provides comprehensive monitoring and decision intelligence. Key features include:
-
-- **Decision Intelligence**: Real-time charging decision monitoring and analysis
-- **Performance Metrics**: Cost savings, efficiency scoring, and system health
-- **Interactive Analytics**: Charts and visualizations for data analysis
-- **System Monitoring**: Real-time status, logs, and health indicators
-
-> **📖 See the [Enhanced Dashboard Documentation](ENHANCED_DASHBOARD.md) for detailed feature descriptions**
-
 ## 📡 **API Endpoints**
 
 ### **Dashboard**
 - `GET /` - Main dashboard with web interface
-
-### **Decision Intelligence**
-- `GET /decisions` - Charging decision history
-- `GET /metrics` - System performance metrics
-- `GET /current-state` - Real-time system state
 
 ### **System Information**
 - `GET /health` - Health check endpoint

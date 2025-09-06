@@ -18,6 +18,7 @@ import time
 import argparse
 import signal
 import sys
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
@@ -36,6 +37,7 @@ from fast_charge import GoodWeFastCharger
 from enhanced_data_collector import EnhancedDataCollector
 from automated_price_charging import AutomatedPriceCharger
 from polish_electricity_analyzer import PolishElectricityAnalyzer
+from log_web_server import LogWebServer
 
 # Setup logging
 project_root = Path(__file__).parent.parent
@@ -85,6 +87,8 @@ class MasterCoordinator:
         self.price_analyzer = None
         self.charging_controller = None
         self.decision_engine = None
+        self.log_web_server = None
+        self.web_server_thread = None
         
         # System data
         self.current_data = {}
@@ -168,6 +172,26 @@ class MasterCoordinator:
             # Initialize decision engine
             logger.info("Initializing Decision Engine...")
             self.decision_engine = MultiFactorDecisionEngine(self.config)
+            
+            # Initialize log web server
+            logger.info("Initializing Log Web Server...")
+            web_server_config = self.config.get('web_server', {})
+            web_host = web_server_config.get('host', '0.0.0.0')
+            web_port = web_server_config.get('port', 8080)
+            web_enabled = web_server_config.get('enabled', True)
+            
+            if web_enabled:
+                self.log_web_server = LogWebServer(host=web_host, port=web_port, log_dir=str(logs_dir))
+                # Start web server in a separate thread
+                self.web_server_thread = threading.Thread(
+                    target=self.log_web_server.start,
+                    daemon=True,
+                    name="LogWebServer"
+                )
+                self.web_server_thread.start()
+                logger.info(f"Log web server started on {web_host}:{web_port}")
+            else:
+                logger.info("Log web server disabled in configuration")
             
             self.state = SystemState.MONITORING
             logger.info("Master Coordinator initialized successfully")
