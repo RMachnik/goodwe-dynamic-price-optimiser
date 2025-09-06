@@ -1,9 +1,10 @@
 # Master Coordinator Configuration for GoodWe Enhanced Energy Management System
 # This configuration orchestrates all components of the energy management system
+# Unified configuration combining master coordinator and fast charging settings
 
 # Inverter Configuration
 inverter:
-  ip_address: "192.168.68.51"  # Your inverter IP
+  ip_address: "192.168.33.15"  # Your inverter IP
   port: 8899
   timeout: 1
   retries: 3
@@ -18,6 +19,13 @@ charging:
   safety_current_max: 32.0   # Maximum safe charging current
   safety_temp_max: 53.0      # Maximum safe battery temperature (GoodWe Lynx-D spec)
   safety_temp_min: 0.0       # Minimum safe battery temperature for charging (GoodWe Lynx-D spec)
+
+# Fast Charging Configuration (merged from fast_charge_config.yaml)
+fast_charging:
+  enable: true                # Enable fast charging (true/false)
+  power_percentage: 90        # Charging power as percentage (0-100)
+  target_soc: 100             # Target State of Charge percentage (0-100)
+  max_charging_time: 120      # Maximum charging time in minutes (0 for unlimited)
 
 # Coordinator Configuration
 coordinator:
@@ -118,13 +126,23 @@ consumption_monitoring:
     medium: 1000               # Medium consumption threshold in Watts
     low: 100                   # Low consumption threshold in Watts
 
-# Logging Configuration
+# Enhanced Safety Settings (merged from fast_charge_config.yaml)
+safety:
+  # Maximum battery temperature in Celsius (0 to disable)
+  max_battery_temp: 50
+  # Minimum battery SoC before starting charge (0-100)
+  min_battery_soc: 10
+  # Maximum grid power usage in watts (0 to disable)
+  max_grid_power: 5000
+
+# Logging Configuration (unified)
 logging:
-  level: "INFO"                # Logging level: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"                # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
   file: "/opt/goodwe-dynamic-price-optimiser/logs/master_coordinator.log"
   max_file_size: "10MB"        # Maximum log file size
   backup_count: 5              # Number of backup log files
   console_output: true         # Enable console output
+  log_to_file: true           # Log to file (true/false)
 
 # Data Storage Configuration
 data_storage:
@@ -142,14 +160,20 @@ performance_monitoring:
     high_memory_usage: 80      # Alert if memory usage exceeds this %
     long_decision_time: 30     # Alert if decision takes longer than this seconds
 
-# Notification Configuration (optional)
+# Notification Configuration (unified)
 notifications:
   enabled: false               # Enable notifications
+  # Send notifications when charging starts/stops (true/false)
+  charging_notifications: false
+  # Webhook URL for notifications (optional)
+  webhook_url: ""
   email:
     smtp_server: "smtp.gmail.com"
     smtp_port: 587
     username: "your-email@gmail.com"
     password: "your-app-password"
+    from_email: "your-email@gmail.com"
+    to_email: "admin@example.com"
     to_addresses: ["admin@example.com"]
   webhook:
     url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
