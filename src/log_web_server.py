@@ -104,6 +104,15 @@ class LogWebServer:
                 
                 # Select log file
                 log_path = self._get_log_file(log_file)
+                
+                # Handle systemd journal
+                if log_file.lower() in ['systemd', 'journal']:
+                    if follow:
+                        return jsonify({'error': 'Live streaming not supported for systemd journal'}), 400
+                    else:
+                        return self._get_systemd_logs(lines, level)
+                
+                # Handle regular log files
                 if not log_path or not log_path.exists():
                     return jsonify({'error': f'Log file {log_file} not found'}), 404
                 
@@ -162,7 +171,9 @@ class LogWebServer:
             'master': self.master_log,
             'data': self.data_log,
             'fast_charge': self.fast_charge_log,
-            'enhanced_data_collector': self.data_log
+            'enhanced_data_collector': self.data_log,
+            'systemd': None,  # Special case for systemd journal
+            'journal': None   # Alias for systemd
         }
         return log_files.get(log_name.lower())
     
@@ -183,6 +194,42 @@ class LogWebServer:
             
             return jsonify({
                 'log_file': log_path.name,
+                'total_lines': len(all_lines),
+                'filtered_lines': len(filtered_lines),
+                'returned_lines': len(recent_lines),
+                'level_filter': level,
+                'lines': [line.rstrip() for line in recent_lines]
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    def _get_systemd_logs(self, lines: int, level: str = '') -> Response:
+        """Get logs from systemd journal"""
+        try:
+            import subprocess
+            
+            # Build journalctl command
+            cmd = ['journalctl', '--user', '-u', 'goodwe-master-coordinator', '-n', str(lines), '--no-pager', '--output=short-iso']
+            
+            # Execute journalctl command
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            
+            if result.returncode != 0:
+                return jsonify({'error': f'Failed to read systemd journal: {result.stderr}'}), 500
+            
+            all_lines = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            # Filter by level if specified
+            if level:
+                filtered_lines = [line for line in all_lines if level.upper() in line.upper()]
+            else:
+                filtered_lines = all_lines
+            
+            # Get last N lines
+            recent_lines = filtered_lines[-lines:] if len(filtered_lines) > lines else filtered_lines
+            
+            return jsonify({
+                'log_file': 'systemd-journal',
                 'total_lines': len(all_lines),
                 'filtered_lines': len(filtered_lines),
                 'returned_lines': len(recent_lines),
@@ -325,7 +372,8 @@ class LogWebServer:
             <h3>Log Viewer</h3>
             <div class="controls">
                 <select id="log-file">
-                    <option value="master">Master Coordinator</option>
+                    <option value="systemd">Systemd Journal (Master Coordinator)</option>
+                    <option value="master">Master Coordinator (File)</option>
                     <option value="data">Data Collector</option>
                     <option value="fast_charge">Fast Charge</option>
                 </select>
