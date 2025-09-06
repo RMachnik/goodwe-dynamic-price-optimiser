@@ -204,27 +204,31 @@ class AutomatedPriceCharger:
         
         return should_charge
     
-    async def start_price_based_charging(self, price_data: Dict) -> bool:
-        """Start charging based on current electricity price"""
+    async def start_price_based_charging(self, price_data: Dict, force_start: bool = False) -> bool:
+        """Start charging based on current electricity price or force start"""
         
         if self.is_charging:
             logger.info("Already charging, skipping start request")
             return True
         
-        if not self.should_start_charging(price_data):
+        # Check price only if not forced to start (e.g., by master coordinator for critical battery)
+        if not force_start and not self.should_start_charging(price_data):
             logger.info("Current price is not optimal for charging")
             return False
         
-        logger.info("Starting price-based charging...")
+        if force_start:
+            logger.info("Starting charging due to critical battery level (overriding price check)")
+        else:
+            logger.info("Starting price-based charging...")
         
         # Start fast charging
         if await self.goodwe_charger.start_fast_charging():
             self.is_charging = True
             self.charging_start_time = datetime.now()
-            logger.info("Price-based charging started successfully")
+            logger.info("Charging started successfully")
             return True
         else:
-            logger.error("Failed to start price-based charging")
+            logger.error("Failed to start charging")
             return False
     
     async def stop_price_based_charging(self) -> bool:

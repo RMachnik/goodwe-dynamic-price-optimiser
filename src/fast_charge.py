@@ -117,6 +117,10 @@ class GoodWeFastCharger:
             self.logger.error(f"Failed to connect to inverter: {e}")
             return False
     
+    def is_connected(self) -> bool:
+        """Check if inverter is connected"""
+        return self.inverter is not None
+    
     async def get_inverter_status(self) -> Dict[str, Any]:
         """Get current inverter status and sensor data"""
         if not self.inverter:
@@ -260,16 +264,37 @@ class GoodWeFastCharger:
             fast_charging_power = await self.inverter.read_setting('fast_charging_power')
             fast_charging_soc = await self.inverter.read_setting('fast_charging_soc')
             
+            # Determine if actually charging based on inverter state
+            # Check if fast charging is enabled (primary indicator)
+            is_actually_charging = (fast_charging_enabled == 1)
+            
+            # If we can get battery current, use it as additional confirmation
+            # Battery current is in 'ibattery1' field
+            # Negative current means charging, positive means discharging
+            battery_current = status.get('ibattery1', {}).get('value', 0)
+            if battery_current != 'Unknown' and battery_current is not None:
+                try:
+                    current_value = float(battery_current)
+                    # If we have current data, use it to confirm charging
+                    # Negative current means charging, positive means discharging
+                    is_actually_charging = is_actually_charging and current_value < 0
+                except (ValueError, TypeError):
+                    # If current data is invalid, rely on fast_charging_enabled
+                    pass
+            
+            # Update our internal charging state
+            self.is_charging = is_actually_charging
+            
             charging_info = {
-                'is_charging': self.is_charging,
+                'is_charging': is_actually_charging,
                 'fast_charging_enabled': fast_charging_enabled == 1,
                 'charging_power_percentage': fast_charging_power,
                 'target_soc_percentage': fast_charging_soc,
                 'current_battery_soc': status.get('battery_soc', {}).get('value', 'Unknown'),
-                'battery_voltage': status.get('battery_voltage', {}).get('value', 'Unknown'),
-                'battery_current': status.get('battery_current', {}).get('value', 'Unknown'),
-                'grid_power': status.get('grid_power', {}).get('value', 'Unknown'),
-                'pv_power': status.get('pv_power', {}).get('value', 'Unknown'),
+                'battery_voltage': status.get('vbattery1', {}).get('value', 'Unknown'),
+                'battery_current': status.get('ibattery1', {}).get('value', 'Unknown'),
+                'grid_power': status.get('pgrid', {}).get('value', 'Unknown'),
+                'pv_power': status.get('ppv', {}).get('value', 'Unknown'),
                 'timestamp': datetime.now().isoformat()
             }
             
