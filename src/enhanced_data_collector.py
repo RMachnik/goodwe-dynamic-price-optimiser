@@ -550,8 +550,8 @@ Examples:
     
     parser.add_argument(
         '--config', '-c',
-        default='config/fast_charge_config.yaml',
-        help='Configuration file path (default: config/fast_charge_config.yaml)'
+        default='config/master_coordinator_config.yaml',
+        help='Configuration file path (default: config/master_coordinator_config.yaml)'
     )
     
     parser.add_argument(

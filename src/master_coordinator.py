@@ -620,11 +620,25 @@ class MultiFactorDecisionEngine:
     
     def _calculate_price_score(self, price_data: Dict) -> float:
         """Calculate price-based score (0-100)"""
-        if not price_data or 'prices' not in price_data:
+        if not price_data or 'value' not in price_data:
             return 50  # Neutral score if no price data
         
-        current_hour = datetime.now().hour
-        current_price = price_data['prices'].get(str(current_hour), 0)
+        # Get current time and find matching price
+        now = datetime.now()
+        current_time = now.replace(second=0, microsecond=0)
+        
+        # Find the current 15-minute period price
+        current_price = None
+        for item in price_data['value']:
+            item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+            if item_time <= current_time < item_time + timedelta(minutes=15):
+                # Calculate final price (market price + SC component)
+                market_price = float(item['csdac_pln'])
+                current_price = market_price + 0.0892  # SC component
+                break
+        
+        if current_price is None:
+            return 50  # Neutral score if no current price found
         
         # Price scoring: 0-200 PLN = 100, 600+ PLN = 0
         if current_price <= 200:
@@ -639,7 +653,7 @@ class MultiFactorDecisionEngine:
     def _calculate_battery_score(self, current_data: Dict) -> float:
         """Calculate battery-based score (0-100)"""
         battery_data = current_data.get('battery', {})
-        soc = battery_data.get('soc', 50)
+        soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
         
         # Battery scoring: 0-20% = 100, 90-100% = 0
         if soc <= 20:
@@ -655,8 +669,8 @@ class MultiFactorDecisionEngine:
     
     def _calculate_pv_score(self, current_data: Dict) -> float:
         """Calculate PV production score (0-100)"""
-        pv_data = current_data.get('pv', {})
-        pv_power = pv_data.get('total_power', 0)
+        pv_data = current_data.get('photovoltaic', {})
+        pv_power = pv_data.get('current_power_w', 0)
         
         # PV scoring: high production = 0, no production = 100
         if pv_power >= 3000:  # High production
@@ -670,8 +684,8 @@ class MultiFactorDecisionEngine:
     
     def _calculate_consumption_score(self, current_data: Dict, historical_data: List) -> float:
         """Calculate consumption-based score (0-100)"""
-        consumption_data = current_data.get('consumption', {})
-        current_consumption = consumption_data.get('total_power', 0)
+        consumption_data = current_data.get('house_consumption', {})
+        current_consumption = consumption_data.get('current_power_w', 0)
         
         # Simple consumption scoring based on current load
         if current_consumption >= 3000:  # High consumption
@@ -685,8 +699,9 @@ class MultiFactorDecisionEngine:
     
     def _determine_action(self, total_score: float, current_data: Dict) -> str:
         """Determine charging action based on total score"""
-        battery_soc = current_data.get('battery', {}).get('soc', 50)
-        is_charging = current_data.get('charging', {}).get('is_charging', False)
+        battery_data = current_data.get('battery', {})
+        battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
+        is_charging = battery_data.get('charging_status', False)
         
         # Critical battery level - charge immediately
         if battery_soc <= 20:

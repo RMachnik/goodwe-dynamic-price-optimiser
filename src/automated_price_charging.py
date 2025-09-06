@@ -36,7 +36,7 @@ class AutomatedPriceCharger:
         if config_path is None:
             # Use absolute path to config directory
             current_dir = Path(__file__).parent.parent
-            self.config_path = str(current_dir / "config" / "fast_charge_config.yaml")
+            self.config_path = str(current_dir / "config" / "master_coordinator_config.yaml")
         else:
             self.config_path = config_path
         self.goodwe_charger = GoodWeFastCharger(self.config_path)
@@ -477,8 +477,8 @@ Examples:
     
     parser.add_argument(
         '--config', '-c',
-        default='config/fast_charge_config.yaml',
-        help='Configuration file path (default: config/fast_charge_config.yaml)'
+        default='config/master_coordinator_config.yaml',
+        help='Configuration file path (default: config/master_coordinator_config.yaml)'
     )
     
     parser.add_argument(
