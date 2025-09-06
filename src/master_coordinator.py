@@ -253,7 +253,7 @@ class MasterCoordinator:
         """Perform system health checks (GoodWe Lynx-D compliant)"""
         try:
             # Check inverter connectivity
-            if not await self.charging_controller.goodwe_charger.is_connected():
+            if not self.charging_controller.goodwe_charger.is_connected():
                 logger.warning("Inverter connection lost, attempting to reconnect...")
                 await self.charging_controller.goodwe_charger.connect_inverter()
             
@@ -440,7 +440,15 @@ class MasterCoordinator:
         
         if action == 'start_charging':
             logger.info("Executing decision: Start charging")
-            await self.charging_controller.start_price_based_charging(decision.get('price_data'))
+            # Check if this is a critical battery situation (force start)
+            battery_data = self.current_data.get('battery', {})
+            battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
+            force_start = battery_soc <= 20  # Critical battery level
+            
+            await self.charging_controller.start_price_based_charging(
+                decision.get('price_data'), 
+                force_start=force_start
+            )
             
         elif action == 'stop_charging':
             logger.info("Executing decision: Stop charging")
@@ -492,9 +500,9 @@ class MasterCoordinator:
         if not self.current_data:
             return
         
-        battery_soc = self.current_data.get('battery', {}).get('soc', 0)
-        pv_power = self.current_data.get('pv', {}).get('total_power', 0)
-        charging_status = self.current_data.get('charging', {}).get('is_charging', False)
+        battery_soc = self.current_data.get('battery', {}).get('soc_percent', 0)
+        pv_power = self.current_data.get('photovoltaic', {}).get('current_power_w', 0)
+        charging_status = self.current_data.get('battery', {}).get('charging_status', False)
         
         logger.info(f"Status - State: {self.state.value}, "
                    f"Battery: {battery_soc}%, "
