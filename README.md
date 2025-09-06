@@ -148,7 +148,16 @@ docker compose -f docker-compose.simple.yml up --build
 ./scripts/docker_manage.sh logs
 ```
 
-#### **Option 2: Automated Setup (Ubuntu)**
+#### **Option 2: Automated Ubuntu Docker Setup**
+```bash
+# Clone and run automated Docker setup
+git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git
+cd goodwe-dynamic-price-optimiser
+chmod +x scripts/ubuntu_docker_setup.sh
+./scripts/ubuntu_docker_setup.sh
+```
+
+#### **Option 3: Manual Ubuntu Setup (Systemd Services)**
 ```bash
 # Clone and run automated setup
 git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git
@@ -157,7 +166,7 @@ chmod +x scripts/ubuntu_setup.sh
 ./scripts/ubuntu_setup.sh
 ```
 
-#### **Option 3: Manual Setup**
+#### **Option 4: Manual Setup**
 1. **Clone the repository**
    ```bash
    git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git
