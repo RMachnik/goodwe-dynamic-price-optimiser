@@ -26,7 +26,7 @@ This Python script provides a command-line interface to control fast charging on
    ```bash
    # Make sure you have the following files:
    # - fast_charge.py
-   # - fast_charge_config.yaml
+   # - master_coordinator_config.yaml (unified configuration)
    # - requirements.txt
    ```
 
@@ -44,13 +44,13 @@ This Python script provides a command-line interface to control fast charging on
 
 1. **Edit the configuration file:**
    ```bash
-   nano fast_charge_config.yaml
+   nano config/master_coordinator_config.yaml
    ```
 
 2. **Update inverter settings:**
    ```yaml
    inverter:
-     ip_address: "192.168.2.14"  # Your inverter's IP address
+     ip_address: "192.168.33.15"  # Your inverter's IP address
      family: "ET"                 # Your inverter family (ET, ES, DT)
      timeout: 1
      retries: 3
