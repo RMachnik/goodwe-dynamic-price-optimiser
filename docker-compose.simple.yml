@@ -1,0 +1,44 @@
+services:
+  goodwe-optimiser:
+    build: 
+      context: .
+      dockerfile: Dockerfile.simple
+    container_name: goodwe-dynamic-price-optimiser-simple
+    restart: unless-stopped
+    
+    # Environment variables
+    environment:
+      PYTHONPATH: /app/src
+      TZ: Europe/Warsaw
+      LOG_LEVEL: INFO
+      CONFIG_PATH: /app/config/master_coordinator_config.yaml
+    
+    # Host directory mounts for persistent data
+    volumes:
+      # Configuration files (read-only)
+      - ./config:/app/config:ro
+      
+      # Persistent data storage
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./out:/app/out
+    
+    # Network configuration
+    network_mode: host
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"

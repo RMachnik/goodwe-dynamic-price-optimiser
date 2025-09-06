@@ -52,7 +52,7 @@ build_image() {
     log "Building Docker image with BuildKit..."
     export DOCKER_BUILDKIT=1
     export COMPOSE_DOCKER_CLI_BUILD=1
-    docker buildx build --platform linux/arm64 -t $PROJECT_NAME:latest .
+    docker build -t $PROJECT_NAME:latest .
     success "Docker image built successfully"
 }
 
