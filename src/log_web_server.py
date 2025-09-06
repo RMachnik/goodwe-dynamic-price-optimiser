@@ -108,9 +108,16 @@ class LogWebServer:
                 # Handle systemd journal
                 if log_file.lower() in ['systemd', 'journal']:
                     if follow:
-                        return jsonify({'error': 'Live streaming not supported for systemd journal'}), 400
+                        return self._stream_systemd_logs(level)
                     else:
                         return self._get_systemd_logs(lines, level)
+                
+                # Handle coordinator summary
+                if log_file.lower() == 'summary':
+                    if follow:
+                        return jsonify({'error': 'Live streaming not supported for summary'}), 400
+                    else:
+                        return self._get_coordinator_summary(lines, level)
                 
                 # Handle regular log files
                 if not log_path or not log_path.exists():
@@ -173,7 +180,8 @@ class LogWebServer:
             'fast_charge': self.fast_charge_log,
             'enhanced_data_collector': self.data_log,
             'systemd': None,  # Special case for systemd journal
-            'journal': None   # Alias for systemd
+            'journal': None,  # Alias for systemd
+            'summary': None   # Special case for coordinator summary
         }
         return log_files.get(log_name.lower())
     
@@ -209,7 +217,7 @@ class LogWebServer:
             import subprocess
             
             # Build journalctl command
-            cmd = ['journalctl', '--user', '-u', 'goodwe-master-coordinator', '-n', str(lines), '--no-pager', '--output=short-iso']
+            cmd = ['journalctl', '--user', '-u', 'goodwe-master-coordinator', '-n', str(lines * 3), '--no-pager', '--output=short-iso']
             
             # Execute journalctl command
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
@@ -219,17 +227,218 @@ class LogWebServer:
             
             all_lines = result.stdout.strip().split('\n') if result.stdout.strip() else []
             
+            # Filter out web server logs (werkzeug, HTTP requests)
+            coordinator_lines = []
+            for line in all_lines:
+                # Skip web server logs
+                if any(skip in line for skip in [
+                    'werkzeug',
+                    'GET /',
+                    'POST /',
+                    'PUT /',
+                    'DELETE /',
+                    'HTTP/1.1',
+                    '127.0.0.1',
+                    '192.168.',
+                    'Address already in use',
+                    'Port 8080 is in use'
+                ]):
+                    continue
+                
+                # Only include actual coordinator logs
+                if any(coord in line for coord in [
+                    'Master Coordinator',
+                    'Data collected successfully',
+                    'Fetched',
+                    'CSDAC price points',
+                    'Decision made',
+                    'Executing decision',
+                    'Status - State:',
+                    'Battery:',
+                    'PV:',
+                    'Charging:',
+                    'Initializing',
+                    'Connected to inverter',
+                    'GoodWe',
+                    'Price Analyzer',
+                    'Charging Controller',
+                    'Decision Engine',
+                    'coordination loop',
+                    'health check',
+                    'emergency',
+                    'ERROR',
+                    'WARNING'
+                ]):
+                    coordinator_lines.append(line)
+            
             # Filter by level if specified
             if level:
-                filtered_lines = [line for line in all_lines if level.upper() in line.upper()]
+                filtered_lines = [line for line in coordinator_lines if level.upper() in line.upper()]
             else:
-                filtered_lines = all_lines
+                filtered_lines = coordinator_lines
             
             # Get last N lines
             recent_lines = filtered_lines[-lines:] if len(filtered_lines) > lines else filtered_lines
             
             return jsonify({
                 'log_file': 'systemd-journal',
+                'total_lines': len(all_lines),
+                'filtered_lines': len(filtered_lines),
+                'returned_lines': len(recent_lines),
+                'level_filter': level,
+                'lines': [line.rstrip() for line in recent_lines]
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    def _stream_systemd_logs(self, level: str = '') -> Response:
+        """Stream systemd journal logs using Server-Sent Events"""
+        def generate():
+            try:
+                import subprocess
+                
+                # Send initial data
+                yield f"data: {json.dumps({'type': 'start', 'message': 'Starting systemd journal stream'})}\n\n"
+                
+                # Send recent logs first
+                cmd = ['journalctl', '--user', '-u', 'goodwe-master-coordinator', '-n', '20', '--no-pager', '--output=short-iso']
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    recent_lines = result.stdout.strip().split('\n')
+                    for line in recent_lines:
+                        # Filter out web server logs
+                        if not any(skip in line for skip in [
+                            'werkzeug', 'GET /', 'POST /', 'PUT /', 'DELETE /', 'HTTP/1.1',
+                            '127.0.0.1', '192.168.', 'Address already in use', 'Port 8080 is in use'
+                        ]):
+                            # Only include coordinator logs
+                            if any(coord in line for coord in [
+                                'Master Coordinator', 'Data collected successfully', 'Fetched',
+                                'CSDAC price points', 'Decision made', 'Executing decision',
+                                'Status - State:', 'Battery:', 'PV:', 'Charging:', 'Initializing',
+                                'Connected to inverter', 'GoodWe', 'Price Analyzer', 'Charging Controller',
+                                'Decision Engine', 'coordination loop', 'health check', 'emergency',
+                                'ERROR', 'WARNING'
+                            ]):
+                                if not level or level.upper() in line.upper():
+                                    yield f"data: {json.dumps({'type': 'log', 'line': line.rstrip()})}\n\n"
+                
+                # Start following new logs
+                cmd = ['journalctl', '--user', '-u', 'goodwe-master-coordinator', '-f', '--no-pager', '--output=short-iso']
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+                
+                try:
+                    for line in iter(process.stdout.readline, ''):
+                        if line:
+                            # Filter out web server logs
+                            if not any(skip in line for skip in [
+                                'werkzeug', 'GET /', 'POST /', 'PUT /', 'DELETE /', 'HTTP/1.1',
+                                '127.0.0.1', '192.168.', 'Address already in use', 'Port 8080 is in use'
+                            ]):
+                                # Only include coordinator logs
+                                if any(coord in line for coord in [
+                                    'Master Coordinator', 'Data collected successfully', 'Fetched',
+                                    'CSDAC price points', 'Decision made', 'Executing decision',
+                                    'Status - State:', 'Battery:', 'PV:', 'Charging:', 'Initializing',
+                                    'Connected to inverter', 'GoodWe', 'Price Analyzer', 'Charging Controller',
+                                    'Decision Engine', 'coordination loop', 'health check', 'emergency',
+                                    'ERROR', 'WARNING'
+                                ]):
+                                    if not level or level.upper() in line.upper():
+                                        yield f"data: {json.dumps({'type': 'log', 'line': line.rstrip()})}\n\n"
+                finally:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        
+        return Response(
+            generate(),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Origin': '*'
+            }
+        )
+    
+    def _get_coordinator_summary(self, lines: int, level: str = '') -> Response:
+        """Get coordinator summary with only key events"""
+        try:
+            import subprocess
+            
+            # Get more lines to filter for key events
+            cmd = ['journalctl', '--user', '-u', 'goodwe-master-coordinator', '-n', str(lines * 5), '--no-pager', '--output=short-iso']
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            
+            if result.returncode != 0:
+                return jsonify({'error': f'Failed to read systemd journal: {result.stderr}'}), 500
+            
+            all_lines = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            # Filter for only key coordinator events
+            key_events = []
+            for line in all_lines:
+                # Skip web server logs
+                if any(skip in line for skip in [
+                    'werkzeug', 'GET /', 'POST /', 'PUT /', 'DELETE /', 'HTTP/1.1',
+                    '127.0.0.1', '192.168.', 'Address already in use', 'Port 8080 is in use'
+                ]):
+                    continue
+                
+                # Only include key events
+                if any(key in line for key in [
+                    'Data collected successfully',
+                    'Fetched.*CSDAC price points',
+                    'Decision made:',
+                    'Executing decision:',
+                    'Status - State:',
+                    'Battery:',
+                    'PV:',
+                    'Charging:',
+                    'Connected to inverter',
+                    'Initializing.*Coordinator',
+                    'ERROR',
+                    'WARNING',
+                    'emergency',
+                    'Failed to',
+                    'Successfully connected'
+                ]):
+                    # Clean up the line for summary
+                    clean_line = line
+                    # Remove duplicate timestamps and process info
+                    if 'goodwe-master-coordinator[' in clean_line:
+                        parts = clean_line.split(']: ')
+                        if len(parts) > 1:
+                            clean_line = parts[1]
+                    
+                    key_events.append(clean_line)
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_events = []
+            for event in key_events:
+                if event not in seen:
+                    seen.add(event)
+                    unique_events.append(event)
+            
+            # Filter by level if specified
+            if level:
+                filtered_lines = [line for line in unique_events if level.upper() in line.upper()]
+            else:
+                filtered_lines = unique_events
+            
+            # Get last N lines
+            recent_lines = filtered_lines[-lines:] if len(filtered_lines) > lines else filtered_lines
+            
+            return jsonify({
+                'log_file': 'coordinator-summary',
                 'total_lines': len(all_lines),
                 'filtered_lines': len(filtered_lines),
                 'returned_lines': len(recent_lines),
@@ -373,6 +582,7 @@ class LogWebServer:
             <div class="controls">
                 <select id="log-file">
                     <option value="systemd">Systemd Journal (Master Coordinator)</option>
+                    <option value="summary">Coordinator Summary (Key Events)</option>
                     <option value="master">Master Coordinator (File)</option>
                     <option value="data">Data Collector</option>
                     <option value="fast_charge">Fast Charge</option>
