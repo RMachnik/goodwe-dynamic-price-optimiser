@@ -353,8 +353,8 @@ class GoodWeFastCharger:
 async def main():
     """Main function"""
     parser = argparse.ArgumentParser(description='GoodWe Dynamic Price Optimiser - Fast Charging Control')
-    parser.add_argument('--config', '-c', default='../config/fast_charge_config.yaml',
-                       help='Configuration file path (default: ../config/fast_charge_config.yaml)')
+    parser.add_argument('--config', '-c', default='config/master_coordinator_config.yaml',
+                       help='Configuration file path (default: config/master_coordinator_config.yaml)')
     parser.add_argument('--start', action='store_true', help='Start fast charging')
     parser.add_argument('--stop', action='store_true', help='Stop fast charging')
     parser.add_argument('--status', action='store_true', help='Show charging status')
