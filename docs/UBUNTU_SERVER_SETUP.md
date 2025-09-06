@@ -98,26 +98,29 @@ cd /opt/goodwe-dynamic-price-optimiser
 
 ### 5.1 Create configuration file
 ```bash
-sudo cp /opt/goodwe-dynamic-price-optimiser/config/fast_charge_config.yaml /opt/goodwe-dynamic-price-optimiser/config/fast_charge_config.yaml.backup
-sudo nano /opt/goodwe-dynamic-price-optimiser/config/fast_charge_config.yaml
+sudo cp /opt/goodwe-dynamic-price-optimiser/config/master_coordinator_config.yaml /opt/goodwe-dynamic-price-optimiser/config/master_coordinator_config.yaml.backup
+sudo nano /opt/goodwe-dynamic-price-optimiser/config/master_coordinator_config.yaml
 ```
 
 ### 5.2 Update configuration with your settings
 ```yaml
 inverter:
-  ip_address: "192.168.1.100"  # Your inverter IP
+  ip_address: "192.168.33.15"  # Your inverter IP
   port: 8899
-  timeout: 10
+  timeout: 1
+  family: "ET"
+  comm_addr: 0xf7
 
 charging:
   max_power: 5000  # Watts
-  safety_voltage_min: 45.0
-  safety_voltage_max: 58.0
+  safety_voltage_min: 320.0  # GoodWe Lynx-D minimum
+  safety_voltage_max: 480.0  # GoodWe Lynx-D maximum
   safety_current_max: 32.0
+  safety_temp_max: 53.0
 
 logging:
   level: "INFO"
-  file: "/opt/goodwe-dynamic-price-optimiser/logs/fast_charge.log"
+  file: "/opt/goodwe-dynamic-price-optimiser/logs/master_coordinator.log"
 ```
 
 ## Step 6: Start and Test Services
@@ -143,7 +146,7 @@ logging:
 ./scripts/manage_services.sh logs
 
 # View specific service logs
-./scripts/manage_services.sh logs goodwe-fast-charge
+./scripts/manage_services.sh logs goodwe-master-coordinator
 ```
 
 ## Step 7: Firewall Configuration (if needed)
@@ -182,13 +185,13 @@ sudo ufw enable
 ### 8.2 Manual service control
 ```bash
 # Individual service control
-sudo systemctl start goodwe-fast-charge
-sudo systemctl stop goodwe-fast-charge
-sudo systemctl restart goodwe-fast-charge
-sudo systemctl status goodwe-fast-charge
+sudo systemctl start goodwe-master-coordinator
+sudo systemctl stop goodwe-master-coordinator
+sudo systemctl restart goodwe-master-coordinator
+sudo systemctl status goodwe-master-coordinator
 
 # View logs for specific service
-sudo journalctl -u goodwe-fast-charge -f
+sudo journalctl -u goodwe-master-coordinator -f
 ```
 
 ### 8.3 Log rotation setup
@@ -215,7 +218,7 @@ Add:
 
 1. **Service fails to start**
    ```bash
-   sudo journalctl -u goodwe-fast-charge -n 50
+   sudo journalctl -u goodwe-master-coordinator -n 50
    ```
 
 2. **Permission denied**
@@ -226,7 +229,7 @@ Add:
 3. **Python module not found**
    ```bash
    # Check if virtual environment is activated in service
-   sudo systemctl edit goodwe-fast-charge
+   sudo systemctl edit goodwe-master-coordinator
    # Add:
    [Service]
    Environment=PATH=/opt/goodwe-dynamic-price-optimiser/venv/bin
@@ -235,7 +238,7 @@ Add:
 4. **Configuration file not found**
    ```bash
    # Check file paths in service files
-   sudo systemctl cat goodwe-fast-charge
+   sudo systemctl cat goodwe-master-coordinator
    ```
 
 ### Log Locations
@@ -268,7 +271,7 @@ sudo tar -czf goodwe-logs-$(date +%Y%m%d).tar.gz /opt/goodwe-dynamic-price-optim
 # Restore from backup
 sudo tar -xzf goodwe-backup-YYYYMMDD.tar.gz -C /
 sudo systemctl daemon-reload
-sudo systemctl restart goodwe-fast-charge
+sudo systemctl restart goodwe-master-coordinator
 ```
 
 ## Next Steps
