@@ -10,7 +10,6 @@ from datetime import datetime, timedelta
 import sys
 import os
 import asyncio
-import pytest
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -70,7 +69,6 @@ class TestMasterCoordinatorIntegration(unittest.TestCase):
     @patch('master_coordinator.EnhancedDataCollector')
     @patch('master_coordinator.AutomatedPriceCharger')
     @patch('master_coordinator.PolishElectricityAnalyzer')
-    @pytest.mark.asyncio
     async def test_initialization_success(self, mock_analyzer, mock_charger, mock_collector):
         """Test successful initialization of master coordinator"""
         # Mock successful initialization
@@ -95,7 +93,6 @@ class TestMasterCoordinatorIntegration(unittest.TestCase):
     @patch('master_coordinator.EnhancedDataCollector')
     @patch('master_coordinator.AutomatedPriceCharger')
     @patch('master_coordinator.PolishElectricityAnalyzer')
-    @pytest.mark.asyncio
     async def test_initialization_failure_data_collector(self, mock_analyzer, mock_charger, mock_collector):
         """Test initialization failure when data collector fails"""
         # Mock data collector failure
@@ -114,7 +111,6 @@ class TestMasterCoordinatorIntegration(unittest.TestCase):
     @patch('master_coordinator.EnhancedDataCollector')
     @patch('master_coordinator.AutomatedPriceCharger')
     @patch('master_coordinator.PolishElectricityAnalyzer')
-    @pytest.mark.asyncio
     async def test_initialization_failure_charging_controller(self, mock_analyzer, mock_charger, mock_collector):
         """Test initialization failure when charging controller fails"""
         # Mock data collector success, charging controller failure
@@ -151,7 +147,6 @@ class TestMasterCoordinatorIntegration(unittest.TestCase):
         self.assertTrue(coordinator._should_make_decision())
     
     @patch('master_coordinator.MultiFactorDecisionEngine')
-    @pytest.mark.asyncio
     async def test_make_charging_decision_success(self, mock_decision_engine):
         """Test successful charging decision making"""
         # Mock decision engine
@@ -183,7 +178,6 @@ class TestMasterCoordinatorIntegration(unittest.TestCase):
         self.assertEqual(len(coordinator.decision_history), 1)
     
     @patch('master_coordinator.MultiFactorDecisionEngine')
-    @pytest.mark.asyncio
     async def test_make_charging_decision_no_price_data(self, mock_decision_engine):
         """Test charging decision when no price data is available"""
         # Mock decision engine
@@ -281,8 +275,7 @@ class TestMasterCoordinatorIntegration(unittest.TestCase):
         self.assertFalse(compliance['compliant'])
         self.assertGreater(len(compliance['issues']), 0)
     
-    @pytest.mark.asyncio
-    async def test_system_state_update_charging(self):
+    def test_system_state_update_charging(self):
         """Test system state update when charging"""
         coordinator = MasterCoordinator()
         coordinator.current_data = self.mock_current_data.copy()
@@ -292,8 +285,7 @@ class TestMasterCoordinatorIntegration(unittest.TestCase):
         
         self.assertEqual(coordinator.state, SystemState.CHARGING)
     
-    @pytest.mark.asyncio
-    async def test_system_state_update_monitoring(self):
+    def test_system_state_update_monitoring(self):
         """Test system state update when not charging"""
         coordinator = MasterCoordinator()
         coordinator.current_data = self.mock_current_data.copy()
@@ -338,7 +330,6 @@ class TestMasterCoordinatorIntegration(unittest.TestCase):
 class TestMasterCoordinatorAsync(unittest.IsolatedAsyncioTestCase):
     """Async tests for master coordinator"""
     
-    @pytest.mark.asyncio
     async def test_emergency_stop(self):
         """Test emergency stop functionality"""
         coordinator = MasterCoordinator()
@@ -351,80 +342,59 @@ class TestMasterCoordinatorAsync(unittest.IsolatedAsyncioTestCase):
         coordinator.charging_controller.stop_price_based_charging.assert_called_once()
         self.assertEqual(coordinator.state, SystemState.ERROR)
     
-    @pytest.mark.asyncio
     async def test_execute_decision_start_charging(self):
         """Test executing start charging decision"""
         coordinator = MasterCoordinator()
         coordinator.charging_controller = AsyncMock()
         coordinator.charging_controller.start_price_based_charging = AsyncMock(return_value=True)
-        coordinator.current_data = {'battery': {'soc_percent': 15}}  # Critical battery level
+        coordinator.current_data = {'battery': {'soc_percent': 25}}
         
         decision = {
-            'should_charge': True,
-            'reason': 'Test charging decision',
-            'priority': 'medium'
+            'action': 'start_charging',
+            'price_data': {'value': []}
         }
         
-        await coordinator._execute_smart_decision(decision)
+        await coordinator._execute_decision(decision)
         
         # Verify charging was started with force_start=True (critical battery)
         coordinator.charging_controller.start_price_based_charging.assert_called_once()
         call_args = coordinator.charging_controller.start_price_based_charging.call_args
         self.assertTrue(call_args[1]['force_start'])  # force_start=True
     
-    @pytest.mark.asyncio
     async def test_execute_decision_stop_charging(self):
         """Test executing stop charging decision"""
         coordinator = MasterCoordinator()
         coordinator.charging_controller = AsyncMock()
         coordinator.charging_controller.stop_price_based_charging = AsyncMock(return_value=True)
-        coordinator.charging_controller.is_charging = True
         
-        decision = {
-            'should_charge': False,
-            'reason': 'Test stop charging decision',
-            'priority': 'medium'
-        }
+        decision = {'action': 'stop_charging'}
         
-        await coordinator._execute_smart_decision(decision)
+        await coordinator._execute_decision(decision)
         
         # Verify charging was stopped
         coordinator.charging_controller.stop_price_based_charging.assert_called_once()
     
-    @pytest.mark.asyncio
     async def test_execute_decision_continue_charging(self):
         """Test executing continue charging decision"""
         coordinator = MasterCoordinator()
         coordinator.charging_controller = AsyncMock()
-        coordinator.charging_controller.is_charging = True
         
-        decision = {
-            'should_charge': True,
-            'reason': 'Continue charging',
-            'priority': 'medium',
-            'price_data': {}
-        }
+        decision = {'action': 'continue_charging'}
         
-        await coordinator._execute_smart_decision(decision)
+        await coordinator._execute_decision(decision)
         
-        # Verify charging was started (continue charging means start charging)
-        coordinator.charging_controller.start_price_based_charging.assert_called_once_with({}, force_start=True)
+        # Verify no action was taken (continue means no change)
+        coordinator.charging_controller.start_price_based_charging.assert_not_called()
         coordinator.charging_controller.stop_price_based_charging.assert_not_called()
     
-    @pytest.mark.asyncio
     async def test_execute_decision_no_action(self):
         """Test executing no action decision"""
         coordinator = MasterCoordinator()
         coordinator.charging_controller = AsyncMock()
-        coordinator.charging_controller.is_charging = False
         
-        decision = {
-            'should_charge': False,
-            'reason': 'No action needed',
-            'priority': 'low'
-        }
+        decision = {'action': 'none'}
         
-        await coordinator._execute_smart_decision(decision)
+        await coordinator._execute_decision(decision)
         
         # Verify no action was taken
         coordinator.charging_controller.start_price_based_charging.assert_not_called()

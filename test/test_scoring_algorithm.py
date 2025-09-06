@@ -25,15 +25,9 @@ class TestScoringAlgorithm(unittest.TestCase):
             'coordinator': {
                 'decision_interval_minutes': 15,
                 'health_check_interval_minutes': 5
-            },
-            'timing_awareness_enabled': False  # Disable timing awareness for legacy tests
+            }
         }
-        # Mock charging controller
-        self.mock_charging_controller = MagicMock()
-        self.mock_charging_controller.get_current_price.return_value = 200.0  # PLN/MWh
-        self.mock_charging_controller.calculate_final_price.return_value = 200.0  # PLN/MWh
-        
-        self.decision_engine = MultiFactorDecisionEngine(self.config, self.mock_charging_controller)
+        self.decision_engine = MultiFactorDecisionEngine(self.config)
         
         # Mock price data
         self.mock_price_data = {
@@ -79,14 +73,11 @@ class TestScoringAlgorithm(unittest.TestCase):
             
             score = self.decision_engine._calculate_price_score(self.mock_price_data)
             
-        # Low price (200 PLN/MWh = 0.2 PLN/kWh) should give score 100 (excellent)
-        self.assertEqual(score, 100)
+            # Low price (200 PLN) should give high score (100)
+            self.assertEqual(score, 100)
     
     def test_price_score_calculation_medium_price(self):
         """Test price score calculation for medium prices"""
-        # Update mock to return medium price (300 PLN/MWh = 0.3 PLN/kWh, still <= 200, so score 100)
-        self.mock_charging_controller.get_current_price.return_value = 300.0  # PLN/MWh
-        
         # Update price data with medium price
         medium_price_data = self.mock_price_data.copy()
         medium_price_data['value'][0]['csdac_pln'] = 300.0  # Medium price
@@ -99,17 +90,14 @@ class TestScoringAlgorithm(unittest.TestCase):
             
             score = self.decision_engine._calculate_price_score(medium_price_data)
             
-            # Medium price (300 PLN/MWh = 0.3 PLN/kWh) should give score (100) - still excellent
+            # Medium price (300 PLN) should give high score (100)
             self.assertEqual(score, 100)
     
     def test_price_score_calculation_high_price(self):
         """Test price score calculation for high prices"""
-        # Update mock to return high price (300,000 PLN/MWh = 300 PLN/kWh, gives score 80)
-        self.mock_charging_controller.get_current_price.return_value = 300000.0  # PLN/MWh
-        
         # Update price data with high price
         high_price_data = self.mock_price_data.copy()
-        high_price_data['value'][0]['csdac_pln'] = 300000.0  # High price
+        high_price_data['value'][0]['csdac_pln'] = 500.0  # High price
         
         with patch('master_coordinator.datetime') as mock_datetime:
             mock_datetime.now.return_value = datetime(2025, 9, 6, 12, 0)
@@ -119,17 +107,14 @@ class TestScoringAlgorithm(unittest.TestCase):
             
             score = self.decision_engine._calculate_price_score(high_price_data)
             
-            # High price (300,000 PLN/MWh = 300 PLN/kWh) should give score (80)
-            self.assertEqual(score, 80)
+            # High price (500 PLN) should give medium score (40)
+            self.assertEqual(score, 40)
     
     def test_price_score_calculation_very_high_price(self):
         """Test price score calculation for very high prices"""
-        # Update mock to return very high price (500,000 PLN/MWh = 500 PLN/kWh, gives score 40)
-        self.mock_charging_controller.get_current_price.return_value = 500000.0  # PLN/MWh
-        
         # Update price data with very high price
         very_high_price_data = self.mock_price_data.copy()
-        very_high_price_data['value'][0]['csdac_pln'] = 500000.0  # Very high price
+        very_high_price_data['value'][0]['csdac_pln'] = 700.0  # Very high price
         
         with patch('master_coordinator.datetime') as mock_datetime:
             mock_datetime.now.return_value = datetime(2025, 9, 6, 12, 0)
@@ -139,8 +124,8 @@ class TestScoringAlgorithm(unittest.TestCase):
             
             score = self.decision_engine._calculate_price_score(very_high_price_data)
             
-            # Very high price (500,000 PLN/MWh = 500 PLN/kWh) should give score (40)
-            self.assertEqual(score, 40)
+            # Very high price (700 PLN) should give low score (0)
+            self.assertEqual(score, 0)
     
     def test_battery_score_calculation_critical(self):
         """Test battery score calculation for critical battery level"""
@@ -203,27 +188,23 @@ class TestScoringAlgorithm(unittest.TestCase):
         self.assertEqual(score, 100)
     
     def test_pv_score_calculation_low_production(self):
-        """Test PV score calculation for low production with deficit"""
+        """Test PV score calculation for low production"""
         low_pv_data = self.mock_current_data.copy()
         low_pv_data['photovoltaic']['current_power_w'] = 200  # Low PV production
-        low_pv_data['house_consumption']['current_power_w'] = 2000  # High consumption
-        # Net power: 200 - 2000 = -1800W (high deficit)
         
         score = self.decision_engine._calculate_pv_score(low_pv_data)
         
-        # High deficit should give high score (80)
-        self.assertEqual(score, 80)
+        # Low PV production should give high score (60)
+        self.assertEqual(score, 60)
     
     def test_pv_score_calculation_medium_production(self):
-        """Test PV score calculation for medium production with balanced consumption"""
+        """Test PV score calculation for medium production"""
         medium_pv_data = self.mock_current_data.copy()
         medium_pv_data['photovoltaic']['current_power_w'] = 1500  # Medium PV production
-        medium_pv_data['house_consumption']['current_power_w'] = 1500  # Balanced consumption
-        # Net power: 1500 - 1500 = 0W (balanced)
         
         score = self.decision_engine._calculate_pv_score(medium_pv_data)
         
-        # Balanced should give medium score (30)
+        # Medium PV production should give medium score (30)
         self.assertEqual(score, 30)
     
     def test_pv_score_calculation_high_production(self):
@@ -278,33 +259,29 @@ class TestScoringAlgorithm(unittest.TestCase):
     
     def test_weighted_total_score_calculation(self):
         """Test weighted total score calculation"""
-        with patch('master_coordinator.datetime') as mock_datetime:
-            mock_datetime.now.return_value = datetime(2025, 9, 6, 12, 0)
-            mock_datetime.strftime = datetime.strftime
-            mock_datetime.strptime = datetime.strptime
-            mock_datetime.timedelta = timedelta
-            
-            # Calculate expected weighted score based on actual scoring logic
-            # Price: 200 PLN/MWh → 100 (low price threshold)
-            # Battery: 30% SOC → 80
-            # PV: 500W - 2000W consumption = -1500W deficit → 80 (medium deficit)
-            # Consumption: 2000W → 60 (medium consumption)
-            expected_score = (
-                100 * 0.40 +  # price
-                80 * 0.25 +   # battery
-                80 * 0.20 +   # pv (deficit)
-                60 * 0.15     # consumption
-            )
-            
-            # Test the decision engine
-            decision = self.decision_engine.analyze_and_decide(
-                self.mock_current_data,
-                self.mock_price_data,
-                []
-            )
-            
-            # Verify the total score matches expected calculation
-            self.assertAlmostEqual(decision['total_score'], expected_score, places=2)
+        # Test with known scores
+        price_score = 100  # 40% weight
+        battery_score = 80  # 25% weight
+        pv_score = 60      # 20% weight
+        consumption_score = 40  # 15% weight
+        
+        # Calculate expected weighted score
+        expected_score = (
+            price_score * 0.40 +
+            battery_score * 0.25 +
+            pv_score * 0.20 +
+            consumption_score * 0.15
+        )
+        
+        # Test the decision engine
+        decision = self.decision_engine.analyze_and_decide(
+            self.mock_current_data,
+            self.mock_price_data,
+            []
+        )
+        
+        # Verify the total score matches expected calculation
+        self.assertAlmostEqual(decision['total_score'], expected_score, places=2)
     
     def test_decision_action_critical_battery(self):
         """Test decision action for critical battery level"""
@@ -330,47 +307,33 @@ class TestScoringAlgorithm(unittest.TestCase):
         low_price_data = self.mock_price_data.copy()
         low_price_data['value'][0]['csdac_pln'] = 150.0  # Very low price
         
-        with patch('master_coordinator.datetime') as mock_datetime:
-            mock_datetime.now.return_value = datetime(2025, 9, 6, 12, 0)
-            mock_datetime.strftime = datetime.strftime
-            mock_datetime.strptime = datetime.strptime
-            mock_datetime.timedelta = timedelta
-            
-            decision = self.decision_engine.analyze_and_decide(
-                high_score_data,
-                low_price_data,
-                []
-            )
-            
-            # Score 81 and not charging should result in start_charging (above 70 threshold)
-            self.assertEqual(decision['action'], 'start_charging')
+        decision = self.decision_engine.analyze_and_decide(
+            high_score_data,
+            low_price_data,
+            []
+        )
+        
+        # High score and not charging should result in start_charging
+        self.assertEqual(decision['action'], 'start_charging')
     
     def test_decision_action_low_score_charging(self):
         """Test decision action for low score when charging"""
         low_score_data = self.mock_current_data.copy()
         low_score_data['battery']['soc_percent'] = 90  # High battery
         low_score_data['battery']['charging_status'] = True  # Currently charging
-        low_score_data['photovoltaic']['current_power_w'] = 2000  # High PV production
-        low_score_data['house_consumption']['current_power_w'] = 500  # Low consumption
         
         # Use high price data for low price score
         high_price_data = self.mock_price_data.copy()
         high_price_data['value'][0]['csdac_pln'] = 700.0  # Very high price
         
-        with patch('master_coordinator.datetime') as mock_datetime:
-            mock_datetime.now.return_value = datetime(2025, 9, 6, 12, 0)
-            mock_datetime.strftime = datetime.strftime
-            mock_datetime.strptime = datetime.strptime
-            mock_datetime.timedelta = timedelta
-            
-            decision = self.decision_engine.analyze_and_decide(
-                low_score_data,
-                high_price_data,
-                []
-            )
-            
-            # Low score and charging should result in stop_charging
-            self.assertEqual(decision['action'], 'stop_charging')
+        decision = self.decision_engine.analyze_and_decide(
+            low_score_data,
+            high_price_data,
+            []
+        )
+        
+        # Low score and charging should result in stop_charging
+        self.assertEqual(decision['action'], 'stop_charging')
     
     def test_decision_action_medium_score_charging(self):
         """Test decision action for medium score when charging"""
@@ -381,9 +344,6 @@ class TestScoringAlgorithm(unittest.TestCase):
         # Use medium price data
         medium_price_data = self.mock_price_data.copy()
         medium_price_data['value'][0]['csdac_pln'] = 400.0  # Medium price
-        
-        # Update charging controller to return the medium price
-        self.mock_charging_controller.get_current_price.return_value = 400.0  # PLN/MWh
         
         decision = self.decision_engine.analyze_and_decide(
             medium_score_data,

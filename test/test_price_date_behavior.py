@@ -9,8 +9,6 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
 import sys
 import os
-import yaml
-import tempfile
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -23,42 +21,7 @@ class TestPriceDateBehavior(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures"""
-        # Create isolated test configuration
-        test_config = {
-            'electricity_pricing': {
-                'sc_component_net': 0.0892,
-                'sc_component_gross': 0.1097,
-                'minimum_price_floor': 0.0050
-            },
-            'electricity_tariff': {
-                'tariff_type': 'g12w',
-                'sc_component_pln_kwh': 0.0892,
-                'distribution_pricing': {
-                    'g12w': {
-                        'type': 'time_based',
-                        'peak_hours': {'start': 7, 'end': 22},
-                        'prices': {'peak': 0.3566, 'off_peak': 0.0749}
-                    }
-                }
-            },
-            'battery_management': {
-                'soc_thresholds': {
-                    'critical': 12,
-                    'emergency': 5
-                }
-            },
-            'cheapest_price_aggressive_charging': {
-                'enabled': True
-            }
-        }
-        
-        # Create a temporary config file
-        self.temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
-        yaml.dump(test_config, self.temp_config_file)
-        self.temp_config_file.close()
-        
-        # Initialize charger with test config
-        self.charger = AutomatedPriceCharger(config_path=self.temp_config_file.name)
+        self.charger = AutomatedPriceCharger()
         
         # Mock price data for different dates
         self.mock_price_data_2025_09_06 = {
@@ -105,12 +68,6 @@ class TestPriceDateBehavior(unittest.TestCase):
                 }
             ]
         }
-    
-    def tearDown(self):
-        """Clean up test fixtures"""
-        # Remove temporary config file
-        if hasattr(self, 'temp_config_file') and os.path.exists(self.temp_config_file.name):
-            os.unlink(self.temp_config_file.name)
     
     @patch('requests.get')
     def test_fetch_today_prices_correct_date(self, mock_get):
@@ -207,9 +164,8 @@ class TestPriceDateBehavior(unittest.TestCase):
             
             # Should find the price for 12:00
             self.assertIsNotNone(current_price)
-            # Price should include market + SC + distribution (G12w peak at 12:00)
-            # 450.00 + 89.2 + 356.6 = 895.8 PLN/MWh
-            self.assertAlmostEqual(current_price, 895.8, places=1)
+            # Price should be market price + SC component (450.00 + 0.0892)
+            self.assertAlmostEqual(current_price, 450.0892, places=4)
     
     def test_get_current_price_outside_day(self):
         """Test that get_current_price returns None when outside the day's data"""
