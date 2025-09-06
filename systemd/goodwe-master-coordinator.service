@@ -32,6 +32,12 @@ ReadWritePaths=/opt/goodwe-dynamic-price-optimiser/logs
 ReadWritePaths=/opt/goodwe-dynamic-price-optimiser/out
 ReadWritePaths=/opt/goodwe-dynamic-price-optimiser/config
 
+# Network access for web server
+IPAddressAllow=localhost
+IPAddressAllow=10.0.0.0/8
+IPAddressAllow=172.16.0.0/12
+IPAddressAllow=192.168.0.0/16
+
 # Resource limits
 LimitNOFILE=65536
 MemoryMax=512M

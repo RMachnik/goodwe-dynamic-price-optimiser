@@ -179,6 +179,13 @@ notifications:
     url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
     enabled: false
 
+# Web Server Configuration
+web_server:
+  enabled: true                # Enable web server for remote log access
+  host: "0.0.0.0"             # Host to bind to (0.0.0.0 for all interfaces)
+  port: 8080                  # Port to bind to
+  cors_enabled: true          # Enable CORS for cross-origin requests
+
 # Development/Debug Configuration
 debug:
   enabled: false               # Enable debug mode
