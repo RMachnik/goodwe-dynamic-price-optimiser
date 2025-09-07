@@ -7,10 +7,10 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/opt/goodwe-dynamic-price-optimiser/src
-ExecStart=/opt/goodwe-dynamic-price-optimiser/venv/bin/python /opt/goodwe-dynamic-price-optimiser/src/master_coordinator.py --non-interactive
+User=rmachnik
+Group=rmachnik
+WorkingDirectory=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/src
+ExecStart=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/venv/bin/python /home/rmachnik/sources/goodwe-dynamic-price-optimiser/src/master_coordinator.py --non-interactive
 ExecStop=/bin/kill -TERM $MAINPID
 Restart=always
 RestartSec=30
@@ -19,18 +19,18 @@ StandardError=journal
 SyslogIdentifier=goodwe-master-coordinator
 
 # Environment variables
-Environment=PYTHONPATH=/opt/goodwe-dynamic-price-optimiser/src
+Environment=PYTHONPATH=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/src
 Environment=PYTHONUNBUFFERED=1
-Environment=HOME=/home/ubuntu
+Environment=HOME=/home/rmachnik
 
 # Security settings
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/goodwe-dynamic-price-optimiser/logs
-ReadWritePaths=/opt/goodwe-dynamic-price-optimiser/out
-ReadWritePaths=/opt/goodwe-dynamic-price-optimiser/config
+ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/logs
+ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/out
+ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/config
 
 # Network access for web server
 IPAddressAllow=localhost
