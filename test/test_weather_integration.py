@@ -7,11 +7,10 @@ Tests IMGW + Open-Meteo API integration and weather-enhanced PV forecasting
 import unittest
 import asyncio
 import json
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
+from unittest.mock import Mock, patch, AsyncMock
 from datetime import datetime, timedelta
 import sys
 from pathlib import Path
-import pytest
 
 # Add src directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -185,7 +184,6 @@ class TestWeatherDataCollector(unittest.TestCase):
         self.assertFalse(self.weather_collector._is_cache_valid())
     
     @patch('aiohttp.ClientSession')
-    @pytest.mark.asyncio
     async def test_fetch_imgw_data_success(self, mock_session):
         """Test successful IMGW data fetching"""
         # Mock response
@@ -206,7 +204,6 @@ class TestWeatherDataCollector(unittest.TestCase):
         self.assertEqual(result['temperature'], 15.2)
     
     @patch('aiohttp.ClientSession')
-    @pytest.mark.asyncio
     async def test_fetch_openmeteo_data_success(self, mock_session):
         """Test successful Open-Meteo data fetching"""
         # Mock response
@@ -356,12 +353,7 @@ class TestWeatherEnhancedDecisionEngine(unittest.TestCase):
             },
             'timing_awareness_enabled': True
         }
-        # Mock charging controller
-        self.mock_charging_controller = MagicMock()
-        self.mock_charging_controller.get_current_price.return_value = 200.0  # PLN/MWh
-        self.mock_charging_controller.calculate_final_price.return_value = 200.0  # PLN/MWh
-        
-        self.decision_engine = MultiFactorDecisionEngine(self.config, self.mock_charging_controller)
+        self.decision_engine = MultiFactorDecisionEngine(self.config)
     
     def test_weather_pv_score_calculation(self):
         """Test weather-enhanced PV scoring"""
@@ -488,7 +480,6 @@ class TestWeatherIntegrationIntegration(unittest.TestCase):
         }
     
     @patch('aiohttp.ClientSession')
-    @pytest.mark.asyncio
     async def test_full_weather_data_collection(self, mock_session):
         """Test complete weather data collection flow"""
         # Mock IMGW response

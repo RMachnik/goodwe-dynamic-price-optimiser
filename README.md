@@ -11,6 +11,7 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **✅ SMART**: Implements intelligent charging strategy with PV overproduction analysis
 - **✅ INTELLIGENT**: Considers consumption patterns and price optimization opportunities
 - **✅ INTEGRATED**: Polish electricity pricing with SC component and G12 distribution tariff
+- **✅ WEATHER-ENHANCED**: Real-time weather data from IMGW + Open-Meteo for accurate PV forecasting
 - **✅ PROVEN**: Saves money by charging during optimal price windows and avoiding grid charging during PV overproduction
 
 **For detailed implementation strategy, technical specifications, and current progress, see the [Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md).**
@@ -29,6 +30,13 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 │   PV System     │    │   Enhanced      │    │   Price-based   │
 │   (5.47-6.87kW)│    │   Data          │    │   Optimization  │
 │                 │    │   Collector     │    │   & Safety      │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Weather APIs  │    │   Weather       │    │   Weather-      │
+│   IMGW +        │◄──►│   Data          │◄──►│   Enhanced      │
+│   Open-Meteo    │    │   Collector     │    │   PV Forecast   │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 

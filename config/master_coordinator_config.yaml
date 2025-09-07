@@ -179,6 +179,35 @@ notifications:
     url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
     enabled: false
 
+# Weather Integration Configuration
+weather_integration:
+  enabled: true
+  
+  # IMGW API Configuration (Official Polish Weather Service)
+  imgw:
+    enabled: true
+    station: "krakow"  # Nearest station to Mników, Małopolska
+    update_interval_minutes: 15
+    
+  # Open-Meteo API Configuration (Free Weather Forecasts)
+  openmeteo:
+    enabled: true
+    forecast_days: 1  # 1 day forecast for D+1 planning
+    update_interval_minutes: 60
+    
+  # Location Configuration (Mników, Małopolska, Poland)
+  location:
+    latitude: 50.1
+    longitude: 19.7
+    timezone: "Europe/Warsaw"
+    
+  # Weather Data Processing
+  processing:
+    forecast_hours: 24  # Match D+1 price planning
+    cache_duration_minutes: 30
+    fallback_to_historical: true
+    confidence_threshold: 0.7
+
 # Web Server Configuration
 web_server:
   enabled: true                # Enable web server for remote log access
@@ -203,7 +232,23 @@ timing_awareness:
   house_consumption_buffer_kw: 0.5   # House consumption buffer (500W)
   forecast_hours: 4                 # PV forecast hours ahead
   historical_days: 7                # Historical data days for patterns
+
+# PV vs consumption analysis configuration
+pv_consumption_analysis:
+  enabled: true
+  pv_overproduction_threshold_w: 500  # Minimum excess PV power to start charging
+  consumption_forecast_hours: 4       # Hours ahead to forecast consumption
+  power_balance_check_interval_minutes: 5  # How often to check power balance
+  historical_data_days: 7             # Days of historical data to keep
   data_directory: "out/energy_data"  # Data storage directory
+  
+  # Night charging strategy for high price day preparation
+  night_charging_enabled: true
+  night_hours: [22, 23, 0, 1, 2, 3, 4, 5]  # 10 PM to 6 AM
+  high_price_threshold_percentile: 0.75     # 75th percentile for high prices
+  poor_pv_threshold_percentile: 25.0        # 25th percentile for poor PV (25% of capacity)
+  min_night_charging_soc: 30.0              # Don't charge if SOC > 30%
+  max_night_charging_soc: 80.0              # Charge up to 80% at night
 
 # Price Window Analysis Configuration
 price_window_analysis:
