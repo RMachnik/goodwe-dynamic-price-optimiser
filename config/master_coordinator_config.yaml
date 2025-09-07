@@ -186,6 +186,37 @@ web_server:
   port: 8080                  # Port to bind to
   cors_enabled: true          # Enable CORS for cross-origin requests
 
+# Timing-Aware Charging Configuration
+timing_awareness:
+  enabled: true                # Enable timing-aware charging decisions
+  pv_capacity_kw: 10.0        # PV system capacity in kW
+  charging_rate_kw: 3.0       # Battery charging rate in kW
+  battery_capacity_kwh: 10.0  # Battery capacity in kWh
+  target_battery_soc: 60.0    # Target battery SOC percentage
+  critical_battery_threshold: 20.0  # Critical battery level (%)
+  low_battery_threshold: 40.0       # Low battery level (%)
+  min_savings_threshold_pln: 50.0   # Minimum savings threshold (PLN/MWh)
+  min_charging_duration_hours: 0.25 # Minimum charging duration (15 minutes)
+  max_charging_duration_hours: 4.0  # Maximum charging duration (4 hours)
+  pv_charging_efficiency: 0.95      # PV charging efficiency (95%)
+  grid_charging_efficiency: 0.90    # Grid charging efficiency (90%)
+  house_consumption_buffer_kw: 0.5   # House consumption buffer (500W)
+  forecast_hours: 4                 # PV forecast hours ahead
+  historical_days: 7                # Historical data days for patterns
+  data_directory: "out/energy_data"  # Data storage directory
+
+# Price Window Analysis Configuration
+price_window_analysis:
+  very_low_price_threshold: 150.0   # Very low price threshold (PLN/MWh)
+  low_price_threshold: 250.0         # Low price threshold (PLN/MWh)
+  medium_price_threshold: 400.0      # Medium price threshold (PLN/MWh)
+  high_price_threshold: 600.0        # High price threshold (PLN/MWh)
+  very_high_price_threshold: 800.0  # Very high price threshold (PLN/MWh)
+  reference_price_pln: 400.0        # Reference price for savings calculation
+  min_charging_duration_hours: 0.25 # Minimum charging duration (15 minutes)
+  max_charging_duration_hours: 4.0  # Maximum charging duration (4 hours)
+  min_savings_threshold_pln: 50.0   # Minimum savings threshold (PLN/MWh)
+
 # Development/Debug Configuration
 debug:
   enabled: false               # Enable debug mode

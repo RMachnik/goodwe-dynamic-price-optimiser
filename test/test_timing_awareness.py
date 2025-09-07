@@ -34,18 +34,13 @@ class TestTimingAwareness(unittest.TestCase):
             'charging_rate_kw': 3.0,
             'battery_capacity_kwh': 10.0,
             'target_battery_soc': 60.0,
-            'critical_battery_threshold': 12.0,
+            'critical_battery_threshold': 20.0,
             'low_battery_threshold': 40.0,
             'min_savings_threshold_pln': 50.0,
             'data_directory': 'out/energy_data'
         }
         
-        # Mock charging controller
-        self.mock_charging_controller = MagicMock()
-        self.mock_charging_controller.get_current_price.return_value = 200.0  # PLN/MWh
-        self.mock_charging_controller.calculate_final_price.return_value = 200.0  # PLN/MWh
-        
-        self.decision_engine = MultiFactorDecisionEngine(self.config, self.mock_charging_controller)
+        self.decision_engine = MultiFactorDecisionEngine(self.config)
         
         # Mock current data
         self.mock_current_data = {
@@ -208,7 +203,7 @@ class TestTimingAwareness(unittest.TestCase):
             mock_datetime.strptime = datetime.strptime
             mock_datetime.timedelta = timedelta
             
-            # Mock PV forecasts showing sufficient but stable PV timing (no increasing trend)
+            # Mock PV forecasts showing sufficient PV timing
             mock_pv_forecasts = [
                 {
                     'timestamp': '2025-09-07T11:00:00',
@@ -223,15 +218,15 @@ class TestTimingAwareness(unittest.TestCase):
                     'timestamp': '2025-09-07T12:00:00',
                     'hour': 12,
                     'hour_offset': 1,
-                    'forecasted_power_kw': 5.0,  # Same PV (no increasing trend)
-                    'forecasted_power_w': 5000,
+                    'forecasted_power_kw': 6.0,  # High PV
+                    'forecasted_power_w': 6000,
                     'confidence': 0.7,
                     'method': 'historical_pattern'
                 }
             ]
             
             with patch.object(self.decision_engine.pv_forecaster, 'forecast_pv_production', return_value=mock_pv_forecasts):
-                with patch.object(self.decision_engine.hybrid_logic.price_analyzer, 'analyze_timing_vs_price') as mock_analyze:
+                with patch.object(self.decision_engine.price_analyzer, 'analyze_timing_vs_price') as mock_analyze:
                     mock_analyze.return_value = {
                         'recommendation': 'pv_charging',
                         'reason': 'PV can complete charging in 1.0h during low price window',
@@ -323,7 +318,7 @@ class TestTimingAwareness(unittest.TestCase):
         legacy_config = self.config.copy()
         legacy_config['timing_awareness_enabled'] = False
         
-        legacy_engine = MultiFactorDecisionEngine(legacy_config, self.mock_charging_controller)
+        legacy_engine = MultiFactorDecisionEngine(legacy_config)
         
         with patch('master_coordinator.datetime') as mock_datetime:
             mock_datetime.now.return_value = datetime(2025, 9, 7, 11, 0)
@@ -344,4 +339,5 @@ class TestTimingAwareness(unittest.TestCase):
             self.assertIn('total_score', decision)
 
 
-# Tests are implemented via unittest.TestCase and collected by pytest; removed direct runner.
+if __name__ == '__main__':
+    unittest.main()
