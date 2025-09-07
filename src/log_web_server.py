@@ -185,6 +185,33 @@ class LogWebServer:
         }
         return log_files.get(log_name.lower())
     
+    def _get_journalctl_cmd(self, lines: int) -> List[str]:
+        """Get the appropriate journalctl command based on which service is running"""
+        import subprocess
+        
+        # Check if system service is running
+        try:
+            result = subprocess.run(['systemctl', 'is-active', 'goodwe-master-coordinator'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0 and result.stdout.strip() == 'active':
+                # System service is running
+                return ['journalctl', '-u', 'goodwe-master-coordinator', '-n', str(lines), '--no-pager', '--output=short-iso']
+        except Exception:
+            pass
+        
+        # Check if user service is running
+        try:
+            result = subprocess.run(['systemctl', '--user', 'is-active', 'goodwe-master-coordinator'], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0 and result.stdout.strip() == 'active':
+                # User service is running
+                return ['journalctl', '--user', '-u', 'goodwe-master-coordinator', '-n', str(lines), '--no-pager', '--output=short-iso']
+        except Exception:
+            pass
+        
+        # Default to system service if neither is clearly active
+        return ['journalctl', '-u', 'goodwe-master-coordinator', '-n', str(lines), '--no-pager', '--output=short-iso']
+    
     def _get_log_lines(self, log_path: Path, lines: int, level: str = '') -> Response:
         """Get last N lines from log file"""
         try:
@@ -216,8 +243,8 @@ class LogWebServer:
         try:
             import subprocess
             
-            # Build journalctl command
-            cmd = ['journalctl', '--user', '-u', 'goodwe-master-coordinator', '-n', str(lines * 3), '--no-pager', '--output=short-iso']
+            # Determine which service is running and use appropriate journalctl command
+            cmd = self._get_journalctl_cmd(lines * 3)
             
             # Execute journalctl command
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
@@ -301,7 +328,7 @@ class LogWebServer:
                 yield f"data: {json.dumps({'type': 'start', 'message': 'Starting systemd journal stream'})}\n\n"
                 
                 # Send recent logs first
-                cmd = ['journalctl', '--user', '-u', 'goodwe-master-coordinator', '-n', '20', '--no-pager', '--output=short-iso']
+                cmd = self._get_journalctl_cmd(20)
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
                 
                 if result.returncode == 0 and result.stdout.strip():
@@ -325,7 +352,8 @@ class LogWebServer:
                                     yield f"data: {json.dumps({'type': 'log', 'line': line.rstrip()})}\n\n"
                 
                 # Start following new logs
-                cmd = ['journalctl', '--user', '-u', 'goodwe-master-coordinator', '-f', '--no-pager', '--output=short-iso']
+                cmd = self._get_journalctl_cmd(0)  # Get command without line limit
+                cmd.extend(['-f'])  # Add follow flag
                 process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
                 
                 try:
@@ -373,7 +401,7 @@ class LogWebServer:
             import subprocess
             
             # Get more lines to filter for key events
-            cmd = ['journalctl', '--user', '-u', 'goodwe-master-coordinator', '-n', str(lines * 5), '--no-pager', '--output=short-iso']
+            cmd = self._get_journalctl_cmd(lines * 5)
             
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
             
