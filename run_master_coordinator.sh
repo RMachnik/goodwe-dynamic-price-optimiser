@@ -10,6 +10,5 @@ export USER="rmachnik"
 # Change to the correct directory (stay in project root, not src)
 cd /home/rmachnik/sources/goodwe-dynamic-price-optimiser
 
-# Activate virtual environment and run
-source /home/rmachnik/sources/goodwe-dynamic-price-optimiser/venv/bin/activate
-exec python src/master_coordinator.py --non-interactive
+# Use virtual environment Python directly
+exec /home/rmachnik/sources/goodwe-dynamic-price-optimiser/venv/bin/python src/master_coordinator.py --non-interactive
