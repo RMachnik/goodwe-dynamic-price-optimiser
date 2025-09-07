@@ -38,6 +38,9 @@ from enhanced_data_collector import EnhancedDataCollector
 from automated_price_charging import AutomatedPriceCharger
 from polish_electricity_analyzer import PolishElectricityAnalyzer
 from log_web_server import LogWebServer
+from pv_forecasting import PVForecaster
+from price_window_analyzer import PriceWindowAnalyzer
+from hybrid_charging_logic import HybridChargingLogic
 
 # Setup logging
 project_root = Path(__file__).parent.parent
@@ -623,7 +626,7 @@ class MasterCoordinator:
 
 
 class MultiFactorDecisionEngine:
-    """Multi-factor decision engine for intelligent charging decisions"""
+    """Multi-factor decision engine for intelligent charging decisions with timing awareness"""
     
     def __init__(self, config: Dict[str, Any]):
         """Initialize the decision engine"""
@@ -637,9 +640,82 @@ class MultiFactorDecisionEngine:
             'pv': 0.20,         # 20% weight
             'consumption': 0.15  # 15% weight
         }
+        
+        # Initialize timing-aware components
+        self.pv_forecaster = PVForecaster(config)
+        self.price_analyzer = PriceWindowAnalyzer(config)
+        self.hybrid_logic = HybridChargingLogic(config)
+        
+        # Timing awareness flag
+        self.timing_awareness_enabled = config.get('timing_awareness_enabled', True)
     
     def analyze_and_decide(self, current_data: Dict, price_data: Dict, historical_data: List) -> Dict[str, Any]:
-        """Analyze current situation and make charging decision"""
+        """Analyze current situation and make charging decision with timing awareness"""
+        
+        # Use timing-aware decision if enabled
+        if self.timing_awareness_enabled:
+            return self._analyze_and_decide_with_timing(current_data, price_data, historical_data)
+        
+        # Fallback to original scoring algorithm
+        return self._analyze_and_decide_legacy(current_data, price_data, historical_data)
+    
+    def _analyze_and_decide_with_timing(self, current_data: Dict, price_data: Dict, historical_data: List) -> Dict[str, Any]:
+        """Analyze and decide using timing-aware hybrid charging logic"""
+        logger.info("Using timing-aware decision engine")
+        
+        try:
+            # Use hybrid charging logic for optimal decision
+            charging_decision = self.hybrid_logic.analyze_and_decide(current_data, price_data)
+            
+            # Convert ChargingDecision to legacy format for compatibility
+            action = self._convert_charging_action(charging_decision.action)
+            
+            # Calculate scores for compatibility
+            price_score = self._calculate_price_score(price_data)
+            battery_score = self._calculate_battery_score(current_data)
+            pv_score = self._calculate_pv_score(current_data)
+            consumption_score = self._calculate_consumption_score(current_data, historical_data)
+            
+            total_score = (
+                price_score * self.weights['price'] +
+                battery_score * self.weights['battery'] +
+                pv_score * self.weights['pv'] +
+                consumption_score * self.weights['consumption']
+            )
+            
+            return {
+                'action': action,
+                'total_score': total_score,
+                'scores': {
+                    'price': price_score,
+                    'battery': battery_score,
+                    'pv': pv_score,
+                    'consumption': consumption_score
+                },
+                'confidence': charging_decision.confidence,
+                'reasoning': charging_decision.reason,
+                'price_data': price_data,
+                'timing_analysis': {
+                    'charging_source': charging_decision.charging_source,
+                    'duration_hours': charging_decision.duration_hours,
+                    'energy_kwh': charging_decision.energy_kwh,
+                    'estimated_cost_pln': charging_decision.estimated_cost_pln,
+                    'estimated_savings_pln': charging_decision.estimated_savings_pln,
+                    'pv_contribution_kwh': charging_decision.pv_contribution_kwh,
+                    'grid_contribution_kwh': charging_decision.grid_contribution_kwh,
+                    'start_time': charging_decision.start_time.isoformat(),
+                    'end_time': charging_decision.end_time.isoformat()
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in timing-aware decision: {e}")
+            # Fallback to legacy decision
+            return self._analyze_and_decide_legacy(current_data, price_data, historical_data)
+    
+    def _analyze_and_decide_legacy(self, current_data: Dict, price_data: Dict, historical_data: List) -> Dict[str, Any]:
+        """Original scoring-based decision algorithm"""
+        logger.info("Using legacy scoring-based decision engine")
         
         # Calculate individual scores
         price_score = self._calculate_price_score(price_data)
@@ -674,6 +750,16 @@ class MultiFactorDecisionEngine:
             'reasoning': self._generate_reasoning(price_score, battery_score, pv_score, consumption_score, action),
             'price_data': price_data
         }
+    
+    def _convert_charging_action(self, hybrid_action: str) -> str:
+        """Convert hybrid charging action to legacy action format"""
+        action_mapping = {
+            'start_pv_charging': 'start_charging',
+            'start_grid_charging': 'start_charging',
+            'start_hybrid_charging': 'start_charging',
+            'wait': 'none'
+        }
+        return action_mapping.get(hybrid_action, 'none')
     
     def _calculate_price_score(self, price_data: Dict) -> float:
         """Calculate price-based score (0-100)"""

@@ -25,7 +25,8 @@ class TestScoringAlgorithm(unittest.TestCase):
             'coordinator': {
                 'decision_interval_minutes': 15,
                 'health_check_interval_minutes': 5
-            }
+            },
+            'timing_awareness_enabled': False  # Disable timing awareness for legacy tests
         }
         self.decision_engine = MultiFactorDecisionEngine(self.config)
         
