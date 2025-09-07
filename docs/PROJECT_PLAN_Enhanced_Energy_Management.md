@@ -20,8 +20,10 @@
 - ✅ **NEW**: CSDAC-PLN API reliability confirmed (100% data availability last 14 days)
 - ✅ **NEW**: Price accuracy validated against Gadek.pl (95-98% match)
 - ✅ **NEW**: SDAC timing strategy implemented (13:00-14:00 CET retry window)
-- ✅ **NEW**: Smart charging strategy with PV overproduction analysis
-- ✅ **NEW**: Multi-factor decision engine considering consumption patterns
+- 🟡 **PARTIAL**: Multi-factor decision engine with scoring algorithm (missing PV vs consumption analysis)
+- ❌ **NOT IMPLEMENTED**: Smart charging strategy with PV overproduction analysis
+- ❌ **NOT IMPLEMENTED**: Battery state management thresholds
+- ❌ **NOT IMPLEMENTED**: Multi-session daily charging
 
 ### **✅ CRITICAL FIX COMPLETED - Monitoring Logic**
 - ✅ **Efficient scheduled charging**: Replaced inefficient monitoring with smart scheduling
@@ -29,12 +31,12 @@
 - ✅ **Simplified approach**: Time-based scheduling instead of continuous price checking
 - ✅ **Smart monitoring**: Only monitors battery SoC and system health
 
-### **✅ NEW FEATURE COMPLETED - Smart Charging Strategy**
-- ✅ **PV Overproduction Analysis**: Avoids grid charging when PV > consumption + 500W
-- ✅ **Price Optimization**: Waits for 30%+ price savings opportunities
-- ✅ **Consumption Pattern Analysis**: Predicts future consumption needs
-- ✅ **Multi-Factor Decision Engine**: Considers battery level, PV production, consumption, and prices
-- ✅ **Priority-Based Decisions**: Critical, High, Medium, Low priority levels with confidence scores
+### **🟡 PARTIALLY IMPLEMENTED - Smart Charging Strategy**
+- ❌ **PV Overproduction Analysis**: NOT IMPLEMENTED - Avoids grid charging when PV > consumption + 500W
+- ✅ **Price Optimization**: IMPLEMENTED - Waits for 30%+ price savings opportunities
+- ❌ **Consumption Pattern Analysis**: NOT IMPLEMENTED - Predicts future consumption needs
+- 🟡 **Multi-Factor Decision Engine**: PARTIALLY IMPLEMENTED - Basic scoring algorithm exists, missing PV vs consumption logic
+- ❌ **Priority-Based Decisions**: NOT IMPLEMENTED - Critical, High, Medium, Low priority levels with confidence scores
 
 ### **Target State**
 - 🎯 Multi-factor optimization (price + PV + consumption + battery)
@@ -230,7 +232,7 @@ Replaced inefficient monitoring with smart scheduling:
 **Dependencies**: Phase 1 completion + Critical Fix completion
 **Status**: 🚀 **READY TO START** (with validated foundation)
 
-### **Task 2.1: Smart Charging Decision Engine (VALIDATED FOUNDATION)**
+### **Task 2.1: Smart Charging Decision Engine (PARTIALLY IMPLEMENTED)**
 - [x] **2.1.1**: Implement price-based charging logic ✅ **COMPLETED & VALIDATED**
   - ✅ Set low price threshold (25th percentile of daily prices)
   - ✅ Only charge when prices are below threshold
@@ -238,7 +240,7 @@ Replaced inefficient monitoring with smart scheduling:
   - ✅ **Validation**: 95-98% accuracy vs Gadek.pl, 100% API reliability
   - ✅ **Actual Time**: 4 hours
 
-- [ ] **2.1.2**: Implement PV vs. consumption analysis
+- [ ] **2.1.2**: Implement PV vs. consumption analysis ❌ **NOT IMPLEMENTED**
   - Real-time power balance monitoring
   - Calculate power deficit (consumption - PV)
   - Only charge when deficit exists
@@ -246,34 +248,39 @@ Replaced inefficient monitoring with smart scheduling:
   - **NEW**: Prefer PV charging when energy costs are low, PV generation is good, and house usage is low
   - **NEW**: Weather-aware charging decisions (charge from grid if weather deteriorating)
   - **Estimated Time**: 6-8 hours
+  - **Status**: ❌ **NOT IMPLEMENTED** - Basic scoring algorithm exists but lacks PV vs consumption logic
 
-- [ ] **2.1.3**: Implement battery state management
+- [ ] **2.1.3**: Implement battery state management ❌ **NOT IMPLEMENTED**
   - Critical (0-20%): Charge immediately if price is low
   - Low (20-40%): Charge during low prices
   - Medium (40-70%): Charge during very low prices only
   - High (70-90%): Charge during extremely low prices only
   - **Estimated Time**: 3-4 hours
+  - **Status**: ❌ **NOT IMPLEMENTED** - Basic battery scoring exists but lacks state management logic
 
-- [ ] **2.1.4**: Implement timing-aware price fetching (NEW)
+- [ ] **2.1.4**: Implement timing-aware price fetching ❌ **NOT IMPLEMENTED**
   - Retry window 13:00-14:00 CET/CEST with multiple attempts
   - Check every 10-15 minutes between 13:00-14:00 CET
   - Plan charging for tomorrow based on available prices
   - Fallback to previous day's prices if no new data after 14:00 CET
   - **Estimated Time**: 3-4 hours
+  - **Status**: ❌ **NOT IMPLEMENTED** - Basic price fetching exists but lacks retry logic
 
-### **Task 2.2: Multi-Session Daily Charging (NEW)**
-- [ ] **2.2.1**: Find multiple low-price windows per day
+### **Task 2.2: Multi-Session Daily Charging ❌ **NOT IMPLEMENTED**
+- [ ] **2.2.1**: Find multiple low-price windows per day ❌ **NOT IMPLEMENTED**
   - Early morning (6:00-9:00): Low prices, high consumption, low PV
   - Midday (11:00-15:00): Low prices, moderate consumption, variable PV
   - Afternoon (15:00-18:00): Low prices, high consumption, declining PV
   - Night (22:00-2:00): Lowest prices, low consumption, no PV
   - **Estimated Time**: 6-8 hours
+  - **Status**: ❌ **NOT IMPLEMENTED** - Only single 4-hour window optimization exists
 
-- [ ] **2.2.2**: Implement non-overlapping charging sessions
+- [ ] **2.2.2**: Implement non-overlapping charging sessions ❌ **NOT IMPLEMENTED**
   - Support 15-minute to 4-hour windows
   - Ensure no overlap between charging periods
   - Prioritize by savings per kWh
   - **Estimated Time**: 6-8 hours
+  - **Status**: ❌ **NOT IMPLEMENTED** - Only single session scheduling exists
 
 ### **Task 2.3: G12 Time Zone Awareness (Optional)**
 - [ ] **2.3.1**: Add G12 time zone detection for analysis
@@ -283,13 +290,111 @@ Replaced inefficient monitoring with smart scheduling:
   - **Estimated Time**: 2-3 hours
 
 **Phase 2 Deliverables**:
-- Smart charging decision engine
-- Multi-session daily charging algorithm
-- Battery state management system
-- Timing-aware price fetching system with retry logic
-- **NEW**: Smart PV vs Grid charging source selection
-- **NEW**: House usage forecasting using 7-day historical averages
+- 🟡 **PARTIALLY IMPLEMENTED**: Smart charging decision engine (basic scoring algorithm exists)
+- ❌ **NOT IMPLEMENTED**: Multi-session daily charging algorithm
+- ❌ **NOT IMPLEMENTED**: Battery state management system
+- ❌ **NOT IMPLEMENTED**: Timing-aware price fetching system with retry logic
+- ❌ **NOT IMPLEMENTED**: Smart PV vs Grid charging source selection
+- ❌ **NOT IMPLEMENTED**: House usage forecasting using 7-day historical averages
 - **Total Estimated Time**: 35-50 hours
+- **Actual Progress**: ~15% complete (only Task 2.1.1 implemented)
+
+---
+
+## 📊 **ACTUAL IMPLEMENTATION STATUS (Updated Analysis)**
+
+### **✅ FULLY IMPLEMENTED FEATURES**
+
+#### **Phase 1: Enhanced Data Collection & Monitoring - 100% COMPLETE**
+- ✅ **Master Coordinator Architecture**: Full orchestration system implemented
+- ✅ **Enhanced Data Collection**: Comprehensive monitoring of PV, grid, battery, consumption
+- ✅ **Real-time Monitoring**: 60-second data collection intervals
+- ✅ **Data Storage**: JSON-based data persistence system
+- ✅ **System Health Monitoring**: Battery SoC, temperature, charging status tracking
+
+#### **Critical Fix: Monitoring Logic - 100% COMPLETE**
+- ✅ **Efficient Scheduled Charging**: Replaced inefficient monitoring with smart scheduling
+- ✅ **API Optimization**: Reduced API calls by 96% (from every 15 min to once per day)
+- ✅ **Smart Monitoring**: Only monitors battery SoC and system health
+- ✅ **Command-line Interface**: Updated with `--schedule-today` and `--schedule-tomorrow`
+
+#### **Polish Electricity Pricing - 100% COMPLETE**
+- ✅ **CSDAC-PLN API Integration**: Correct API endpoint implementation
+- ✅ **SC Component**: 0.0892 PLN/kWh properly integrated
+- ✅ **Price Analysis**: Comprehensive price analysis and optimization
+- ✅ **Charging Windows**: Optimal charging window identification
+- ✅ **Configuration System**: YAML-based configuration management
+
+#### **Additional Features Implemented (Not in Original Plan)**
+- ✅ **Comprehensive Test Suite**: 66 tests covering all components
+- ✅ **Docker Integration**: Full Docker setup with multiple configurations
+- ✅ **Systemd Integration**: Service management and deployment
+- ✅ **Web Log Server**: Remote log access capabilities
+- ✅ **Enhanced CLI**: Multiple command-line interfaces
+
+### **🟡 PARTIALLY IMPLEMENTED FEATURES**
+
+#### **Phase 2: Multi-Factor Decision Engine - ~15% COMPLETE**
+- ✅ **Basic Scoring Algorithm**: MultiFactorDecisionEngine class with scoring system
+- ✅ **Price Scoring**: 0-100 scale with SC component integration
+- ✅ **Battery Scoring**: 0-100 scale based on SoC levels
+- ✅ **PV Scoring**: 0-100 scale based on production levels
+- ✅ **Consumption Scoring**: 0-100 scale based on usage patterns
+- ✅ **Weighted Calculation**: 40% price, 25% battery, 20% PV, 15% consumption
+- ✅ **Action Determination**: start_charging, stop_charging, continue_charging, none
+- ✅ **Confidence Calculation**: Decision confidence scoring
+- ✅ **Reasoning Generation**: Human-readable decision explanations
+
+**Missing Components:**
+- ❌ **PV vs Consumption Analysis**: No logic to avoid charging during PV overproduction
+- ❌ **Smart Charging Source Selection**: No PV vs Grid decision logic
+- ❌ **Battery State Management**: No threshold-based charging strategies
+- ❌ **Timing-aware Price Fetching**: No retry logic for price data
+- ❌ **Multi-session Charging**: Only single 4-hour window optimization
+
+### **❌ NOT IMPLEMENTED FEATURES**
+
+#### **Phase 2 Missing Components**
+- ❌ **Task 2.1.2**: PV vs. consumption analysis
+- ❌ **Task 2.1.3**: Battery state management thresholds
+- ❌ **Task 2.1.4**: Timing-aware price fetching with retry logic
+- ❌ **Task 2.2**: Multi-session daily charging
+- ❌ **Task 2.3**: G12 time zone awareness
+
+#### **Phase 3: Predictive Analytics & Learning - 0% COMPLETE**
+- ❌ **Weather API Integration**: No weather-based PV prediction
+- ❌ **Consumption Pattern Learning**: No historical pattern analysis
+- ❌ **Price Pattern Analysis**: No trend analysis or forecasting
+
+#### **Phase 4-7: Advanced Features - 0% COMPLETE**
+- ❌ **Grid Flow Optimization**: No advanced grid arbitrage
+- ❌ **Energy Trading**: No trading strategies
+- ❌ **User Interface**: No enhanced dashboard
+- ❌ **Mobile Interface**: No mobile-friendly interface
+- ❌ **Performance Optimization**: No advanced optimization
+
+### **🎯 IMMEDIATE NEXT STEPS (Corrected Priority)**
+
+Based on actual implementation status, the priority order should be:
+
+1. **HIGH PRIORITY**: Implement PV vs consumption analysis (Task 2.1.2)
+   - Real-time power balance monitoring
+   - Calculate power deficit (consumption - PV)
+   - Avoid charging during PV overproduction
+
+2. **HIGH PRIORITY**: Implement battery state management (Task 2.1.3)
+   - Critical (0-20%): Charge immediately
+   - Low (20-40%): Charge during low prices
+   - Medium (40-70%): Charge during very low prices only
+   - High (70-90%): Charge during extremely low prices only
+
+3. **MEDIUM PRIORITY**: Implement timing-aware price fetching (Task 2.1.4)
+   - Retry window 13:00-14:00 CET with multiple attempts
+   - Fallback to previous day's prices
+
+4. **MEDIUM PRIORITY**: Implement multi-session charging (Task 2.2)
+   - Multiple low-price windows per day
+   - Non-overlapping charging sessions
 
 ---
 
@@ -500,20 +605,21 @@ Replaced inefficient monitoring with smart scheduling:
 ## 📊 **Project Summary**
 
 ### **Total Estimated Time**: 220-300 hours
-### **Total Actual Time So Far**: 28 hours ✅ **INCLUDING TODAY'S WORK**
+### **Total Actual Time So Far**: 35 hours ✅ **INCLUDING TEST FIXES**
 ### **Project Duration**: 12-18 weeks (3-4.5 months)
-### **Current Status**: Phase 1 COMPLETED (Week 1) ✅
+### **Current Status**: Phase 1 COMPLETED ✅, Phase 2 PARTIALLY COMPLETED 🟡
 ### **Team Size**: 1 developer (you)
-### **Progress**: 12% complete (28/220 hours) 🚀 **ACCELERATED**
+### **Progress**: 18% complete (35/220 hours) 🚀 **ACCELERATED**
+### **Actual Implementation**: Phase 1 (100%), Phase 2 (15%), Phase 3+ (0%)
 
 ### **Critical Path**:
 1. **Phase 1**: Enhanced Data Collection (1-2 weeks) ✅ **COMPLETED**
-2. **Phase 2**: Multi-Factor Decision Engine (2-3 weeks) 🚀 **READY TO START**
-3. **Phase 3**: Predictive Analytics (2-3 weeks)
-4. **Phase 4**: Smart Grid Integration (1-2 weeks)
-5. **Phase 5**: User Interface (1-2 weeks)
-6. **Phase 6**: Testing & Optimization (1-2 weeks)
-7. **Phase 7**: Documentation & Deployment (1 week)
+2. **Phase 2**: Multi-Factor Decision Engine (2-3 weeks) 🟡 **15% COMPLETE**
+3. **Phase 3**: Predictive Analytics (2-3 weeks) ❌ **NOT STARTED**
+4. **Phase 4**: Smart Grid Integration (1-2 weeks) ❌ **NOT STARTED**
+5. **Phase 5**: User Interface (1-2 weeks) ❌ **NOT STARTED**
+6. **Phase 6**: Testing & Optimization (1-2 weeks) ✅ **COMPLETED** (66 tests)
+7. **Phase 7**: Documentation & Deployment (1 week) ❌ **NOT STARTED**
 
 ### **Risk Factors (UPDATED WITH NEW INSIGHTS)**:
 - **✅ ELIMINATED**: API reliability concerns (100% uptime confirmed)
@@ -551,26 +657,26 @@ Replaced inefficient monitoring with smart scheduling:
 3. **✅ Timing Strategy**: Robust retry mechanism implemented
 4. **✅ Real-World Test**: Successfully identified optimal charging for cloudy day
 
-### **🚀 READY TO START: Phase 2 - Multi-Factor Decision Engine (UPDATED PRIORITIES)**
+### **🚀 READY TO START: Phase 2 - Multi-Factor Decision Engine (CORRECTED PRIORITIES)**
 1. **✅ Task 2.1.1 COMPLETED**: Price-based charging logic validated and working
-2. **🎯 NEXT PRIORITY**: Task 2.1.2 - PV vs. consumption analysis with smart charging source selection (high impact)
-3. **🎯 THEN**: Task 1.2.3 - House usage forecasting using 7-day historical averages (medium impact)
-4. **🎯 THEN**: Task 2.1.3 - Battery state management (critical for optimization)
-5. **🎯 FINALLY**: Task 2.1.4 - Multi-session charging (multiple low-price windows)
+2. **🎯 NEXT PRIORITY**: Task 2.1.2 - PV vs. consumption analysis (HIGH IMPACT - NOT IMPLEMENTED)
+3. **🎯 THEN**: Task 2.1.3 - Battery state management (HIGH IMPACT - NOT IMPLEMENTED)
+4. **🎯 THEN**: Task 2.1.4 - Timing-aware price fetching (MEDIUM IMPACT - NOT IMPLEMENTED)
+5. **🎯 FINALLY**: Task 2.2 - Multi-session charging (MEDIUM IMPACT - NOT IMPLEMENTED)
 
 ### **📊 Updated Priority Justification:**
 - **Price Logic**: ✅ **COMPLETED** - Validated with 95-98% accuracy
-- **PV vs Grid Decision**: 🎯 **HIGH PRIORITY** - Essential for smart charging source selection
-- **House Usage Forecasting**: 🎯 **MEDIUM PRIORITY** - 7-day historical averages for better predictions
-- **Battery Management**: 🎯 **HIGH PRIORITY** - Critical for system efficiency
-- **Multi-Session**: 🎯 **MEDIUM PRIORITY** - Enhancement after core logic
+- **PV vs Consumption Analysis**: 🎯 **HIGH PRIORITY** - NOT IMPLEMENTED - Essential for avoiding charging during PV overproduction
+- **Battery State Management**: 🎯 **HIGH PRIORITY** - NOT IMPLEMENTED - Critical for system efficiency
+- **Timing-aware Price Fetching**: 🎯 **MEDIUM PRIORITY** - NOT IMPLEMENTED - Robust retry logic needed
+- **Multi-Session Charging**: 🎯 **MEDIUM PRIORITY** - NOT IMPLEMENTED - Enhancement after core logic
 
-### **📋 Phase 2 Implementation Plan (UPDATED - This Week)**
+### **📋 Phase 2 Implementation Plan (CORRECTED - Next Week)**
 1. **✅ Day 1**: Price-based charging logic - **COMPLETED & VALIDATED**
-2. **🎯 Day 2-3**: PV vs. consumption analysis with smart charging source selection - **NEXT PRIORITY**
-3. **🎯 Day 4**: House usage forecasting using 7-day historical averages - **MEDIUM PRIORITY**
-4. **🎯 Day 5-6**: Battery state management - **HIGH PRIORITY**
-5. **🎯 Day 7**: Multi-session charging - **ENHANCEMENT**
+2. **🎯 Day 2-3**: PV vs. consumption analysis - **HIGH PRIORITY (NOT IMPLEMENTED)**
+3. **🎯 Day 4-5**: Battery state management - **HIGH PRIORITY (NOT IMPLEMENTED)**
+4. **🎯 Day 6**: Timing-aware price fetching - **MEDIUM PRIORITY (NOT IMPLEMENTED)**
+5. **🎯 Day 7**: Multi-session charging - **MEDIUM PRIORITY (NOT IMPLEMENTED)**
 
 ### **⏰ Phase 2 Timing Considerations (NEW)**
 - **13:00-14:00 CET Retry Window**: Multiple attempts to fetch new D+1 CSDAC prices
@@ -836,6 +942,29 @@ def forecast_house_usage(self, target_hour: int, target_day_type: str) -> float:
 
 ---
 
-**Ready to start building your intelligent energy management system?** 
+## 🚨 **CRITICAL PROJECT PLAN CORRECTIONS**
 
-Begin with Phase 2, Task 2.1.1 - implementing the price-based charging logic. This will give you the foundation for the multi-factor decision engine! 🚀⚡🔋
+### **Major Discrepancies Identified and Corrected:**
+
+1. **❌ FALSE CLAIMS CORRECTED**: Project plan claimed many Phase 2 features were "COMPLETED" when they were not implemented
+2. **✅ ACCURATE STATUS**: Updated all task statuses to reflect actual implementation
+3. **📊 REALISTIC PROGRESS**: Corrected progress from misleading "Phase 2 ready to start" to actual "Phase 2 15% complete"
+4. **🎯 CORRECTED PRIORITIES**: Updated immediate next steps to focus on unimplemented high-priority features
+
+### **What Was Actually Implemented:**
+- ✅ **Phase 1**: 100% complete (data collection, monitoring, pricing)
+- ✅ **Critical Fix**: 100% complete (efficient scheduling)
+- 🟡 **Phase 2**: 15% complete (basic scoring algorithm only)
+- ❌ **Phase 3+**: 0% complete (not started)
+
+### **What Needs Immediate Attention:**
+1. **PV vs Consumption Analysis** (Task 2.1.2) - NOT IMPLEMENTED
+2. **Battery State Management** (Task 2.1.3) - NOT IMPLEMENTED  
+3. **Timing-aware Price Fetching** (Task 2.1.4) - NOT IMPLEMENTED
+4. **Multi-session Charging** (Task 2.2) - NOT IMPLEMENTED
+
+---
+
+**Ready to continue building your intelligent energy management system?** 
+
+Begin with Phase 2, Task 2.1.2 - implementing PV vs consumption analysis. This is the highest priority missing component! 🚀⚡🔋
