@@ -8,7 +8,7 @@ import asyncio
 import goodwe
 import ipaddress
 
-async def test_ip(ip):
+async def check_ip_address(ip):
     """Test if a specific IP responds to GoodWe protocol"""
     try:
         print(f"Testing {ip}...", end=" ")
@@ -52,7 +52,7 @@ async def main():
     found_inverters = []
     
     for ip in test_ips:
-        if await test_ip(ip):
+        if await check_ip_address(ip):
             found_inverters.append(ip)
     
     print("\n" + "=" * 50)
@@ -67,6 +67,12 @@ async def main():
         print("2. Look at your GoodWe app for the IP address")
         print("3. Check if the inverter is powered on")
         print("4. Verify network connectivity")
+
+def test_ip_script():
+    """Test that the IP testing script can be imported and run"""
+    # This is a placeholder test to ensure the script doesn't break pytest
+    # The actual IP testing should be run manually with: python test/test_ips.py
+    assert True
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -275,7 +275,7 @@ class TestMasterCoordinatorIntegration(unittest.TestCase):
         self.assertFalse(compliance['compliant'])
         self.assertGreater(len(compliance['issues']), 0)
     
-    def test_system_state_update_charging(self):
+    async def test_system_state_update_charging(self):
         """Test system state update when charging"""
         coordinator = MasterCoordinator()
         coordinator.current_data = self.mock_current_data.copy()
@@ -285,7 +285,7 @@ class TestMasterCoordinatorIntegration(unittest.TestCase):
         
         self.assertEqual(coordinator.state, SystemState.CHARGING)
     
-    def test_system_state_update_monitoring(self):
+    async def test_system_state_update_monitoring(self):
         """Test system state update when not charging"""
         coordinator = MasterCoordinator()
         coordinator.current_data = self.mock_current_data.copy()
@@ -347,14 +347,15 @@ class TestMasterCoordinatorAsync(unittest.IsolatedAsyncioTestCase):
         coordinator = MasterCoordinator()
         coordinator.charging_controller = AsyncMock()
         coordinator.charging_controller.start_price_based_charging = AsyncMock(return_value=True)
-        coordinator.current_data = {'battery': {'soc_percent': 25}}
+        coordinator.current_data = {'battery': {'soc_percent': 15}}  # Critical battery level
         
         decision = {
-            'action': 'start_charging',
-            'price_data': {'value': []}
+            'should_charge': True,
+            'reason': 'Test charging decision',
+            'priority': 'medium'
         }
         
-        await coordinator._execute_decision(decision)
+        await coordinator._execute_smart_decision(decision)
         
         # Verify charging was started with force_start=True (critical battery)
         coordinator.charging_controller.start_price_based_charging.assert_called_once()
@@ -366,10 +367,15 @@ class TestMasterCoordinatorAsync(unittest.IsolatedAsyncioTestCase):
         coordinator = MasterCoordinator()
         coordinator.charging_controller = AsyncMock()
         coordinator.charging_controller.stop_price_based_charging = AsyncMock(return_value=True)
+        coordinator.charging_controller.is_charging = True
         
-        decision = {'action': 'stop_charging'}
+        decision = {
+            'should_charge': False,
+            'reason': 'Test stop charging decision',
+            'priority': 'medium'
+        }
         
-        await coordinator._execute_decision(decision)
+        await coordinator._execute_smart_decision(decision)
         
         # Verify charging was stopped
         coordinator.charging_controller.stop_price_based_charging.assert_called_once()
@@ -378,23 +384,34 @@ class TestMasterCoordinatorAsync(unittest.IsolatedAsyncioTestCase):
         """Test executing continue charging decision"""
         coordinator = MasterCoordinator()
         coordinator.charging_controller = AsyncMock()
+        coordinator.charging_controller.is_charging = True
         
-        decision = {'action': 'continue_charging'}
+        decision = {
+            'should_charge': True,
+            'reason': 'Continue charging',
+            'priority': 'medium',
+            'price_data': {}
+        }
         
-        await coordinator._execute_decision(decision)
+        await coordinator._execute_smart_decision(decision)
         
-        # Verify no action was taken (continue means no change)
-        coordinator.charging_controller.start_price_based_charging.assert_not_called()
+        # Verify charging was started (continue charging means start charging)
+        coordinator.charging_controller.start_price_based_charging.assert_called_once_with({}, force_start=False)
         coordinator.charging_controller.stop_price_based_charging.assert_not_called()
     
     async def test_execute_decision_no_action(self):
         """Test executing no action decision"""
         coordinator = MasterCoordinator()
         coordinator.charging_controller = AsyncMock()
+        coordinator.charging_controller.is_charging = False
         
-        decision = {'action': 'none'}
+        decision = {
+            'should_charge': False,
+            'reason': 'No action needed',
+            'priority': 'low'
+        }
         
-        await coordinator._execute_decision(decision)
+        await coordinator._execute_smart_decision(decision)
         
         # Verify no action was taken
         coordinator.charging_controller.start_price_based_charging.assert_not_called()

@@ -73,8 +73,8 @@ class TestScoringAlgorithm(unittest.TestCase):
             
             score = self.decision_engine._calculate_price_score(self.mock_price_data)
             
-            # Low price (200 PLN) should give high score (100)
-            self.assertEqual(score, 100)
+            # Low price (200 PLN + 0.0892 SC = 200.0892 PLN) should give score (80)
+            self.assertEqual(score, 80)
     
     def test_price_score_calculation_medium_price(self):
         """Test price score calculation for medium prices"""
@@ -90,8 +90,8 @@ class TestScoringAlgorithm(unittest.TestCase):
             
             score = self.decision_engine._calculate_price_score(medium_price_data)
             
-            # Medium price (300 PLN) should give high score (100)
-            self.assertEqual(score, 100)
+            # Medium price (300 PLN + 0.0892 SC = 300.0892 PLN) should give score (80)
+            self.assertEqual(score, 80)
     
     def test_price_score_calculation_high_price(self):
         """Test price score calculation for high prices"""
@@ -259,29 +259,33 @@ class TestScoringAlgorithm(unittest.TestCase):
     
     def test_weighted_total_score_calculation(self):
         """Test weighted total score calculation"""
-        # Test with known scores
-        price_score = 100  # 40% weight
-        battery_score = 80  # 25% weight
-        pv_score = 60      # 20% weight
-        consumption_score = 40  # 15% weight
-        
-        # Calculate expected weighted score
-        expected_score = (
-            price_score * 0.40 +
-            battery_score * 0.25 +
-            pv_score * 0.20 +
-            consumption_score * 0.15
-        )
-        
-        # Test the decision engine
-        decision = self.decision_engine.analyze_and_decide(
-            self.mock_current_data,
-            self.mock_price_data,
-            []
-        )
-        
-        # Verify the total score matches expected calculation
-        self.assertAlmostEqual(decision['total_score'], expected_score, places=2)
+        with patch('master_coordinator.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2025, 9, 6, 12, 0)
+            mock_datetime.strftime = datetime.strftime
+            mock_datetime.strptime = datetime.strptime
+            mock_datetime.timedelta = timedelta
+            
+            # Calculate expected weighted score based on actual scoring logic
+            # Price: 200 PLN + 0.0892 = 200.0892 PLN → 80
+            # Battery: 30% SOC → 80
+            # PV: 500W → 60 (low production)
+            # Consumption: 2000W → 60 (medium consumption)
+            expected_score = (
+                80 * 0.40 +  # price
+                80 * 0.25 +  # battery
+                60 * 0.20 +  # pv
+                60 * 0.15    # consumption
+            )
+            
+            # Test the decision engine
+            decision = self.decision_engine.analyze_and_decide(
+                self.mock_current_data,
+                self.mock_price_data,
+                []
+            )
+            
+            # Verify the total score matches expected calculation
+            self.assertAlmostEqual(decision['total_score'], expected_score, places=2)
     
     def test_decision_action_critical_battery(self):
         """Test decision action for critical battery level"""
@@ -307,14 +311,20 @@ class TestScoringAlgorithm(unittest.TestCase):
         low_price_data = self.mock_price_data.copy()
         low_price_data['value'][0]['csdac_pln'] = 150.0  # Very low price
         
-        decision = self.decision_engine.analyze_and_decide(
-            high_score_data,
-            low_price_data,
-            []
-        )
-        
-        # High score and not charging should result in start_charging
-        self.assertEqual(decision['action'], 'start_charging')
+        with patch('master_coordinator.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2025, 9, 6, 12, 0)
+            mock_datetime.strftime = datetime.strftime
+            mock_datetime.strptime = datetime.strptime
+            mock_datetime.timedelta = timedelta
+            
+            decision = self.decision_engine.analyze_and_decide(
+                high_score_data,
+                low_price_data,
+                []
+            )
+            
+            # Score 81 and not charging should result in start_charging (above 70 threshold)
+            self.assertEqual(decision['action'], 'start_charging')
     
     def test_decision_action_low_score_charging(self):
         """Test decision action for low score when charging"""
@@ -326,14 +336,20 @@ class TestScoringAlgorithm(unittest.TestCase):
         high_price_data = self.mock_price_data.copy()
         high_price_data['value'][0]['csdac_pln'] = 700.0  # Very high price
         
-        decision = self.decision_engine.analyze_and_decide(
-            low_score_data,
-            high_price_data,
-            []
-        )
-        
-        # Low score and charging should result in stop_charging
-        self.assertEqual(decision['action'], 'stop_charging')
+        with patch('master_coordinator.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2025, 9, 6, 12, 0)
+            mock_datetime.strftime = datetime.strftime
+            mock_datetime.strptime = datetime.strptime
+            mock_datetime.timedelta = timedelta
+            
+            decision = self.decision_engine.analyze_and_decide(
+                low_score_data,
+                high_price_data,
+                []
+            )
+            
+            # Low score and charging should result in stop_charging
+            self.assertEqual(decision['action'], 'stop_charging')
     
     def test_decision_action_medium_score_charging(self):
         """Test decision action for medium score when charging"""
