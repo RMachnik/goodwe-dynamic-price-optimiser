@@ -203,7 +203,7 @@ class TestTimingAwareness(unittest.TestCase):
             mock_datetime.strptime = datetime.strptime
             mock_datetime.timedelta = timedelta
             
-            # Mock PV forecasts showing sufficient PV timing
+            # Mock PV forecasts showing sufficient but stable PV timing (no increasing trend)
             mock_pv_forecasts = [
                 {
                     'timestamp': '2025-09-07T11:00:00',
@@ -218,15 +218,15 @@ class TestTimingAwareness(unittest.TestCase):
                     'timestamp': '2025-09-07T12:00:00',
                     'hour': 12,
                     'hour_offset': 1,
-                    'forecasted_power_kw': 6.0,  # High PV
-                    'forecasted_power_w': 6000,
+                    'forecasted_power_kw': 5.0,  # Same PV (no increasing trend)
+                    'forecasted_power_w': 5000,
                     'confidence': 0.7,
                     'method': 'historical_pattern'
                 }
             ]
             
             with patch.object(self.decision_engine.pv_forecaster, 'forecast_pv_production', return_value=mock_pv_forecasts):
-                with patch.object(self.decision_engine.price_analyzer, 'analyze_timing_vs_price') as mock_analyze:
+                with patch.object(self.decision_engine.hybrid_logic.price_analyzer, 'analyze_timing_vs_price') as mock_analyze:
                     mock_analyze.return_value = {
                         'recommendation': 'pv_charging',
                         'reason': 'PV can complete charging in 1.0h during low price window',

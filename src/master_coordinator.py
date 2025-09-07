@@ -758,7 +758,8 @@ class MultiFactorDecisionEngine:
         }
         
         # PV vs consumption analysis
-        self.pv_consumption_analyzer = None
+        from pv_consumption_analyzer import PVConsumptionAnalyzer
+        self.pv_consumption_analyzer = PVConsumptionAnalyzer(config)
         
         # PV trend analysis for weather-aware decisions
         self.pv_trend_analyzer = PVTrendAnalyzer(config)
@@ -953,7 +954,8 @@ class MultiFactorDecisionEngine:
                 return 'none'  # Wait for better PV conditions
             else:
                 logger.info(f"Weather-aware decision: Charging now - {timing_recommendation.wait_reason}")
-                return self._convert_charging_action(original_action)
+                # If timing recommendation says don't wait, force charging regardless of hybrid logic
+                return 'start_charging'
                 
         except Exception as e:
             logger.error(f"Error applying weather-aware timing: {e}")
