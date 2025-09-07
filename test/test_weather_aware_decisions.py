@@ -5,7 +5,7 @@ Verifies that the system correctly uses weather forecasts and PV trends to make 
 """
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, Mock
 from datetime import datetime, timedelta
 import sys
 import os
@@ -51,6 +51,33 @@ class TestWeatherAwareDecisions(unittest.TestCase):
         from pv_consumption_analyzer import PVConsumptionAnalyzer
         self.decision_engine.pv_consumption_analyzer = PVConsumptionAnalyzer(self.config)
         
+        # Set up mock weather collector for PV forecaster
+        mock_weather_collector = Mock()
+        # Mock the get_solar_irradiance_forecast method to return test data
+        mock_weather_collector.get_solar_irradiance_forecast.return_value = [
+            {
+                'timestamp': '2025-09-07T12:00:00',
+                'ghi': 800,  # High solar irradiance
+                'dni': 900,
+                'dhi': 100,
+                'cloud_cover_total': 20,  # Low cloud cover
+                'cloud_cover_low': 10,
+                'cloud_cover_mid': 5,
+                'cloud_cover_high': 5
+            },
+            {
+                'timestamp': '2025-09-07T13:00:00',
+                'ghi': 900,  # Even higher solar irradiance
+                'dni': 1000,
+                'dhi': 100,
+                'cloud_cover_total': 10,  # Very low cloud cover
+                'cloud_cover_low': 5,
+                'cloud_cover_mid': 3,
+                'cloud_cover_high': 2
+            }
+        ]
+        self.decision_engine.pv_forecaster.set_weather_collector(mock_weather_collector)
+        
         # Mock price data with current time
         current_time = datetime.now()
         current_hour = current_time.hour
@@ -60,7 +87,52 @@ class TestWeatherAwareDecisions(unittest.TestCase):
             'value': [
                 {
                     'dtime': f'2025-09-07 {current_hour:02d}:{current_minute:02d}',
-                    'csdac_pln': 300.0,  # Medium price
+                    'csdac_pln': 1100.0,  # Price above 10th percentile (1089.2)
+                    'business_date': '2025-09-07'
+                },
+                {
+                    'dtime': f'2025-09-07 {(current_hour + 1) % 24:02d}:{current_minute:02d}',
+                    'csdac_pln': 800.0,  # Even higher price
+                    'business_date': '2025-09-07'
+                },
+                {
+                    'dtime': f'2025-09-07 {(current_hour + 2) % 24:02d}:{current_minute:02d}',
+                    'csdac_pln': 1000.0,  # Very high price
+                    'business_date': '2025-09-07'
+                },
+                {
+                    'dtime': f'2025-09-07 {(current_hour + 3) % 24:02d}:{current_minute:02d}',
+                    'csdac_pln': 1200.0,  # Extremely high price
+                    'business_date': '2025-09-07'
+                },
+                {
+                    'dtime': f'2025-09-07 {(current_hour + 4) % 24:02d}:{current_minute:02d}',
+                    'csdac_pln': 1400.0,  # Even higher
+                    'business_date': '2025-09-07'
+                },
+                {
+                    'dtime': f'2025-09-07 {(current_hour + 5) % 24:02d}:{current_minute:02d}',
+                    'csdac_pln': 1600.0,  # Even higher
+                    'business_date': '2025-09-07'
+                },
+                {
+                    'dtime': f'2025-09-07 {(current_hour + 6) % 24:02d}:{current_minute:02d}',
+                    'csdac_pln': 1800.0,  # Even higher
+                    'business_date': '2025-09-07'
+                },
+                {
+                    'dtime': f'2025-09-07 {(current_hour + 7) % 24:02d}:{current_minute:02d}',
+                    'csdac_pln': 2000.0,  # Even higher
+                    'business_date': '2025-09-07'
+                },
+                {
+                    'dtime': f'2025-09-07 {(current_hour + 8) % 24:02d}:{current_minute:02d}',
+                    'csdac_pln': 2200.0,  # Even higher
+                    'business_date': '2025-09-07'
+                },
+                {
+                    'dtime': f'2025-09-07 {(current_hour + 9) % 24:02d}:{current_minute:02d}',
+                    'csdac_pln': 2400.0,  # Even higher
                     'business_date': '2025-09-07'
                 }
             ]
@@ -272,7 +344,7 @@ class TestWeatherAwareDecisions(unittest.TestCase):
         }
         
         # Mock PV forecast without weather data
-        with patch.object(self.decision_engine.pv_forecaster, 'forecast_pv_production') as mock_forecast:
+        with patch.object(self.decision_engine.pv_forecaster, 'forecast_pv_production_with_weather') as mock_forecast:
             mock_forecast.return_value = [
                 {'forecasted_power_kw': 2.0, 'confidence': 0.6, 'timestamp': '2025-09-07T12:00:00'},
                 {'forecasted_power_kw': 2.2, 'confidence': 0.6, 'timestamp': '2025-09-07T12:15:00'},

@@ -21,7 +21,6 @@ from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock
 import sys
 import os
-import pytest
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -29,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from master_coordinator import MasterCoordinator, SystemState
 from enhanced_data_collector import EnhancedDataCollector
 from automated_price_charging import AutomatedPriceCharger
+from polish_electricity_analyzer import PolishElectricityAnalyzer
 from weather_data_collector import WeatherDataCollector
 from pv_consumption_analyzer import PVConsumptionAnalyzer
 from multi_session_manager import MultiSessionManager
@@ -116,7 +116,6 @@ class TestEndToEndIntegration(unittest.TestCase):
     @patch('enhanced_data_collector.goodwe')
     @patch('automated_price_charging.requests')
     @patch('weather_data_collector.aiohttp')
-    @pytest.mark.asyncio
     async def test_complete_system_initialization(self, mock_aiohttp, mock_requests, mock_goodwe):
         """Test complete system initialization flow"""
         # Mock GoodWe inverter
@@ -156,7 +155,6 @@ class TestEndToEndIntegration(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @patch('automated_price_charging.requests')
-    @pytest.mark.asyncio
     async def test_data_collection_to_decision_flow(self, mock_requests, mock_goodwe):
         """Test complete data collection to decision making flow"""
         # Mock GoodWe inverter
@@ -194,7 +192,6 @@ class TestEndToEndIntegration(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @patch('automated_price_charging.requests')
-    @pytest.mark.asyncio
     async def test_decision_execution_flow(self, mock_requests, mock_goodwe):
         """Test decision execution and monitoring flow"""
         # Mock GoodWe inverter
@@ -232,7 +229,6 @@ class TestEndToEndIntegration(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @patch('automated_price_charging.requests')
-    @pytest.mark.asyncio
     async def test_error_handling_and_recovery(self, mock_requests, mock_goodwe):
         """Test error handling and recovery mechanisms"""
         # Mock GoodWe inverter with connection failure
@@ -269,7 +265,6 @@ class TestEndToEndIntegration(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @patch('automated_price_charging.requests')
-    @pytest.mark.asyncio
     async def test_system_performance_under_load(self, mock_requests, mock_goodwe):
         """Test system performance under various load conditions"""
         # Mock GoodWe inverter
@@ -314,7 +309,6 @@ class TestEndToEndIntegration(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @patch('automated_price_charging.requests')
-    @pytest.mark.asyncio
     async def test_multi_session_coordination(self, mock_requests, mock_goodwe):
         """Test multi-session charging coordination"""
         # Mock GoodWe inverter
@@ -354,7 +348,6 @@ class TestEndToEndIntegration(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @patch('automated_price_charging.requests')
-    @pytest.mark.asyncio
     async def test_weather_integration_flow(self, mock_requests, mock_goodwe):
         """Test weather data integration in decision making"""
         # Mock GoodWe inverter
@@ -406,7 +399,6 @@ class TestEndToEndIntegration(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @patch('automated_price_charging.requests')
-    @pytest.mark.asyncio
     async def test_data_persistence_and_recovery(self, mock_requests, mock_goodwe):
         """Test data persistence and recovery mechanisms"""
         # Mock GoodWe inverter

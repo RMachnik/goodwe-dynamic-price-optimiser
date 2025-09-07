@@ -21,7 +21,6 @@ from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock
 import sys
 import os
-import pytest
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -115,8 +114,6 @@ class TestEnhancedDataCollector(unittest.TestCase):
             return yaml.safe_load(f)
     
     @patch('enhanced_data_collector.goodwe')
-    @pytest.mark.asyncio
-    @pytest.mark.asyncio
     async def test_data_collector_initialization(self, mock_goodwe):
         """Test data collector initialization"""
         # Mock GoodWe inverter
@@ -134,7 +131,6 @@ class TestEnhancedDataCollector(unittest.TestCase):
                         "Configuration should be loaded correctly")
     
     @patch('enhanced_data_collector.goodwe')
-    @pytest.mark.asyncio
     async def test_data_collection_success(self, mock_goodwe):
         """Test successful data collection"""
         # Mock GoodWe inverter
@@ -164,7 +160,6 @@ class TestEnhancedDataCollector(unittest.TestCase):
         self.assertEqual(data['consumption']['power'], 2000.0, "Consumption power should match")
     
     @patch('enhanced_data_collector.goodwe')
-    @pytest.mark.asyncio
     async def test_data_validation(self, mock_goodwe):
         """Test data validation and processing"""
         # Mock GoodWe inverter with invalid data
@@ -195,7 +190,6 @@ class TestEnhancedDataCollector(unittest.TestCase):
             self.assertGreater(len(data['validation_errors']), 0, "Should detect validation errors")
     
     @patch('enhanced_data_collector.goodwe')
-    @pytest.mark.asyncio
     async def test_data_storage(self, mock_goodwe):
         """Test data storage functionality"""
         # Mock GoodWe inverter
@@ -224,7 +218,6 @@ class TestEnhancedDataCollector(unittest.TestCase):
         self.assertEqual(saved_data['battery']['soc_percent'], 45.0, "Saved data should match collected data")
     
     @patch('enhanced_data_collector.goodwe')
-    @pytest.mark.asyncio
     async def test_historical_data_retrieval(self, mock_goodwe):
         """Test historical data retrieval"""
         # Mock GoodWe inverter
@@ -253,7 +246,6 @@ class TestEnhancedDataCollector(unittest.TestCase):
         self.assertEqual(timestamps, sorted(timestamps, reverse=True), "Data should be sorted by timestamp")
     
     @patch('enhanced_data_collector.goodwe')
-    @pytest.mark.asyncio
     async def test_error_handling_connection_failure(self, mock_goodwe):
         """Test error handling for connection failures"""
         # Mock connection failure
@@ -267,7 +259,6 @@ class TestEnhancedDataCollector(unittest.TestCase):
         self.assertIsNone(collector.inverter, "Inverter should not be connected")
     
     @patch('enhanced_data_collector.goodwe')
-    @pytest.mark.asyncio
     async def test_error_handling_data_collection_failure(self, mock_goodwe):
         """Test error handling for data collection failures"""
         # Mock GoodWe inverter with data collection failure
@@ -286,7 +277,6 @@ class TestEnhancedDataCollector(unittest.TestCase):
         self.assertIn('error', data, "Should include error information")
     
     @patch('enhanced_data_collector.goodwe')
-    @pytest.mark.asyncio
     async def test_data_collection_performance(self, mock_goodwe):
         """Test data collection performance"""
         # Mock GoodWe inverter
@@ -321,7 +311,6 @@ class TestEnhancedDataCollector(unittest.TestCase):
         self.assertLess(avg_collection_time, 1.0, "Average collection time should be less than 1 second")
     
     @patch('enhanced_data_collector.goodwe')
-    @pytest.mark.asyncio
     async def test_data_aggregation(self, mock_goodwe):
         """Test data aggregation and statistics"""
         # Mock GoodWe inverter
@@ -356,7 +345,6 @@ class TestEnhancedDataCollector(unittest.TestCase):
             self.assertIn('max_soc', aggregated_data['battery'], "Should include maximum SOC")
     
     @patch('enhanced_data_collector.goodwe')
-    @pytest.mark.asyncio
     async def test_data_export_functionality(self, mock_goodwe):
         """Test data export functionality"""
         # Mock GoodWe inverter
@@ -388,7 +376,6 @@ class TestEnhancedDataCollector(unittest.TestCase):
             self.assertIn('battery_soc_percent', content, "Export should contain battery data")
     
     @patch('enhanced_data_collector.goodwe')
-    @pytest.mark.asyncio
     async def test_data_cleanup_and_retention(self, mock_goodwe):
         """Test data cleanup and retention policies"""
         # Mock GoodWe inverter
@@ -446,7 +433,6 @@ class TestEnhancedDataCollector(unittest.TestCase):
         self.assertIsNotNone(collector, "Should create collector even with invalid config")
     
     @patch('enhanced_data_collector.goodwe')
-    @pytest.mark.asyncio
     async def test_concurrent_data_collection(self, mock_goodwe):
         """Test concurrent data collection"""
         # Mock GoodWe inverter
