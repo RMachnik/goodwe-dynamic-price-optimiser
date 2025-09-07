@@ -9,8 +9,8 @@ StartLimitIntervalSec=0
 Type=simple
 User=rmachnik
 Group=rmachnik
-WorkingDirectory=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/src
-ExecStart=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/venv/bin/python /home/rmachnik/sources/goodwe-dynamic-price-optimiser/src/master_coordinator.py --non-interactive
+WorkingDirectory=/home/rmachnik/sources/goodwe-dynamic-price-optimiser
+ExecStart=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/run_master_coordinator.sh
 ExecStop=/bin/kill -TERM $MAINPID
 Restart=always
 RestartSec=30
@@ -19,9 +19,10 @@ StandardError=journal
 SyslogIdentifier=goodwe-master-coordinator
 
 # Environment variables
-Environment=PYTHONPATH=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/src
+Environment=PYTHONPATH=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/src:/home/rmachnik/sources/goodwe-dynamic-price-optimiser/venv/lib/python3.12/site-packages
 Environment=PYTHONUNBUFFERED=1
 Environment=HOME=/home/rmachnik
+Environment=USER=rmachnik
 
 # Security settings
 NoNewPrivileges=true
