@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from automated_price_charging import AutomatedPriceCharger
+from polish_electricity_analyzer import PolishElectricityAnalyzer, ChargingWindow
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ class MultiSessionManager:
         self.data_dir.mkdir(exist_ok=True)
         
         # Initialize price analyzer
-        self.price_analyzer = AutomatedPriceCharger()
+        self.price_analyzer = PolishElectricityAnalyzer()
         
         logger.info(f"Multi-session manager initialized: enabled={self.enabled}, max_sessions={self.max_sessions_per_day}")
     
@@ -98,9 +98,9 @@ class MultiSessionManager:
                 return None
             
             # Find optimal charging windows
-            charging_windows = self.price_analyzer.analyze_charging_windows(
-                price_data=price_data,
-                target_hours=self.max_session_duration_hours
+            charging_windows = self.price_analyzer.get_daily_charging_schedule(
+                target_charge_hours=self.max_session_duration_hours,
+                max_windows=self.max_sessions_per_day
             )
             
             if not charging_windows:
@@ -284,8 +284,9 @@ class MultiSessionManager:
     async def _fetch_price_data_for_date(self, date: datetime) -> Optional[Dict]:
         """Fetch price data for a specific date"""
         try:
-            # Use AutomatedPriceCharger for consistent price data fetching
-            price_data = self.price_analyzer.fetch_price_data_for_date(date.strftime('%Y-%m-%d'))
+            # This would integrate with the existing price fetching logic
+            # For now, we'll use the price analyzer's existing method
+            price_data = await self.price_analyzer.fetch_price_data()
             return price_data
         except Exception as e:
             logger.error(f"Failed to fetch price data for {date}: {e}")
@@ -297,17 +298,17 @@ class MultiSessionManager:
         charging_power_kw = 3.0
         return duration_hours * charging_power_kw
     
-    def _calculate_session_cost(self, window: Dict) -> float:
+    def _calculate_session_cost(self, window: ChargingWindow) -> float:
         """Calculate estimated cost for a charging session"""
-        energy_kwh = self._estimate_energy_for_session(window['duration_minutes'] / 60.0)
-        return energy_kwh * (window['avg_price'] / 1000.0)  # Convert from PLN/MWh to PLN/kWh
+        energy_kwh = self._estimate_energy_for_session(window.duration_minutes / 60.0)
+        return energy_kwh * (window.avg_price / 1000.0)  # Convert from PLN/MWh to PLN/kWh
     
-    def _calculate_session_savings(self, window: Dict) -> float:
+    def _calculate_session_savings(self, window: ChargingWindow) -> float:
         """Calculate estimated savings for a charging session"""
         # This would compare against average daily price
-        # For now, use the savings from the window
-        energy_kwh = self._estimate_energy_for_session(window['duration_minutes'] / 60.0)
-        return energy_kwh * (window['savings'] / 1000.0)
+        # For now, use the savings_per_mwh from the window
+        energy_kwh = self._estimate_energy_for_session(window.duration_minutes / 60.0)
+        return energy_kwh * (window.savings_per_mwh / 1000.0)
     
     async def _save_daily_plan(self, plan: DailyChargingPlan):
         """Save daily plan to file"""

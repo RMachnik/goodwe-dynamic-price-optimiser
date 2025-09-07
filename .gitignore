@@ -59,3 +59,8 @@ config/*_production.yaml
 config/*_secrets.yaml
 config/user_*.yaml
 .env
+
+# ngrok configuration and sensitive files
+ngrok.yml.local
+ngrok_secrets.yml
+*.ngrok.yml

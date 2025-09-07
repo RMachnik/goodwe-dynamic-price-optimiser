@@ -410,18 +410,12 @@ class PVTrendAnalyzer:
                                       price_data: Dict, battery_soc: float) -> bool:
         """Determine if we should wait for PV improvement"""
         
-        # For critical battery levels, still consider PV forecast but with stricter conditions
-        if battery_soc <= 12:  # Critical battery threshold (updated from config)
-            # Only wait if PV improvement is very significant and very soon
-            if (trend_analysis.trend_direction == 'increasing' and 
-                trend_analysis.time_to_peak_hours <= 1.0 and  # Must be within 1 hour
-                trend_analysis.peak_pv_kw >= 2.0 and  # Must reach at least 2kW
-                trend_analysis.confidence >= 0.8):  # High confidence required
-                return True
+        # Don't wait if battery is critical
+        if battery_soc <= 20:
             return False
         
-        # Don't wait if we already have significant PV overproduction
-        if current_net_power > 1.0:  # 1kW overproduction threshold
+        # Don't wait if we already have PV overproduction
+        if current_net_power > 0.5:  # 500W overproduction
             return False
         
         # Don't wait if trend confidence is too low
@@ -441,10 +435,10 @@ class PVTrendAnalyzer:
         if self._is_very_low_price_window(price_data):
             return False
         
-        # Wait if we have an increasing trend with reasonable conditions
+        # Wait if we have a strong increasing trend
         if (trend_analysis.trend_direction == 'increasing' and 
-            trend_analysis.trend_strength > 0.3 and  # More lenient threshold
-            trend_analysis.weather_factor > 0.3):    # More lenient threshold
+            trend_analysis.trend_strength > 0.6 and
+            trend_analysis.weather_factor > 0.6):
             return True
         
         return False
@@ -460,37 +454,16 @@ class PVTrendAnalyzer:
             current_hour = current_time.hour
             
             for price_point in price_data['value']:
-                # Handle different timestamp formats
-                dtime_str = price_point['dtime']
-                try:
-                    if 'T' in dtime_str:
-                        # ISO format: '2025-09-07T12:00:00'
-                        price_time = datetime.fromisoformat(dtime_str)
-                    else:
-                        # Standard format: '2025-09-07 12:00'
-                        price_time = datetime.strptime(dtime_str, '%Y-%m-%d %H:%M')
-                except ValueError:
-                    # Try alternative formats
-                    try:
-                        price_time = datetime.strptime(dtime_str, '%Y-%m-%d %H:%M:%S')
-                    except ValueError:
-                        # Skip this price point if we can't parse it
-                        continue
+                price_time = datetime.strptime(price_point['dtime'], '%Y-%m-%d %H:%M')
                 if price_time.hour == current_hour:
-                    # Handle both 'csdac_pln' and 'price' field names
-                    if 'csdac_pln' in price_point:
-                        market_price = float(price_point['csdac_pln'])
-                        sc_component = self.config.get('electricity_pricing', {}).get('sc_component_pln_kwh', 0.0892)
-                        final_price = market_price + (sc_component * 1000)
-                        
-                        # Very low price threshold (10th percentile)
-                        all_prices = [float(p['csdac_pln']) + (sc_component * 1000) for p in price_data['value']]
-                    else:
-                        # For test data with 'price' field
-                        final_price = float(price_point['price'])
-                        all_prices = [float(p['price']) for p in price_data['value']]
+                    market_price = float(price_point['csdac_pln'])
+                    sc_component = self.config.get('electricity_pricing', {}).get('sc_component_pln_kwh', 0.0892)
+                    final_price = market_price + (sc_component * 1000)
                     
+                    # Very low price threshold (10th percentile)
+                    all_prices = [float(p['csdac_pln']) + (sc_component * 1000) for p in price_data['value']]
                     very_low_threshold = sorted(all_prices)[int(len(all_prices) * 0.1)]
+                    
                     return final_price <= very_low_threshold
             
             return False
@@ -516,11 +489,11 @@ class PVTrendAnalyzer:
         """Generate reason for charging now"""
         if battery_soc <= 20:
             return "Critical battery level - charging immediately"
+        elif current_net_power > 0.5:
+            return "PV overproduction - no grid charging needed"
         elif trend_analysis.trend_direction == 'decreasing':
             return "PV production decreasing - charge now before it gets worse"
         elif self._is_very_low_price_window(price_data):
             return "Very low electricity prices - charge now to capture savings"
-        elif current_net_power > 0.5:
-            return "PV overproduction - no grid charging needed"
         else:
             return "No significant PV improvement expected - charge now"

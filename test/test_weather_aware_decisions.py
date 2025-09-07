@@ -5,7 +5,7 @@ Verifies that the system correctly uses weather forecasts and PV trends to make 
 """
 
 import unittest
-from unittest.mock import patch, MagicMock, Mock
+from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
 import sys
 import os
@@ -43,108 +43,25 @@ class TestWeatherAwareDecisions(unittest.TestCase):
                 'pv_capacity_kw': 10.0,
                 'charging_rate_kw': 3.0,
                 'battery_capacity_kwh': 10.0
-            },
-            'battery_management': {
-                'soc_thresholds': {
-                    'critical': 12  # Use same threshold as main config
-                }
             }
         }
-        # Mock charging controller
-        self.mock_charging_controller = MagicMock()
-        self.mock_charging_controller.get_current_price.return_value = 200.0  # PLN/MWh
-        self.mock_charging_controller.calculate_final_price.return_value = 200.0  # PLN/MWh
-        
-        self.decision_engine = MultiFactorDecisionEngine(self.config, self.mock_charging_controller)
+        self.decision_engine = MultiFactorDecisionEngine(self.config)
         
         # Initialize PV consumption analyzer (normally done in MasterCoordinator)
         from pv_consumption_analyzer import PVConsumptionAnalyzer
         self.decision_engine.pv_consumption_analyzer = PVConsumptionAnalyzer(self.config)
         
-        # Set up mock weather collector for PV forecaster
-        mock_weather_collector = Mock()
-        # Mock the get_solar_irradiance_forecast method to return test data
-        mock_weather_collector.get_solar_irradiance_forecast.return_value = [
-            {
-                'timestamp': '2025-09-07T12:00:00',
-                'ghi': 800,  # High solar irradiance
-                'dni': 900,
-                'dhi': 100,
-                'cloud_cover_total': 20,  # Low cloud cover
-                'cloud_cover_low': 10,
-                'cloud_cover_mid': 5,
-                'cloud_cover_high': 5
-            },
-            {
-                'timestamp': '2025-09-07T13:00:00',
-                'ghi': 900,  # Even higher solar irradiance
-                'dni': 1000,
-                'dhi': 100,
-                'cloud_cover_total': 10,  # Very low cloud cover
-                'cloud_cover_low': 5,
-                'cloud_cover_mid': 3,
-                'cloud_cover_high': 2
-            }
-        ]
-        self.decision_engine.pv_forecaster.set_weather_collector(mock_weather_collector)
-        
         # Mock price data with current time
         current_time = datetime.now()
         current_hour = current_time.hour
         current_minute = (current_time.minute // 15) * 15  # Round to nearest 15 minutes
-        current_date = current_time.strftime('%Y-%m-%d')
         
         self.mock_price_data = {
             'value': [
                 {
-                    'dtime': f'{current_date} {current_hour:02d}:{current_minute:02d}',
-                    'csdac_pln': 1100.0,  # Price above 10th percentile (1089.2)
-                    'business_date': current_date
-                },
-                {
-                    'dtime': f'{current_date} {(current_hour + 1) % 24:02d}:{current_minute:02d}',
-                    'csdac_pln': 800.0,  # Even higher price
-                    'business_date': current_date
-                },
-                {
-                    'dtime': f'{current_date} {(current_hour + 2) % 24:02d}:{current_minute:02d}',
-                    'csdac_pln': 1000.0,  # Very high price
-                    'business_date': current_date
-                },
-                {
-                    'dtime': f'{current_date} {(current_hour + 3) % 24:02d}:{current_minute:02d}',
-                    'csdac_pln': 1200.0,  # Extremely high price
-                    'business_date': current_date
-                },
-                {
-                    'dtime': f'{current_date} {(current_hour + 4) % 24:02d}:{current_minute:02d}',
-                    'csdac_pln': 1400.0,  # Even higher
-                    'business_date': current_date
-                },
-                {
-                    'dtime': f'{current_date} {(current_hour + 5) % 24:02d}:{current_minute:02d}',
-                    'csdac_pln': 1600.0,  # Even higher
-                    'business_date': current_date
-                },
-                {
-                    'dtime': f'{current_date} {(current_hour + 6) % 24:02d}:{current_minute:02d}',
-                    'csdac_pln': 1800.0,  # Even higher
-                    'business_date': current_date
-                },
-                {
-                    'dtime': f'{current_date} {(current_hour + 7) % 24:02d}:{current_minute:02d}',
-                    'csdac_pln': 2000.0,  # Even higher
-                    'business_date': current_date
-                },
-                {
-                    'dtime': f'{current_date} {(current_hour + 8) % 24:02d}:{current_minute:02d}',
-                    'csdac_pln': 2200.0,  # Even higher
-                    'business_date': current_date
-                },
-                {
-                    'dtime': f'{current_date} {(current_hour + 9) % 24:02d}:{current_minute:02d}',
-                    'csdac_pln': 2400.0,  # Even higher
-                    'business_date': current_date
+                    'dtime': f'2025-09-07 {current_hour:02d}:{current_minute:02d}',
+                    'csdac_pln': 300.0,  # Medium price
+                    'business_date': '2025-09-07'
                 }
             ]
         }
@@ -284,7 +201,7 @@ class TestWeatherAwareDecisions(unittest.TestCase):
         # Scenario: Critical battery but PV production increasing
         current_data = {
             'battery': {
-                'soc_percent': 18,  # Critical battery level (below 20% threshold)
+                'soc_percent': 15,  # Critical battery level
                 'charging_status': False,
                 'voltage': 400.0,
                 'temperature': 25.0
@@ -355,7 +272,7 @@ class TestWeatherAwareDecisions(unittest.TestCase):
         }
         
         # Mock PV forecast without weather data
-        with patch.object(self.decision_engine.pv_forecaster, 'forecast_pv_production_with_weather') as mock_forecast:
+        with patch.object(self.decision_engine.pv_forecaster, 'forecast_pv_production') as mock_forecast:
             mock_forecast.return_value = [
                 {'forecasted_power_kw': 2.0, 'confidence': 0.6, 'timestamp': '2025-09-07T12:00:00'},
                 {'forecasted_power_kw': 2.2, 'confidence': 0.6, 'timestamp': '2025-09-07T12:15:00'},
@@ -422,14 +339,13 @@ class TestWeatherAwareDecisions(unittest.TestCase):
         current_time = datetime.now()
         current_hour = current_time.hour
         current_minute = (current_time.minute // 15) * 15  # Round to nearest 15 minutes
-        current_date = current_time.strftime('%Y-%m-%d')
         
         very_low_price_data = {
             'value': [
                 {
-                    'dtime': f'{current_date} {current_hour:02d}:{current_minute:02d}',
+                    'dtime': f'2025-09-07 {current_hour:02d}:{current_minute:02d}',
                     'csdac_pln': 100.0,  # Very low price
-                    'business_date': current_date
+                    'business_date': '2025-09-07'
                 }
             ]
         }

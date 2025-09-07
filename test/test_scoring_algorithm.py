@@ -189,23 +189,27 @@ class TestScoringAlgorithm(unittest.TestCase):
         self.assertEqual(score, 100)
     
     def test_pv_score_calculation_low_production(self):
-        """Test PV score calculation for low production"""
+        """Test PV score calculation for low production with deficit"""
         low_pv_data = self.mock_current_data.copy()
         low_pv_data['photovoltaic']['current_power_w'] = 200  # Low PV production
+        low_pv_data['house_consumption']['current_power_w'] = 2000  # High consumption
+        # Net power: 200 - 2000 = -1800W (high deficit)
         
         score = self.decision_engine._calculate_pv_score(low_pv_data)
         
-        # Low PV production should give high score (60)
-        self.assertEqual(score, 60)
+        # High deficit should give high score (80)
+        self.assertEqual(score, 80)
     
     def test_pv_score_calculation_medium_production(self):
-        """Test PV score calculation for medium production"""
+        """Test PV score calculation for medium production with balanced consumption"""
         medium_pv_data = self.mock_current_data.copy()
         medium_pv_data['photovoltaic']['current_power_w'] = 1500  # Medium PV production
+        medium_pv_data['house_consumption']['current_power_w'] = 1500  # Balanced consumption
+        # Net power: 1500 - 1500 = 0W (balanced)
         
         score = self.decision_engine._calculate_pv_score(medium_pv_data)
         
-        # Medium PV production should give medium score (30)
+        # Balanced should give medium score (30)
         self.assertEqual(score, 30)
     
     def test_pv_score_calculation_high_production(self):
@@ -269,12 +273,12 @@ class TestScoringAlgorithm(unittest.TestCase):
             # Calculate expected weighted score based on actual scoring logic
             # Price: 200 PLN + 0.0892 = 200.0892 PLN → 80
             # Battery: 30% SOC → 80
-            # PV: 500W → 60 (low production)
+            # PV: 500W - 2000W consumption = -1500W deficit → 80 (medium deficit)
             # Consumption: 2000W → 60 (medium consumption)
             expected_score = (
                 80 * 0.40 +  # price
                 80 * 0.25 +  # battery
-                60 * 0.20 +  # pv
+                80 * 0.20 +  # pv (deficit)
                 60 * 0.15    # consumption
             )
             
