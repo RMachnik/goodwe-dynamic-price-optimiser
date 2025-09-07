@@ -37,6 +37,11 @@ class PVForecaster:
         self.forecast_hours = config.get('forecast_hours', 4)  # Forecast next 4 hours
         self.historical_days = config.get('historical_days', 7)  # Use last 7 days for patterns
         
+        # Weather integration
+        self.weather_collector = None
+        self.weather_enabled = config.get('weather_integration', {}).get('enabled', True)
+        self.weather_forecast_hours = config.get('weather_integration', {}).get('forecast_hours', 24)
+        
         # Time-based PV production patterns (typical for Polish climate)
         self.hourly_production_factors = {
             6: 0.0,   # 6 AM - No production
@@ -56,6 +61,11 @@ class PVForecaster:
             20: 0.0,  # 8 PM - No production
         }
     
+    def set_weather_collector(self, weather_collector):
+        """Set weather data collector for enhanced forecasting"""
+        self.weather_collector = weather_collector
+        logger.info("Weather collector set for PV forecasting")
+    
     def forecast_pv_production(self, hours_ahead: int = None) -> List[Dict[str, Any]]:
         """
         Forecast PV production for the next N hours
@@ -70,6 +80,76 @@ class PVForecaster:
             hours_ahead = self.forecast_hours
             
         logger.info(f"Forecasting PV production for next {hours_ahead} hours")
+        
+        # Try weather-based forecasting first
+        if self.weather_collector and self.weather_enabled:
+            weather_forecast = self.forecast_pv_production_with_weather(hours_ahead)
+            if weather_forecast:
+                return weather_forecast
+        
+        # Fallback to historical pattern-based forecast
+        return self._forecast_pv_production_historical(hours_ahead)
+    
+    def forecast_pv_production_with_weather(self, hours_ahead: int = None) -> List[Dict[str, Any]]:
+        """
+        Enhanced PV production forecast using weather data
+        
+        Args:
+            hours_ahead: Number of hours to forecast (default: self.forecast_hours)
+            
+        Returns:
+            List of hourly PV production forecasts based on weather data
+        """
+        if hours_ahead is None:
+            hours_ahead = self.forecast_hours
+            
+        logger.info(f"Forecasting PV production with weather data for next {hours_ahead} hours")
+        
+        # Get weather-based solar irradiance forecast
+        if not self.weather_collector:
+            logger.warning("No weather collector available for weather-based forecasting")
+            return []
+        
+        solar_forecast = self.weather_collector.get_solar_irradiance_forecast(hours_ahead)
+        if not solar_forecast:
+            logger.warning("No solar irradiance forecast data available")
+            return []
+        
+        # Calculate PV production based on solar irradiance
+        forecasts = []
+        for solar_data in solar_forecast:
+            # Convert solar irradiance to PV power
+            ghi = solar_data.get('ghi', 0)  # W/m²
+            cloud_cover = solar_data.get('cloud_cover_total', 0)  # %
+            
+            # Calculate PV power from GHI
+            pv_power_w = self._ghi_to_pv_power(ghi, cloud_cover)
+            pv_power_kw = pv_power_w / 1000
+            
+            # Apply system efficiency and capacity limits
+            pv_power_kw = min(pv_power_kw, self.pv_capacity_kw)
+            
+            forecasts.append({
+                'timestamp': solar_data['timestamp'],
+                'forecasted_power_kw': pv_power_kw,
+                'forecasted_power_w': pv_power_w,
+                'ghi_w_m2': ghi,
+                'dni_w_m2': solar_data.get('dni', 0),
+                'dhi_w_m2': solar_data.get('dhi', 0),
+                'cloud_cover_percent': cloud_cover,
+                'cloud_cover_low': solar_data.get('cloud_cover_low', 0),
+                'cloud_cover_mid': solar_data.get('cloud_cover_mid', 0),
+                'cloud_cover_high': solar_data.get('cloud_cover_high', 0),
+                'confidence': self._calculate_weather_confidence(cloud_cover),
+                'method': 'weather_based'
+            })
+        
+        logger.info(f"Generated {len(forecasts)} weather-based PV production forecasts")
+        return forecasts
+    
+    def _forecast_pv_production_historical(self, hours_ahead: int) -> List[Dict[str, Any]]:
+        """Original historical pattern-based PV production forecast"""
+        logger.info(f"Using historical pattern-based PV forecasting for next {hours_ahead} hours")
         
         # Get historical data for pattern analysis
         historical_data = self._load_historical_data()
@@ -101,7 +181,7 @@ class PVForecaster:
                 'method': 'historical_pattern' if historical_data else 'time_based_pattern'
             })
         
-        logger.info(f"Generated {len(forecasts)} PV production forecasts")
+        logger.info(f"Generated {len(forecasts)} historical pattern-based PV production forecasts")
         return forecasts
     
     def _load_historical_data(self) -> List[Dict[str, Any]]:
@@ -220,6 +300,36 @@ class PVForecaster:
         
         confidence = base_confidence - time_penalty + data_bonus
         return max(0.1, min(1.0, confidence))
+    
+    def _ghi_to_pv_power(self, ghi: float, cloud_cover: float) -> float:
+        """Convert Global Horizontal Irradiance to PV power output"""
+        # Basic conversion formula
+        # PV power = GHI * System efficiency * (1 - cloud_cover_factor)
+        
+        # Cloud cover impact (0-100% cloud cover reduces efficiency)
+        cloud_factor = cloud_cover / 100 * 0.7  # 70% reduction at 100% cloud cover
+        
+        # System efficiency factors
+        system_efficiency = self.pv_efficiency * (1 - cloud_factor)
+        
+        # Convert GHI to power (W/m² to kW for 10kW system)
+        # Assuming 10 m² of panels for 10kW system
+        panel_area = 10  # m²
+        pv_power = ghi * panel_area * system_efficiency
+        
+        return max(0, pv_power)
+    
+    def _calculate_weather_confidence(self, cloud_cover: float) -> float:
+        """Calculate confidence based on cloud cover conditions"""
+        # Higher confidence with clearer skies
+        if cloud_cover < 25:
+            return 0.9  # High confidence
+        elif cloud_cover < 50:
+            return 0.8  # Good confidence
+        elif cloud_cover < 75:
+            return 0.7  # Medium confidence
+        else:
+            return 0.6  # Lower confidence
     
     def get_current_pv_capacity(self) -> float:
         """Get current PV production capacity"""

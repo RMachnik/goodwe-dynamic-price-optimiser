@@ -41,6 +41,8 @@ from log_web_server import LogWebServer
 from pv_forecasting import PVForecaster
 from price_window_analyzer import PriceWindowAnalyzer
 from hybrid_charging_logic import HybridChargingLogic
+from weather_data_collector import WeatherDataCollector
+from pv_consumption_analyzer import PVConsumptionAnalyzer
 
 # Setup logging
 project_root = Path(__file__).parent.parent
@@ -92,6 +94,8 @@ class MasterCoordinator:
         self.decision_engine = None
         self.log_web_server = None
         self.web_server_thread = None
+        self.weather_collector = None
+        self.pv_consumption_analyzer = None
         
         # System data
         self.current_data = {}
@@ -172,9 +176,33 @@ class MasterCoordinator:
                 logger.error("Failed to initialize charging controller")
                 return False
             
+            # Initialize weather data collector
+            logger.info("Initializing Weather Data Collector...")
+            weather_enabled = self.config.get('weather_integration', {}).get('enabled', True)
+            if weather_enabled:
+                self.weather_collector = WeatherDataCollector(self.config)
+                logger.info("Weather Data Collector initialized successfully")
+            else:
+                logger.info("Weather integration disabled in configuration")
+            
             # Initialize decision engine
             logger.info("Initializing Decision Engine...")
             self.decision_engine = MultiFactorDecisionEngine(self.config)
+            
+            # Initialize PV vs consumption analyzer
+            logger.info("Initializing PV vs Consumption Analyzer...")
+            self.pv_consumption_analyzer = PVConsumptionAnalyzer(self.config)
+            logger.info("PV vs Consumption Analyzer initialized successfully")
+            
+            # Set weather collector in PV forecaster if available
+            if self.decision_engine and hasattr(self.decision_engine, 'pv_forecaster') and self.weather_collector:
+                self.decision_engine.pv_forecaster.set_weather_collector(self.weather_collector)
+                logger.info("Weather collector integrated with PV forecaster")
+            
+            # Set PV consumption analyzer in decision engine
+            if self.decision_engine and self.pv_consumption_analyzer:
+                self.decision_engine.pv_consumption_analyzer = self.pv_consumption_analyzer
+                logger.info("PV consumption analyzer integrated with decision engine")
             
             # Initialize log web server
             logger.info("Initializing Log Web Server...")
@@ -254,11 +282,27 @@ class MasterCoordinator:
                 await asyncio.sleep(30)  # Wait before retry
     
     async def _collect_system_data(self):
-        """Collect comprehensive system data"""
+        """Collect comprehensive system data including weather"""
         try:
+            # Collect weather data if enabled
+            if self.weather_collector:
+                try:
+                    weather_data = await self.weather_collector.collect_weather_data()
+                    if weather_data:
+                        self.current_data['weather'] = weather_data
+                        logger.debug("Weather data collected successfully")
+                    else:
+                        logger.warning("No weather data collected")
+                except Exception as e:
+                    logger.error(f"Failed to collect weather data: {e}")
+            
             # Collect data from all sources
             await self.data_collector.collect_comprehensive_data()
-            self.current_data = self.data_collector.get_current_data()
+            self.current_data.update(self.data_collector.get_current_data())
+            
+            # Update PV vs consumption analyzer with current data
+            if self.pv_consumption_analyzer:
+                self.pv_consumption_analyzer.update_consumption_history(self.current_data)
             
             # Store historical data
             self.historical_data.append({
@@ -648,6 +692,16 @@ class MultiFactorDecisionEngine:
         
         # Timing awareness flag
         self.timing_awareness_enabled = config.get('timing_awareness_enabled', True)
+        
+        # Weather integration
+        self.weather_enabled = config.get('weather_integration', {}).get('enabled', True)
+        self.weather_weights = {
+            'solar_irradiance': 0.6,
+            'cloud_cover': 0.4
+        }
+        
+        # PV vs consumption analysis
+        self.pv_consumption_analyzer = None
     
     def analyze_and_decide(self, current_data: Dict, price_data: Dict, historical_data: List) -> Dict[str, Any]:
         """Analyze current situation and make charging decision with timing awareness"""
@@ -660,20 +714,49 @@ class MultiFactorDecisionEngine:
         return self._analyze_and_decide_legacy(current_data, price_data, historical_data)
     
     def _analyze_and_decide_with_timing(self, current_data: Dict, price_data: Dict, historical_data: List) -> Dict[str, Any]:
-        """Analyze and decide using timing-aware hybrid charging logic"""
-        logger.info("Using timing-aware decision engine")
+        """Analyze and decide using timing-aware hybrid charging logic with weather integration and PV vs consumption analysis"""
+        logger.info("Using timing-aware decision engine with weather integration and PV vs consumption analysis")
         
         try:
+            # Get weather-enhanced PV forecast
+            pv_forecast = self._get_weather_enhanced_pv_forecast(current_data)
+            
+            # Analyze PV vs consumption balance
+            power_balance = None
+            charging_recommendation = None
+            night_charging_recommendation = None
+            battery_discharge_recommendation = None
+            
+            if self.pv_consumption_analyzer:
+                power_balance = self.pv_consumption_analyzer.analyze_power_balance(current_data)
+                battery_soc = current_data.get('battery', {}).get('soc_percent', 0)
+                weather_data = current_data.get('weather')
+                
+                # Standard charging timing analysis
+                charging_recommendation = self.pv_consumption_analyzer.analyze_charging_timing(
+                    power_balance, battery_soc, pv_forecast, price_data, weather_data
+                )
+                
+                # Night charging strategy for high price day preparation
+                night_charging_recommendation = self.pv_consumption_analyzer.analyze_night_charging_strategy(
+                    battery_soc, pv_forecast, price_data, weather_data
+                )
+                
+                # Battery discharge strategy during high price periods
+                battery_discharge_recommendation = self.pv_consumption_analyzer.analyze_battery_discharge_strategy(
+                    battery_soc, current_data, pv_forecast, price_data
+                )
+            
             # Use hybrid charging logic for optimal decision
             charging_decision = self.hybrid_logic.analyze_and_decide(current_data, price_data)
             
             # Convert ChargingDecision to legacy format for compatibility
             action = self._convert_charging_action(charging_decision.action)
             
-            # Calculate scores for compatibility
+            # Calculate scores for compatibility with weather enhancement
             price_score = self._calculate_price_score(price_data)
             battery_score = self._calculate_battery_score(current_data)
-            pv_score = self._calculate_pv_score(current_data)
+            pv_score = self._calculate_weather_enhanced_pv_score(current_data)
             consumption_score = self._calculate_consumption_score(current_data, historical_data)
             
             total_score = (
@@ -694,7 +777,13 @@ class MultiFactorDecisionEngine:
                 },
                 'confidence': charging_decision.confidence,
                 'reasoning': charging_decision.reason,
+                'power_balance': power_balance,
+                'charging_recommendation': charging_recommendation,
+                'night_charging_recommendation': night_charging_recommendation,
+                'battery_discharge_recommendation': battery_discharge_recommendation,
                 'price_data': price_data,
+                'weather_data': current_data.get('weather', {}),
+                'pv_forecast': pv_forecast,
                 'timing_analysis': {
                     'charging_source': charging_decision.charging_source,
                     'duration_hours': charging_decision.duration_hours,
@@ -709,7 +798,7 @@ class MultiFactorDecisionEngine:
             }
             
         except Exception as e:
-            logger.error(f"Error in timing-aware decision: {e}")
+            logger.error(f"Error in weather-enhanced timing-aware decision: {e}")
             # Fallback to legacy decision
             return self._analyze_and_decide_legacy(current_data, price_data, historical_data)
     
@@ -760,6 +849,56 @@ class MultiFactorDecisionEngine:
             'wait': 'none'
         }
         return action_mapping.get(hybrid_action, 'none')
+    
+    def _get_weather_enhanced_pv_forecast(self, current_data: Dict) -> List[Dict]:
+        """Get PV forecast enhanced with weather data"""
+        if not self.weather_enabled or 'weather' not in current_data:
+            return self.pv_forecaster.forecast_pv_production()
+        
+        # Use weather-based PV forecasting
+        return self.pv_forecaster.forecast_pv_production_with_weather()
+    
+    def _calculate_weather_enhanced_pv_score(self, current_data: Dict) -> float:
+        """Enhanced PV scoring with weather data"""
+        pv_data = current_data.get('photovoltaic', {})
+        pv_power = pv_data.get('current_power_w', 0)
+        
+        # Base PV scoring
+        base_score = self._calculate_pv_score(current_data)
+        
+        # Weather enhancement
+        if self.weather_enabled and 'weather' in current_data:
+            weather_score = self._calculate_weather_pv_score(current_data['weather'])
+            # Blend base and weather scores
+            return (base_score * 0.7) + (weather_score * 0.3)
+        
+        return base_score
+    
+    def _calculate_weather_pv_score(self, weather_data: Dict) -> float:
+        """Calculate PV score based on weather conditions"""
+        if not weather_data or 'forecast' not in weather_data:
+            return 50  # Neutral score
+        
+        forecast = weather_data['forecast']
+        solar_data = forecast.get('solar_irradiance', {})
+        
+        # Get current hour's solar irradiance
+        current_hour = datetime.now().hour
+        if current_hour < len(solar_data.get('ghi', [])):
+            current_ghi = solar_data['ghi'][current_hour]
+            cloud_cover = forecast['cloud_cover']['total'][current_hour] if current_hour < len(forecast['cloud_cover']['total']) else 0
+            
+            # Score based on solar irradiance and cloud cover
+            if current_ghi > 800 and cloud_cover < 25:
+                return 100  # Excellent conditions
+            elif current_ghi > 400 and cloud_cover < 50:
+                return 75   # Good conditions
+            elif current_ghi > 200 and cloud_cover < 75:
+                return 50   # Moderate conditions
+            else:
+                return 25   # Poor conditions
+        
+        return 50  # Default neutral score
     
     def _calculate_price_score(self, price_data: Dict) -> float:
         """Calculate price-based score (0-100)"""
