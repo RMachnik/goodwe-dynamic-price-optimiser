@@ -424,39 +424,64 @@ class MasterCoordinator:
         return time_since_last.total_seconds() >= self.decision_interval
     
     async def _make_charging_decision(self):
-        """Make intelligent charging decision using multi-factor analysis"""
+        """Make intelligent charging decision using enhanced smart strategy"""
         try:
             logger.info("Making charging decision...")
             
             # Get current price data
-            price_data = self.charging_controller.fetch_today_prices()
+            price_data = self.charging_controller.fetch_price_data_for_date(
+                datetime.now().strftime('%Y-%m-%d')
+            )
             if not price_data:
                 logger.warning("No price data available, skipping decision")
                 return
             
-            # Analyze current system state
-            decision = self.decision_engine.analyze_and_decide(
+            # Use smart charging strategy
+            decision = self.charging_controller.make_smart_charging_decision(
                 current_data=self.current_data,
-                price_data=price_data,
-                historical_data=self.historical_data
+                price_data=price_data
             )
             
             # Execute decision
-            await self._execute_decision(decision)
+            await self._execute_smart_decision(decision)
             
             # Record decision
             self.decision_history.append({
                 'timestamp': datetime.now(),
                 'decision': decision,
-                'reasoning': decision.get('reasoning', ''),
-                'confidence': decision.get('confidence', 0)
+                'reasoning': decision.get('reason', ''),
+                'confidence': decision.get('confidence', 0),
+                'priority': decision.get('priority', 'unknown')
             })
             
             self.last_decision_time = datetime.now()
-            logger.info(f"Decision made: {decision.get('action', 'unknown')}")
+            logger.info(f"Decision made: {decision.get('should_charge', False)} - {decision.get('reason', 'unknown')}")
             
         except Exception as e:
             logger.error(f"Failed to make charging decision: {e}")
+    
+    async def _execute_smart_decision(self, decision: Dict[str, Any]):
+        """Execute the smart charging decision"""
+        should_charge = decision.get('should_charge', False)
+        reason = decision.get('reason', 'Unknown')
+        priority = decision.get('priority', 'low')
+        
+        if should_charge:
+            logger.info(f"Executing decision: Start charging - {reason}")
+            # Check if this is a critical battery situation (force start)
+            battery_data = self.current_data.get('battery', {})
+            battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
+            force_start = battery_soc <= 20 or priority == 'critical'
+            
+            await self.charging_controller.start_price_based_charging(
+                decision.get('price_data', {}), 
+                force_start=force_start
+            )
+        else:
+            logger.info(f"Executing decision: No action needed - {reason}")
+            # Stop charging if currently charging
+            if self.charging_controller.is_charging:
+                await self.charging_controller.stop_price_based_charging()
     
     async def _execute_decision(self, decision: Dict[str, Any]):
         """Execute the charging decision"""

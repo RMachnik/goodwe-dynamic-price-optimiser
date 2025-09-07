@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-GoodWe Dynamic Price Optimiser - Automated Price-Based Charging System
-Integrates Polish electricity market prices with automatic charging control
+GoodWe Dynamic Price Optimiser - Enhanced Automated Price-Based Charging System
+Integrates Polish electricity market prices with smart charging control
+Considers PV overproduction, consumption patterns, and price optimization
 """
 
 import asyncio
@@ -10,7 +11,7 @@ import logging
 import time
 import argparse
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import requests
 from pathlib import Path
 
@@ -23,13 +24,14 @@ current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
 from fast_charge import GoodWeFastCharger
+from enhanced_data_collector import EnhancedDataCollector
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class AutomatedPriceCharger:
-    """Automated charging system based on Polish electricity prices"""
+    """Enhanced automated charging system with smart strategy"""
     
     def __init__(self, config_path: str = None):
         """Initialize the automated charger"""
@@ -40,10 +42,21 @@ class AutomatedPriceCharger:
         else:
             self.config_path = config_path
         self.goodwe_charger = GoodWeFastCharger(self.config_path)
+        self.data_collector = EnhancedDataCollector(self.config_path)
         self.price_api_url = "https://api.raporty.pse.pl/api/csdac-pln"
         self.current_schedule = None
         self.is_charging = False
         self.charging_start_time = None
+        self.last_decision_time = None
+        self.decision_history = []
+        
+        # Smart charging thresholds
+        self.critical_battery_threshold = 20  # % - Always charge if below this
+        self.low_battery_threshold = 30  # % - Consider charging if below this
+        self.medium_battery_threshold = 50  # % - Only charge if conditions are favorable
+        self.price_savings_threshold = 0.3  # 30% savings required to wait
+        self.overproduction_threshold = 500  # W - Significant overproduction
+        self.high_consumption_threshold = 1000  # W - High consumption
         
         # Load electricity pricing configuration
         self._load_pricing_config()
@@ -203,6 +216,174 @@ class AutomatedPriceCharger:
         logger.info(f"Current price: {current_price:.2f} PLN/MWh, Threshold: {max_price_threshold:.2f} PLN/MWh, Should charge: {should_charge}")
         
         return should_charge
+    
+    def make_smart_charging_decision(self, current_data: Dict, price_data: Dict) -> Dict[str, any]:
+        """
+        Make intelligent charging decision using smart strategy
+        Considers PV overproduction, consumption patterns, and price optimization
+        """
+        try:
+            logger.info("Making smart charging decision...")
+            
+            # Extract current system state
+            battery_soc = current_data.get('battery', {}).get('soc_percent', 0)
+            pv_power = current_data.get('photovoltaic', {}).get('current_power_w', 0)
+            house_consumption = current_data.get('house_consumption', {}).get('current_power_w', 0)
+            grid_power = current_data.get('grid', {}).get('power_w', 0)
+            grid_direction = current_data.get('grid', {}).get('flow_direction', 'Unknown')
+            
+            # Calculate overproduction
+            overproduction = pv_power - house_consumption
+            
+            # Get current and future prices
+            current_price, cheapest_price, cheapest_hour = self._analyze_prices(price_data)
+            
+            # Make charging decision
+            decision = self._make_charging_decision(
+                battery_soc=battery_soc,
+                overproduction=overproduction,
+                grid_power=grid_power,
+                grid_direction=grid_direction,
+                current_price=current_price,
+                cheapest_price=cheapest_price,
+                cheapest_hour=cheapest_hour
+            )
+            
+            # Store decision in history
+            self.decision_history.append({
+                'timestamp': datetime.now(),
+                'decision': decision,
+                'current_data': current_data
+            })
+            
+            # Keep only last 10 decisions
+            if len(self.decision_history) > 10:
+                self.decision_history = self.decision_history[-10:]
+            
+            logger.info(f"Smart charging decision: {decision['should_charge']} - {decision['reason']}")
+            logger.info(f"Priority: {decision['priority']}, Confidence: {decision['confidence']:.1%}")
+            
+            return decision
+            
+        except Exception as e:
+            logger.error(f"Error making smart charging decision: {e}")
+            return {
+                'should_charge': False,
+                'reason': f'Error in decision making: {e}',
+                'priority': 'low',
+                'confidence': 0.0
+            }
+    
+    def _analyze_prices(self, price_data: Dict) -> Tuple[Optional[float], Optional[float], Optional[int]]:
+        """Analyze current and future prices"""
+        try:
+            if not price_data or 'value' not in price_data:
+                return None, None, None
+            
+            current_hour = datetime.now().hour
+            prices_raw = price_data['value']
+            
+            # Convert to hourly averages
+            hourly_prices = {}
+            for entry in prices_raw:
+                hour = int(entry['dtime'].split(' ')[1].split(':')[0])
+                price_pln_kwh = entry['csdac_pln'] / 1000  # Convert to PLN/kWh
+                
+                if hour not in hourly_prices:
+                    hourly_prices[hour] = []
+                hourly_prices[hour].append(price_pln_kwh)
+            
+            # Calculate average price per hour
+            hourly_avg = {}
+            for hour, prices in hourly_prices.items():
+                hourly_avg[hour] = sum(prices) / len(prices)
+            
+            # Get current price
+            current_price = hourly_avg.get(current_hour)
+            
+            # Find cheapest price in next 8 hours
+            next_hours = [(h, p) for h, p in hourly_avg.items() 
+                         if h >= current_hour and h < current_hour + 8]
+            
+            if next_hours:
+                cheapest_hour, cheapest_price = min(next_hours, key=lambda x: x[1])
+                return current_price, cheapest_price, cheapest_hour
+            
+            return current_price, None, None
+            
+        except Exception as e:
+            logger.error(f"Error analyzing prices: {e}")
+            return None, None, None
+    
+    def _make_charging_decision(self, battery_soc: int, overproduction: int, grid_power: int,
+                              grid_direction: str, current_price: Optional[float],
+                              cheapest_price: Optional[float], cheapest_hour: Optional[int]) -> Dict[str, any]:
+        """Make the final charging decision based on all factors"""
+        
+        # CRITICAL: Battery below critical threshold
+        if battery_soc < self.critical_battery_threshold:
+            return {
+                'should_charge': True,
+                'reason': f'Critical battery level ({battery_soc}% < {self.critical_battery_threshold}%)',
+                'priority': 'critical',
+                'confidence': 1.0
+            }
+        
+        # HIGH: PV overproduction - no need to charge from grid
+        if overproduction > self.overproduction_threshold:
+            return {
+                'should_charge': False,
+                'reason': f'PV overproduction ({overproduction}W > {self.overproduction_threshold}W) - no grid charging needed',
+                'priority': 'high',
+                'confidence': 0.9
+            }
+        
+        # HIGH: Significant grid consumption with low battery
+        if (battery_soc < self.low_battery_threshold and 
+            grid_direction == 'Import' and grid_power > self.high_consumption_threshold):
+            return {
+                'should_charge': True,
+                'reason': f'Low battery ({battery_soc}%) + high grid consumption ({grid_power}W)',
+                'priority': 'high',
+                'confidence': 0.8
+            }
+        
+        # MEDIUM: Price analysis
+        if current_price and cheapest_price and cheapest_hour:
+            savings_percent = self._calculate_savings(current_price, cheapest_price)
+            
+            # Wait for much better price
+            if savings_percent > (self.price_savings_threshold * 100):
+                return {
+                    'should_charge': False,
+                    'reason': f'Much cheaper price available in {cheapest_hour}:00 ({cheapest_price:.3f} vs {current_price:.3f} PLN/kWh, {savings_percent:.1f}% savings)',
+                    'priority': 'medium',
+                    'confidence': 0.7
+                }
+            
+            # Charge now if price is good enough
+            if savings_percent < (self.price_savings_threshold * 50):  # Less than 15% savings
+                if battery_soc < self.medium_battery_threshold:
+                    return {
+                        'should_charge': True,
+                        'reason': f'Good price ({current_price:.3f} PLN/kWh) + medium battery ({battery_soc}%)',
+                        'priority': 'medium',
+                        'confidence': 0.6
+                    }
+        
+        # DEFAULT: Wait for better conditions
+        return {
+            'should_charge': False,
+            'reason': 'Wait for better conditions (PV overproduction, lower prices, or higher consumption)',
+            'priority': 'low',
+            'confidence': 0.4
+        }
+    
+    def _calculate_savings(self, current_price: float, cheapest_price: float) -> float:
+        """Calculate potential savings percentage"""
+        if not current_price or not cheapest_price or current_price == 0:
+            return 0.0
+        return ((current_price - cheapest_price) / current_price) * 100
     
     async def start_price_based_charging(self, price_data: Dict, force_start: bool = False) -> bool:
         """Start charging based on current electricity price or force start"""

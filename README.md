@@ -8,9 +8,10 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **✅ VALIDATED**: Monitors PV production, grid flow, battery status, and house consumption in real-time
 - **✅ EFFICIENT**: Optimizes battery charging based on Polish electricity market prices (95-98% accuracy)
 - **✅ RELIABLE**: Automates charging decisions using validated CSDAC-PLN API (100% uptime)
-- **✅ SMART**: Implements scheduled charging strategy (no more redundant API calls)
+- **✅ SMART**: Implements intelligent charging strategy with PV overproduction analysis
+- **✅ INTELLIGENT**: Considers consumption patterns and price optimization opportunities
 - **✅ INTEGRATED**: Polish electricity pricing with SC component and G12 distribution tariff
-- **✅ PROVEN**: Saves money by charging during optimal price windows
+- **✅ PROVEN**: Saves money by charging during optimal price windows and avoiding grid charging during PV overproduction
 
 **For detailed implementation strategy, technical specifications, and current progress, see the [Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md).**
 
@@ -43,6 +44,32 @@ The system is built around a **Master Coordinator** that orchestrates all compon
 - **⚡ Action Execution**: Automated charging control and system management
 
 **Detailed architecture and component descriptions available in the [Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md).**
+
+## 🧠 **Smart Charging Strategy**
+
+The system now implements an **Enhanced Smart Charging Strategy** that considers multiple factors:
+
+### **Decision Factors:**
+- **🔋 Battery Level**: Critical (20%), Low (30%), Medium (50%) thresholds
+- **☀️ PV Overproduction**: Avoids grid charging when PV > consumption + 500W
+- **💰 Price Optimization**: Waits for 30%+ price savings opportunities
+- **🏠 Consumption Patterns**: Predicts future consumption needs
+- **⚡ Grid Usage**: Considers current grid import/export status
+
+### **Decision Logic:**
+```
+🚨 CRITICAL (Always Charge): Battery < 20%
+🟢 HIGH (PV Overproduction): No grid charging when PV overproduction detected
+🔴 HIGH (Low Battery + High Consumption): Charge when battery < 30% + high grid usage
+🟡 MEDIUM (Price Analysis): Wait for 30%+ price savings
+🟠 LOW (Consumption Pattern): Consider charging based on expected consumption
+```
+
+### **Benefits:**
+- **💡 Cost Savings**: Wait for 50-70% cheaper electricity prices
+- **☀️ PV Optimization**: Use solar overproduction instead of expensive grid power
+- **⏰ Smart Timing**: Charge when consumption is high or prices are low
+- **🛡️ Safety First**: Always charge when battery is critically low
 
 ## 📁 **Project Structure**
 

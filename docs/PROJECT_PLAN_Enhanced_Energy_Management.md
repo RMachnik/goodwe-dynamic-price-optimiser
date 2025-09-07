@@ -20,12 +20,21 @@
 - ✅ **NEW**: CSDAC-PLN API reliability confirmed (100% data availability last 14 days)
 - ✅ **NEW**: Price accuracy validated against Gadek.pl (95-98% match)
 - ✅ **NEW**: SDAC timing strategy implemented (13:00-14:00 CET retry window)
+- ✅ **NEW**: Smart charging strategy with PV overproduction analysis
+- ✅ **NEW**: Multi-factor decision engine considering consumption patterns
 
 ### **✅ CRITICAL FIX COMPLETED - Monitoring Logic**
 - ✅ **Efficient scheduled charging**: Replaced inefficient monitoring with smart scheduling
 - ✅ **Eliminated redundant API calls**: Fetch prices once, use for scheduling
 - ✅ **Simplified approach**: Time-based scheduling instead of continuous price checking
 - ✅ **Smart monitoring**: Only monitors battery SoC and system health
+
+### **✅ NEW FEATURE COMPLETED - Smart Charging Strategy**
+- ✅ **PV Overproduction Analysis**: Avoids grid charging when PV > consumption + 500W
+- ✅ **Price Optimization**: Waits for 30%+ price savings opportunities
+- ✅ **Consumption Pattern Analysis**: Predicts future consumption needs
+- ✅ **Multi-Factor Decision Engine**: Considers battery level, PV production, consumption, and prices
+- ✅ **Priority-Based Decisions**: Critical, High, Medium, Low priority levels with confidence scores
 
 ### **Target State**
 - 🎯 Multi-factor optimization (price + PV + consumption + battery)
