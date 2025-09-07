@@ -247,7 +247,9 @@ Replaced inefficient monitoring with smart scheduling:
   - **NEW**: Smart PV vs Grid charging decision logic
   - **NEW**: Prefer PV charging when energy costs are low, PV generation is good, and house usage is low
   - **NEW**: Weather-aware charging decisions (charge from grid if weather deteriorating)
-  - **Estimated Time**: 6-8 hours
+  - **🚨 CRITICAL**: Timing-aware hybrid charging (PV + Grid) for optimal price windows
+  - **🚨 CRITICAL**: Low price + insufficient PV timing = Grid charging to capture savings
+  - **Estimated Time**: 8-10 hours (increased due to timing complexity)
   - **Status**: ❌ **NOT IMPLEMENTED** - Basic scoring algorithm exists but lacks PV vs consumption logic
 
 - [ ] **2.1.3**: Implement battery state management ❌ **NOT IMPLEMENTED**
@@ -377,10 +379,12 @@ Replaced inefficient monitoring with smart scheduling:
 
 Based on actual implementation status, the priority order should be:
 
-1. **HIGH PRIORITY**: Implement PV vs consumption analysis (Task 2.1.2)
+1. **🚨 CRITICAL PRIORITY**: Implement PV vs consumption analysis with timing awareness (Task 2.1.2)
    - Real-time power balance monitoring
    - Calculate power deficit (consumption - PV)
-   - Avoid charging during PV overproduction
+   - **🚨 CRITICAL SCENARIO**: Low price + insufficient PV timing = Grid charging to capture savings
+   - Avoid charging during PV overproduction (when PV > consumption + 500W)
+   - **NEW**: Hybrid charging logic (PV + Grid) for optimal price windows
 
 2. **HIGH PRIORITY**: Implement battery state management (Task 2.1.3)
    - Critical (0-20%): Charge immediately
@@ -395,6 +399,167 @@ Based on actual implementation status, the priority order should be:
 4. **MEDIUM PRIORITY**: Implement multi-session charging (Task 2.2)
    - Multiple low-price windows per day
    - Non-overlapping charging sessions
+
+---
+
+## 🚨 **CRITICAL SCENARIO: PV Timing vs Low Price Windows**
+
+### **The Problem You Identified**
+
+This is a **critical optimization scenario** that the current system doesn't handle:
+
+**Scenario**: Low electricity price window (e.g., 11:00-15:00) but PV production won't be sufficient to charge the battery before the cheap period ends.
+
+**Example**:
+- **Current Time**: 11:00 AM
+- **Low Price Window**: 11:00-15:00 (4 hours of cheap electricity)
+- **Current PV**: 2 kW (insufficient for fast charging)
+- **Battery Capacity**: 10 kWh
+- **Battery Current**: 30% (3 kWh needed to reach 60%)
+- **Charging Rate**: 3 kW (from inverter)
+- **Time to Charge**: 3 kWh ÷ 3 kW = 1 hour
+- **PV Forecast**: PV will increase to 5 kW at 13:00 (2 hours from now)
+
+**Decision**: Should we wait for PV or charge from grid now?
+
+### **Optimal Solution: Hybrid Charging Strategy**
+
+#### **Timing-Aware Charging Logic**
+
+```python
+def analyze_charging_timing(self, current_data, price_data, pv_forecast):
+    """
+    Analyze whether to charge from grid during low price windows
+    when PV won't be sufficient to complete charging before price increases
+    """
+    
+    # Get current conditions
+    current_price = self.get_current_price(price_data)
+    low_price_threshold = self.get_low_price_threshold(price_data)
+    battery_soc = current_data['battery']['soc_percent']
+    battery_capacity = 10.0  # kWh
+    charging_rate = 3.0  # kW (from inverter)
+    
+    # Calculate charging needs
+    target_soc = 60.0  # Target SOC
+    energy_needed = (target_soc - battery_soc) / 100 * battery_capacity
+    time_to_charge = energy_needed / charging_rate  # hours
+    
+    # Check if we're in a low price window
+    if current_price <= low_price_threshold:
+        low_price_end = self.get_low_price_window_end(price_data)
+        time_remaining = (low_price_end - datetime.now()).total_seconds() / 3600
+        
+        # Critical decision point
+        if time_remaining < time_to_charge:
+            # PV won't be able to complete charging before price increases
+            return self.decide_hybrid_charging(current_data, price_data, pv_forecast)
+    
+    return "wait_for_pv"
+```
+
+#### **Hybrid Charging Decision Matrix**
+
+| Scenario | PV Available | Price Window | Decision | Reasoning |
+|----------|-------------|--------------|----------|-----------|
+| **Low Price + Insufficient PV Time** | < 3 kW | < 2 hours remaining | **Grid Charge Now** | Capture cheap electricity before price increases |
+| **Low Price + Sufficient PV Time** | > 3 kW | > 2 hours remaining | **Wait for PV** | Let PV handle charging during cheap period |
+| **High Price + PV Available** | > 2 kW | High price | **PV Only** | Avoid expensive grid charging |
+| **High Price + No PV** | < 1 kW | High price | **Wait** | Don't charge during expensive periods |
+
+#### **Implementation Strategy**
+
+**1. Real-time PV Forecasting**
+```python
+def forecast_pv_production(self, hours_ahead: int = 4) -> List[float]:
+    """
+    Forecast PV production for next 4 hours
+    Based on historical patterns, weather data, and current conditions
+    """
+    # Use historical PV data + weather forecast
+    # Return hourly PV production predictions
+    pass
+```
+
+**2. Price Window Analysis**
+```python
+def analyze_price_windows(self, price_data: Dict) -> List[PriceWindow]:
+    """
+    Identify low price windows and their duration
+    """
+    windows = []
+    current_price = self.get_current_price(price_data)
+    threshold = self.get_low_price_threshold(price_data)
+    
+    if current_price <= threshold:
+        # Find when price increases above threshold
+        end_time = self.find_price_increase_time(price_data)
+        windows.append(PriceWindow(
+            start=datetime.now(),
+            end=end_time,
+            duration=(end_time - datetime.now()).total_seconds() / 3600,
+            avg_price=current_price
+        ))
+    
+    return windows
+```
+
+**3. Hybrid Charging Logic**
+```python
+def decide_hybrid_charging(self, current_data, price_data, pv_forecast):
+    """
+    Decide whether to use grid charging during low price windows
+    when PV timing is insufficient
+    """
+    
+    # Calculate energy needed and time required
+    energy_needed = self.calculate_energy_needed(current_data)
+    time_to_charge = energy_needed / self.charging_rate
+    
+    # Get low price window duration
+    price_window = self.analyze_price_windows(price_data)[0]
+    time_remaining = price_window.duration
+    
+    # Critical decision: Can PV complete charging before price increases?
+    if time_remaining < time_to_charge:
+        # PV won't finish in time - use grid charging
+        savings = self.calculate_savings(current_data, price_data)
+        
+        if savings > self.minimum_savings_threshold:
+            return {
+                'action': 'start_grid_charging',
+                'reason': f'Low price window ({time_remaining:.1f}h) shorter than charging time ({time_to_charge:.1f}h)',
+                'savings': savings,
+                'charging_source': 'grid',
+                'duration': min(time_remaining, time_to_charge)
+            }
+    
+    return {
+        'action': 'wait_for_pv',
+        'reason': 'PV will complete charging before price increases',
+        'charging_source': 'pv',
+        'estimated_completion': datetime.now() + timedelta(hours=time_to_charge)
+    }
+```
+
+### **Benefits of This Approach**
+
+1. **💰 Maximum Savings**: Capture cheap electricity before price increases
+2. **⚡ Optimal Timing**: Don't miss low price windows due to PV timing
+3. **🔄 Hybrid Strategy**: Use both PV and grid optimally
+4. **📊 Data-Driven**: Based on real PV forecasts and price analysis
+5. **🛡️ Safety**: Always prioritize critical battery levels
+
+### **Implementation Priority**
+
+This scenario makes **Task 2.1.2** even more critical because it requires:
+
+1. **PV Production Forecasting** (2-3 hours)
+2. **Price Window Analysis** (2-3 hours)  
+3. **Hybrid Charging Logic** (3-4 hours)
+4. **Timing Calculations** (1-2 hours)
+
+**Total Estimated Time**: 8-12 hours (increased from original 6-8 hours)
 
 ---
 
@@ -659,24 +824,30 @@ Based on actual implementation status, the priority order should be:
 
 ### **🚀 READY TO START: Phase 2 - Multi-Factor Decision Engine (CORRECTED PRIORITIES)**
 1. **✅ Task 2.1.1 COMPLETED**: Price-based charging logic validated and working
-2. **🎯 NEXT PRIORITY**: Task 2.1.2 - PV vs. consumption analysis (HIGH IMPACT - NOT IMPLEMENTED)
+2. **🚨 CRITICAL PRIORITY**: Task 2.1.2 - PV vs. consumption analysis with timing awareness (CRITICAL IMPACT - NOT IMPLEMENTED)
+   - **🚨 NEW**: Hybrid charging logic for low price + insufficient PV timing scenarios
+   - **🚨 NEW**: PV production forecasting for timing decisions
+   - **🚨 NEW**: Price window analysis for optimal charging decisions
 3. **🎯 THEN**: Task 2.1.3 - Battery state management (HIGH IMPACT - NOT IMPLEMENTED)
 4. **🎯 THEN**: Task 2.1.4 - Timing-aware price fetching (MEDIUM IMPACT - NOT IMPLEMENTED)
 5. **🎯 FINALLY**: Task 2.2 - Multi-session charging (MEDIUM IMPACT - NOT IMPLEMENTED)
 
 ### **📊 Updated Priority Justification:**
 - **Price Logic**: ✅ **COMPLETED** - Validated with 95-98% accuracy
-- **PV vs Consumption Analysis**: 🎯 **HIGH PRIORITY** - NOT IMPLEMENTED - Essential for avoiding charging during PV overproduction
+- **🚨 PV vs Consumption Analysis with Timing**: 🚨 **CRITICAL PRIORITY** - NOT IMPLEMENTED - Essential for hybrid charging during low price windows
 - **Battery State Management**: 🎯 **HIGH PRIORITY** - NOT IMPLEMENTED - Critical for system efficiency
 - **Timing-aware Price Fetching**: 🎯 **MEDIUM PRIORITY** - NOT IMPLEMENTED - Robust retry logic needed
 - **Multi-Session Charging**: 🎯 **MEDIUM PRIORITY** - NOT IMPLEMENTED - Enhancement after core logic
 
 ### **📋 Phase 2 Implementation Plan (CORRECTED - Next Week)**
 1. **✅ Day 1**: Price-based charging logic - **COMPLETED & VALIDATED**
-2. **🎯 Day 2-3**: PV vs. consumption analysis - **HIGH PRIORITY (NOT IMPLEMENTED)**
-3. **🎯 Day 4-5**: Battery state management - **HIGH PRIORITY (NOT IMPLEMENTED)**
-4. **🎯 Day 6**: Timing-aware price fetching - **MEDIUM PRIORITY (NOT IMPLEMENTED)**
-5. **🎯 Day 7**: Multi-session charging - **MEDIUM PRIORITY (NOT IMPLEMENTED)**
+2. **🚨 Day 2-4**: PV vs. consumption analysis with timing awareness - **CRITICAL PRIORITY (NOT IMPLEMENTED)**
+   - **Day 2**: PV production forecasting
+   - **Day 3**: Price window analysis
+   - **Day 4**: Hybrid charging logic implementation
+3. **🎯 Day 5-6**: Battery state management - **HIGH PRIORITY (NOT IMPLEMENTED)**
+4. **🎯 Day 7**: Timing-aware price fetching - **MEDIUM PRIORITY (NOT IMPLEMENTED)**
+5. **🎯 Day 8**: Multi-session charging - **MEDIUM PRIORITY (NOT IMPLEMENTED)**
 
 ### **⏰ Phase 2 Timing Considerations (NEW)**
 - **13:00-14:00 CET Retry Window**: Multiple attempts to fetch new D+1 CSDAC prices
@@ -958,13 +1129,21 @@ def forecast_house_usage(self, target_hour: int, target_day_type: str) -> float:
 - ❌ **Phase 3+**: 0% complete (not started)
 
 ### **What Needs Immediate Attention:**
-1. **PV vs Consumption Analysis** (Task 2.1.2) - NOT IMPLEMENTED
+1. **🚨 PV vs Consumption Analysis with Timing Awareness** (Task 2.1.2) - NOT IMPLEMENTED
+   - **🚨 CRITICAL**: Hybrid charging logic for low price + insufficient PV timing scenarios
+   - **🚨 CRITICAL**: PV production forecasting for timing decisions
+   - **🚨 CRITICAL**: Price window analysis for optimal charging decisions
 2. **Battery State Management** (Task 2.1.3) - NOT IMPLEMENTED  
 3. **Timing-aware Price Fetching** (Task 2.1.4) - NOT IMPLEMENTED
 4. **Multi-session Charging** (Task 2.2) - NOT IMPLEMENTED
+
+### **🚨 Critical Scenario Identified:**
+**Low Price Window + Insufficient PV Timing** = Grid charging to capture savings before price increases
+
+This scenario requires immediate implementation to maximize cost savings and system efficiency.
 
 ---
 
 **Ready to continue building your intelligent energy management system?** 
 
-Begin with Phase 2, Task 2.1.2 - implementing PV vs consumption analysis. This is the highest priority missing component! 🚀⚡🔋
+Begin with Phase 2, Task 2.1.2 - implementing PV vs consumption analysis with timing awareness. This is the **CRITICAL** missing component that will enable hybrid charging during optimal price windows! 🚀⚡🔋
