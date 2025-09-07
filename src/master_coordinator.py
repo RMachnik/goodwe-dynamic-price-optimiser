@@ -43,6 +43,8 @@ from price_window_analyzer import PriceWindowAnalyzer
 from hybrid_charging_logic import HybridChargingLogic
 from weather_data_collector import WeatherDataCollector
 from pv_consumption_analyzer import PVConsumptionAnalyzer
+from pv_trend_analyzer import PVTrendAnalyzer
+from multi_session_manager import MultiSessionManager
 
 # Setup logging
 project_root = Path(__file__).parent.parent
@@ -96,6 +98,7 @@ class MasterCoordinator:
         self.web_server_thread = None
         self.weather_collector = None
         self.pv_consumption_analyzer = None
+        self.multi_session_manager = None
         
         # System data
         self.current_data = {}
@@ -203,6 +206,11 @@ class MasterCoordinator:
             if self.decision_engine and self.pv_consumption_analyzer:
                 self.decision_engine.pv_consumption_analyzer = self.pv_consumption_analyzer
                 logger.info("PV consumption analyzer integrated with decision engine")
+            
+            # Initialize multi-session manager
+            logger.info("Initializing Multi-Session Manager...")
+            self.multi_session_manager = MultiSessionManager(self.config)
+            logger.info("Multi-Session Manager initialized successfully")
             
             # Initialize log web server
             logger.info("Initializing Log Web Server...")
@@ -471,9 +479,13 @@ class MasterCoordinator:
         return time_since_last.total_seconds() >= self.decision_interval
     
     async def _make_charging_decision(self):
-        """Make intelligent charging decision using enhanced smart strategy"""
+        """Make intelligent charging decision using enhanced smart strategy with multi-session support"""
         try:
             logger.info("Making charging decision...")
+            
+            # Check if multi-session charging is enabled and handle session management
+            if self.multi_session_manager and self.multi_session_manager.enabled:
+                await self._handle_multi_session_logic()
             
             # Get current price data
             price_data = self.charging_controller.fetch_price_data_for_date(
@@ -506,6 +518,45 @@ class MasterCoordinator:
             
         except Exception as e:
             logger.error(f"Failed to make charging decision: {e}")
+    
+    async def _handle_multi_session_logic(self):
+        """Handle multi-session charging logic"""
+        try:
+            now = datetime.now()
+            
+            # Check if we need to create a daily plan
+            if not self.multi_session_manager.current_plan:
+                # Check if it's time to plan (default 06:00)
+                planning_time = self.multi_session_manager.daily_planning_time
+                if now.strftime('%H:%M') == planning_time:
+                    logger.info("Creating daily charging plan...")
+                    await self.multi_session_manager.create_daily_plan(now.date())
+            
+            # Check for active session completion
+            if self.multi_session_manager.active_session:
+                session = self.multi_session_manager.active_session
+                if now >= session.end_time:
+                    logger.info(f"Completing scheduled session {session.session_id}")
+                    await self.multi_session_manager.complete_session(session)
+                    # Stop charging if active
+                    if self.charging_controller.is_charging:
+                        await self.charging_controller.stop_price_based_charging()
+            
+            # Check for next session start
+            next_session = await self.multi_session_manager.get_next_session()
+            if next_session and now >= next_session.start_time:
+                logger.info(f"Starting scheduled session {next_session.session_id}")
+                await self.multi_session_manager.start_session(next_session)
+                # Start charging if not already charging
+                if not self.charging_controller.is_charging:
+                    price_data = self.charging_controller.fetch_price_data_for_date(
+                        now.strftime('%Y-%m-%d')
+                    )
+                    if price_data:
+                        await self.charging_controller.start_price_based_charging(price_data)
+            
+        except Exception as e:
+            logger.error(f"Failed to handle multi-session logic: {e}")
     
     async def _execute_smart_decision(self, decision: Dict[str, Any]):
         """Execute the smart charging decision"""
@@ -650,7 +701,7 @@ class MasterCoordinator:
         """Get current system status (GoodWe Lynx-D compliant)"""
         compliance = self._check_goodwe_lynx_d_compliance()
         
-        return {
+        status = {
             'state': self.state.value,
             'is_running': self.is_running,
             'uptime_seconds': (datetime.now() - self.start_time).total_seconds() if self.start_time else 0,
@@ -667,6 +718,12 @@ class MasterCoordinator:
                 'vde_2510_50_compliant': self.config.get('battery_management', {}).get('vde_2510_50_compliance', True)
             }
         }
+        
+        # Add multi-session status if available
+        if self.multi_session_manager:
+            status['multi_session_status'] = self.multi_session_manager.get_current_plan_status()
+        
+        return status
 
 
 class MultiFactorDecisionEngine:
@@ -702,6 +759,9 @@ class MultiFactorDecisionEngine:
         
         # PV vs consumption analysis
         self.pv_consumption_analyzer = None
+        
+        # PV trend analysis for weather-aware decisions
+        self.pv_trend_analyzer = PVTrendAnalyzer(config)
     
     def analyze_and_decide(self, current_data: Dict, price_data: Dict, historical_data: List) -> Dict[str, Any]:
         """Analyze current situation and make charging decision with timing awareness"""
@@ -721,20 +781,30 @@ class MultiFactorDecisionEngine:
             # Get weather-enhanced PV forecast
             pv_forecast = self._get_weather_enhanced_pv_forecast(current_data)
             
+            # Analyze PV trend for weather-aware decisions
+            weather_data = current_data.get('weather')
+            pv_trend_analysis = self.pv_trend_analyzer.analyze_pv_trend(current_data, pv_forecast, weather_data)
+            
             # Analyze PV vs consumption balance
             power_balance = None
             charging_recommendation = None
             night_charging_recommendation = None
             battery_discharge_recommendation = None
+            timing_recommendation = None
             
             if self.pv_consumption_analyzer:
                 power_balance = self.pv_consumption_analyzer.analyze_power_balance(current_data)
                 battery_soc = current_data.get('battery', {}).get('soc_percent', 0)
-                weather_data = current_data.get('weather')
+                current_consumption_kw = current_data.get('house_consumption', {}).get('current_power_kw', 0)
                 
                 # Standard charging timing analysis
                 charging_recommendation = self.pv_consumption_analyzer.analyze_charging_timing(
                     power_balance, battery_soc, pv_forecast, price_data, weather_data
+                )
+                
+                # Weather-aware timing recommendation
+                timing_recommendation = self.pv_trend_analyzer.analyze_timing_recommendation(
+                    pv_trend_analysis, price_data, battery_soc, current_consumption_kw
                 )
                 
                 # Night charging strategy for high price day preparation
@@ -750,8 +820,10 @@ class MultiFactorDecisionEngine:
             # Use hybrid charging logic for optimal decision
             charging_decision = self.hybrid_logic.analyze_and_decide(current_data, price_data)
             
-            # Convert ChargingDecision to legacy format for compatibility
-            action = self._convert_charging_action(charging_decision.action)
+            # Apply weather-aware timing recommendation
+            action = self._apply_weather_aware_timing(
+                charging_decision.action, timing_recommendation, pv_trend_analysis, current_data
+            )
             
             # Calculate scores for compatibility with weather enhancement
             price_score = self._calculate_price_score(price_data)
@@ -794,6 +866,27 @@ class MultiFactorDecisionEngine:
                     'grid_contribution_kwh': charging_decision.grid_contribution_kwh,
                     'start_time': charging_decision.start_time.isoformat(),
                     'end_time': charging_decision.end_time.isoformat()
+                },
+                'weather_aware_analysis': {
+                    'pv_trend': {
+                        'trend_direction': pv_trend_analysis.trend_direction,
+                        'trend_strength': pv_trend_analysis.trend_strength,
+                        'current_pv_kw': pv_trend_analysis.current_pv_kw,
+                        'forecasted_pv_kw': pv_trend_analysis.forecasted_pv_kw,
+                        'peak_pv_kw': pv_trend_analysis.peak_pv_kw,
+                        'confidence': pv_trend_analysis.confidence,
+                        'time_to_peak_hours': pv_trend_analysis.time_to_peak_hours,
+                        'weather_factor': pv_trend_analysis.weather_factor,
+                        'recommendation': pv_trend_analysis.recommendation
+                    },
+                    'timing_recommendation': {
+                        'should_wait': timing_recommendation.should_wait if timing_recommendation else False,
+                        'wait_reason': timing_recommendation.wait_reason if timing_recommendation else 'No timing analysis',
+                        'estimated_wait_time_hours': timing_recommendation.estimated_wait_time_hours if timing_recommendation else 0.0,
+                        'expected_pv_improvement_kw': timing_recommendation.expected_pv_improvement_kw if timing_recommendation else 0.0,
+                        'confidence': timing_recommendation.confidence if timing_recommendation else 0.0,
+                        'alternative_action': timing_recommendation.alternative_action if timing_recommendation else 'charge_now'
+                    }
                 }
             }
             
@@ -839,6 +932,32 @@ class MultiFactorDecisionEngine:
             'reasoning': self._generate_reasoning(price_score, battery_score, pv_score, consumption_score, action),
             'price_data': price_data
         }
+    
+    def _apply_weather_aware_timing(self, original_action: str, timing_recommendation, 
+                                  pv_trend_analysis, current_data: Dict) -> str:
+        """Apply weather-aware timing recommendations to charging decisions"""
+        try:
+            if not timing_recommendation:
+                return self._convert_charging_action(original_action)
+            
+            battery_soc = current_data.get('battery', {}).get('soc_percent', 50)
+            
+            # Critical battery level - always charge regardless of timing recommendation
+            if battery_soc <= 20:
+                logger.info("Critical battery level - overriding timing recommendation")
+                return 'start_charging'
+            
+            # Apply timing recommendation
+            if timing_recommendation.should_wait:
+                logger.info(f"Weather-aware decision: Waiting for PV improvement - {timing_recommendation.wait_reason}")
+                return 'none'  # Wait for better PV conditions
+            else:
+                logger.info(f"Weather-aware decision: Charging now - {timing_recommendation.wait_reason}")
+                return self._convert_charging_action(original_action)
+                
+        except Exception as e:
+            logger.error(f"Error applying weather-aware timing: {e}")
+            return self._convert_charging_action(original_action)
     
     def _convert_charging_action(self, hybrid_action: str) -> str:
         """Convert hybrid charging action to legacy action format"""
@@ -950,19 +1069,44 @@ class MultiFactorDecisionEngine:
             return 0    # Full - no charging needed
     
     def _calculate_pv_score(self, current_data: Dict) -> float:
-        """Calculate PV production score (0-100)"""
+        """Calculate PV production score (0-100) with consumption analysis"""
         pv_data = current_data.get('photovoltaic', {})
-        pv_power = pv_data.get('current_power_w', 0)
+        consumption_data = current_data.get('house_consumption', {})
         
-        # PV scoring: high production = 0, no production = 100
-        if pv_power >= 3000:  # High production
+        pv_power = pv_data.get('current_power_w', 0)
+        consumption_power = consumption_data.get('current_power_w', 0)
+        
+        # Calculate net power (PV - Consumption)
+        net_power = pv_power - consumption_power
+        
+        # Get overproduction threshold from config
+        overproduction_threshold = self.config.get('pv_consumption_analysis', {}).get('pv_overproduction_threshold_w', 500)
+        
+        # PV vs Consumption scoring logic:
+        # - If PV overproduction (net > threshold): Score = 0 (no grid charging needed)
+        # - If PV deficit (net < 0): Score = 100 (urgent charging needed)
+        # - If PV balanced (0 < net < threshold): Score based on deficit amount
+        
+        if net_power > overproduction_threshold:
+            # PV overproduction - no grid charging needed
             return 0
-        elif pv_power >= 1000:  # Medium production
-            return 30
-        elif pv_power >= 100:   # Low production
-            return 60
-        else:  # No production
-            return 100
+        elif net_power < 0:
+            # PV deficit - urgent charging needed
+            deficit = abs(net_power)
+            if deficit >= 2000:  # High deficit
+                return 100
+            elif deficit >= 1000:  # Medium deficit
+                return 80
+            else:  # Low deficit
+                return 60
+        else:
+            # PV balanced or slight overproduction
+            if net_power >= overproduction_threshold * 0.5:  # Close to overproduction
+                return 10
+            elif net_power >= 0:  # Balanced
+                return 30
+            else:  # Slight deficit
+                return 50
     
     def _calculate_consumption_score(self, current_data: Dict, historical_data: List) -> float:
         """Calculate consumption-based score (0-100)"""
@@ -980,14 +1124,37 @@ class MultiFactorDecisionEngine:
             return 0
     
     def _determine_action(self, total_score: float, current_data: Dict) -> str:
-        """Determine charging action based on total score"""
+        """Determine charging action based on total score with PV overproduction analysis"""
         battery_data = current_data.get('battery', {})
         battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
         is_charging = battery_data.get('charging_status', False)
         
-        # Critical battery level - charge immediately
+        # Critical battery level - charge immediately (highest priority)
         if battery_soc <= 20:
             return 'start_charging'
+        
+        # Check for PV overproduction
+        pv_data = current_data.get('photovoltaic', {})
+        consumption_data = current_data.get('house_consumption', {})
+        pv_power = pv_data.get('current_power_w', 0)
+        consumption_power = consumption_data.get('current_power_w', 0)
+        net_power = pv_power - consumption_power
+        
+        # Get overproduction threshold from config
+        overproduction_threshold = self.config.get('pv_consumption_analysis', {}).get('pv_overproduction_threshold_w', 500)
+        
+        # PV Overproduction Check: Avoid grid charging when PV > consumption + threshold
+        if net_power > overproduction_threshold:
+            # PV overproduction detected - avoid grid charging
+            if is_charging:
+                return 'stop_charging'  # Stop grid charging during PV overproduction
+            else:
+                return 'none'  # No grid charging needed during PV overproduction
+        
+        # PV Deficit Check: Start charging if significant PV deficit and low battery
+        if net_power < -1000 and battery_soc <= 40:  # Significant deficit and low battery
+            if not is_charging:
+                return 'start_charging'  # Start charging due to PV deficit
         
         # High score and not charging - start charging
         if total_score >= 70 and not is_charging:
@@ -1015,7 +1182,7 @@ class MultiFactorDecisionEngine:
         return min(100, confidence)
     
     def _generate_reasoning(self, price_score: float, battery_score: float, pv_score: float, consumption_score: float, action: str) -> str:
-        """Generate human-readable reasoning for the decision"""
+        """Generate human-readable reasoning for the decision with PV overproduction analysis"""
         reasons = []
         
         if price_score >= 80:
@@ -1028,15 +1195,28 @@ class MultiFactorDecisionEngine:
         elif battery_score <= 20:
             reasons.append("Battery nearly full")
         
-        if pv_score <= 20:
+        # Enhanced PV reasoning with overproduction analysis
+        if pv_score == 0:
+            reasons.append("PV overproduction - no grid charging needed")
+        elif pv_score <= 20:
             reasons.append("High PV production")
         elif pv_score >= 80:
-            reasons.append("No PV production")
+            reasons.append("PV deficit - urgent charging needed")
+        elif pv_score >= 60:
+            reasons.append("PV insufficient for consumption")
+        else:
+            reasons.append("PV production available")
         
         if consumption_score >= 80:
             reasons.append("High consumption expected")
         elif consumption_score <= 20:
             reasons.append("Low consumption expected")
+        
+        # Add action-specific reasoning
+        if action == 'stop_charging' and pv_score == 0:
+            reasons.append("Stopping grid charging due to PV overproduction")
+        elif action == 'start_charging' and pv_score >= 80:
+            reasons.append("Starting charging due to PV deficit")
         
         if not reasons:
             reasons.append("Balanced conditions")

@@ -38,6 +38,16 @@ coordinator:
   data_retention_days: 30              # How long to keep historical data
   max_charging_sessions_per_day: 4     # Maximum charging sessions per day
   
+  # Multi-session charging configuration
+  multi_session_charging:
+    enabled: true                       # Enable multi-session daily charging
+    max_sessions_per_day: 3            # Maximum number of charging sessions per day
+    min_session_duration_hours: 1.0    # Minimum duration for a charging session
+    max_session_duration_hours: 4.0    # Maximum duration for a charging session
+    min_savings_percent: 15.0          # Minimum savings percentage to consider a session
+    session_gap_minutes: 30            # Minimum gap between charging sessions
+    daily_planning_time: "06:00"       # Time to plan daily charging schedule
+  
   # Decision engine weights (from project plan)
   decision_weights:
     price: 0.40        # 40% weight for electricity prices
@@ -261,6 +271,15 @@ price_window_analysis:
   min_charging_duration_hours: 0.25 # Minimum charging duration (15 minutes)
   max_charging_duration_hours: 4.0  # Maximum charging duration (4 hours)
   min_savings_threshold_pln: 50.0   # Minimum savings threshold (PLN/MWh)
+
+# Weather-Aware Decision Configuration
+weather_aware_decisions:
+  enabled: true                # Enable weather-aware charging decisions
+  trend_analysis_hours: 2      # Hours to analyze for PV trends
+  min_trend_confidence: 0.6    # Minimum confidence for trend-based decisions
+  weather_impact_threshold: 0.3 # Minimum weather impact to consider
+  max_wait_time_hours: 2.0     # Maximum time to wait for PV improvement
+  min_pv_improvement_kw: 1.0   # Minimum PV improvement to wait for
 
 # Development/Debug Configuration
 debug:

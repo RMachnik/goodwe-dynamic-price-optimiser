@@ -1,0 +1,19 @@
+# ngrok configuration for GoodWe Master Coordinator Web UI
+version: "2"
+
+tunnels:
+  goodwe-web-ui:
+    proto: http
+    addr: 8080
+    subdomain: goodwe-monitor  # Optional: requires paid plan for custom subdomain
+    inspect: true              # Enable web interface for tunnel inspection
+    schemes: [https]           # Force HTTPS
+    host_header: localhost:8080
+
+  # Alternative tunnel without custom subdomain (free tier)
+  goodwe-web-ui-free:
+    proto: http
+    addr: 8080
+    inspect: true
+    schemes: [https]           # Force HTTPS
+    host_header: localhost:8080
