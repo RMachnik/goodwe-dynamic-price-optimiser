@@ -12,6 +12,8 @@ Group=rmachnik
 WorkingDirectory=/home/rmachnik/sources/goodwe-dynamic-price-optimiser
 ExecStart=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/run_master_coordinator.sh
 ExecStop=/bin/kill -TERM $MAINPID
+KillMode=mixed
+KillSignal=TERM
 Restart=always
 RestartSec=30
 StandardOutput=journal
@@ -24,14 +26,14 @@ Environment=PYTHONUNBUFFERED=1
 Environment=HOME=/home/rmachnik
 Environment=USER=rmachnik
 
-# Security settings
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/logs
-ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/out
-ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/config
+# Security settings (simplified for development)
+# NoNewPrivileges=true
+# PrivateTmp=true
+# ProtectSystem=strict
+# ProtectHome=false
+# ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/logs
+# ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/out
+# ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/config
 
 # Network access for web server
 IPAddressAllow=localhost
