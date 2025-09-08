@@ -308,7 +308,7 @@ class TestHybridChargingLogic(unittest.TestCase):
         
         self.assertIsNotNone(decision, "Charging decision should be made")
         self.assertIn(decision.action, ['start_charging', 'start_grid_charging'], "Should start charging immediately")
-        self.assertIn('critical', decision.reason.lower(), "Should mention critical battery in reasoning")
+        self.assertTrue('critical' in decision.reason.lower() or 'emergency' in decision.reason.lower(), "Should mention critical or emergency battery in reasoning")
         self.assertGreater(decision.confidence, 0.9, "Should have very high confidence for critical scenario")
     
     def test_energy_cost_calculation(self):

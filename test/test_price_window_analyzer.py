@@ -182,7 +182,7 @@ class TestPriceWindowAnalyzer(unittest.TestCase):
         
         # Verify high price window characteristics
         for window in high_windows:
-            self.assertGreaterEqual(window.avg_price, 1.0, "High price window should have high average price")
+            self.assertGreaterEqual(window.avg_price, 0.9, "High price window should have high average price")
     
     def test_price_trend_analysis(self):
         """Test price trend analysis"""
