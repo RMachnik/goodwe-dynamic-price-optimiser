@@ -55,7 +55,7 @@ class AutomatedPriceCharger:
         self.decision_history = []
         
         # Smart charging thresholds
-        self.critical_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('critical', 10)  # % - Price-aware charging
+        self.critical_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('critical', 20)  # % - Price-aware charging
         self.emergency_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('emergency', 5)  # % - Always charge regardless of price
         self.low_battery_threshold = 30  # % - Consider charging if below this
         self.medium_battery_threshold = 50  # % - Only charge if conditions are favorable

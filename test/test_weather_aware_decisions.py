@@ -43,6 +43,11 @@ class TestWeatherAwareDecisions(unittest.TestCase):
                 'pv_capacity_kw': 10.0,
                 'charging_rate_kw': 3.0,
                 'battery_capacity_kwh': 10.0
+            },
+            'battery_management': {
+                'soc_thresholds': {
+                    'critical': 20  # Use same threshold as main config
+                }
             }
         }
         self.decision_engine = MultiFactorDecisionEngine(self.config)
@@ -82,58 +87,59 @@ class TestWeatherAwareDecisions(unittest.TestCase):
         current_time = datetime.now()
         current_hour = current_time.hour
         current_minute = (current_time.minute // 15) * 15  # Round to nearest 15 minutes
+        current_date = current_time.strftime('%Y-%m-%d')
         
         self.mock_price_data = {
             'value': [
                 {
-                    'dtime': f'2025-09-07 {current_hour:02d}:{current_minute:02d}',
+                    'dtime': f'{current_date} {current_hour:02d}:{current_minute:02d}',
                     'csdac_pln': 1100.0,  # Price above 10th percentile (1089.2)
-                    'business_date': '2025-09-07'
+                    'business_date': current_date
                 },
                 {
-                    'dtime': f'2025-09-07 {(current_hour + 1) % 24:02d}:{current_minute:02d}',
+                    'dtime': f'{current_date} {(current_hour + 1) % 24:02d}:{current_minute:02d}',
                     'csdac_pln': 800.0,  # Even higher price
-                    'business_date': '2025-09-07'
+                    'business_date': current_date
                 },
                 {
-                    'dtime': f'2025-09-07 {(current_hour + 2) % 24:02d}:{current_minute:02d}',
+                    'dtime': f'{current_date} {(current_hour + 2) % 24:02d}:{current_minute:02d}',
                     'csdac_pln': 1000.0,  # Very high price
-                    'business_date': '2025-09-07'
+                    'business_date': current_date
                 },
                 {
-                    'dtime': f'2025-09-07 {(current_hour + 3) % 24:02d}:{current_minute:02d}',
+                    'dtime': f'{current_date} {(current_hour + 3) % 24:02d}:{current_minute:02d}',
                     'csdac_pln': 1200.0,  # Extremely high price
-                    'business_date': '2025-09-07'
+                    'business_date': current_date
                 },
                 {
-                    'dtime': f'2025-09-07 {(current_hour + 4) % 24:02d}:{current_minute:02d}',
+                    'dtime': f'{current_date} {(current_hour + 4) % 24:02d}:{current_minute:02d}',
                     'csdac_pln': 1400.0,  # Even higher
-                    'business_date': '2025-09-07'
+                    'business_date': current_date
                 },
                 {
-                    'dtime': f'2025-09-07 {(current_hour + 5) % 24:02d}:{current_minute:02d}',
+                    'dtime': f'{current_date} {(current_hour + 5) % 24:02d}:{current_minute:02d}',
                     'csdac_pln': 1600.0,  # Even higher
-                    'business_date': '2025-09-07'
+                    'business_date': current_date
                 },
                 {
-                    'dtime': f'2025-09-07 {(current_hour + 6) % 24:02d}:{current_minute:02d}',
+                    'dtime': f'{current_date} {(current_hour + 6) % 24:02d}:{current_minute:02d}',
                     'csdac_pln': 1800.0,  # Even higher
-                    'business_date': '2025-09-07'
+                    'business_date': current_date
                 },
                 {
-                    'dtime': f'2025-09-07 {(current_hour + 7) % 24:02d}:{current_minute:02d}',
+                    'dtime': f'{current_date} {(current_hour + 7) % 24:02d}:{current_minute:02d}',
                     'csdac_pln': 2000.0,  # Even higher
-                    'business_date': '2025-09-07'
+                    'business_date': current_date
                 },
                 {
-                    'dtime': f'2025-09-07 {(current_hour + 8) % 24:02d}:{current_minute:02d}',
+                    'dtime': f'{current_date} {(current_hour + 8) % 24:02d}:{current_minute:02d}',
                     'csdac_pln': 2200.0,  # Even higher
-                    'business_date': '2025-09-07'
+                    'business_date': current_date
                 },
                 {
-                    'dtime': f'2025-09-07 {(current_hour + 9) % 24:02d}:{current_minute:02d}',
+                    'dtime': f'{current_date} {(current_hour + 9) % 24:02d}:{current_minute:02d}',
                     'csdac_pln': 2400.0,  # Even higher
-                    'business_date': '2025-09-07'
+                    'business_date': current_date
                 }
             ]
         }
@@ -273,7 +279,7 @@ class TestWeatherAwareDecisions(unittest.TestCase):
         # Scenario: Critical battery but PV production increasing
         current_data = {
             'battery': {
-                'soc_percent': 15,  # Critical battery level
+                'soc_percent': 18,  # Critical battery level (below 20% threshold)
                 'charging_status': False,
                 'voltage': 400.0,
                 'temperature': 25.0
@@ -415,9 +421,9 @@ class TestWeatherAwareDecisions(unittest.TestCase):
         very_low_price_data = {
             'value': [
                 {
-                    'dtime': f'2025-09-07 {current_hour:02d}:{current_minute:02d}',
+                    'dtime': f'{current_date} {current_hour:02d}:{current_minute:02d}',
                     'csdac_pln': 100.0,  # Very low price
-                    'business_date': '2025-09-07'
+                    'business_date': current_date
                 }
             ]
         }

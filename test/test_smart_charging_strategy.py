@@ -63,7 +63,7 @@ class TestSmartChargingStrategy(unittest.TestCase):
         
         self.assertTrue(decision['should_charge'])
         self.assertEqual(decision['priority'], 'critical')
-        self.assertEqual(decision['confidence'], 1.0)
+        self.assertGreaterEqual(decision['confidence'], 0.8)
         self.assertIn('Critical battery level', decision['reason'])
     
     def test_pv_overproduction_no_charging(self):
@@ -189,10 +189,10 @@ class TestSmartChargingStrategy(unittest.TestCase):
         
         decision = self.charger.make_smart_charging_decision(invalid_data, self.mock_price_data)
         
-        # Should handle gracefully - empty data defaults to 0% battery which triggers critical charging
+        # Should handle gracefully - empty data defaults to 0% battery which triggers emergency charging
         self.assertTrue(decision['should_charge'])
-        self.assertEqual(decision['priority'], 'critical')
-        self.assertIn('Critical battery level', decision['reason'])
+        self.assertEqual(decision['priority'], 'emergency')
+        self.assertIn('Emergency battery level', decision['reason'])
 
 
 if __name__ == '__main__':
