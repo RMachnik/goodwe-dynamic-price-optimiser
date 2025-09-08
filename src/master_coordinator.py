@@ -590,7 +590,7 @@ class MasterCoordinator:
             # Check if this is a critical battery situation (force start)
             battery_data = self.current_data.get('battery', {})
             battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
-            force_start = battery_soc <= 20  # Critical battery level
+            force_start = battery_soc <= 5  # Emergency battery level only
             
             await self.charging_controller.start_price_based_charging(
                 decision.get('price_data'), 
@@ -943,10 +943,15 @@ class MultiFactorDecisionEngine:
             
             battery_soc = current_data.get('battery', {}).get('soc_percent', 50)
             
-            # Critical battery level - always charge regardless of timing recommendation
-            if battery_soc <= 20:
-                logger.info("Critical battery level - overriding timing recommendation")
+            # Emergency battery level - always charge regardless of timing recommendation
+            if battery_soc <= 5:
+                logger.info("Emergency battery level - overriding timing recommendation")
                 return 'start_charging'
+            
+            # Critical battery level - smart price-aware charging (let decision engine handle)
+            if battery_soc <= 10:
+                logger.info("Critical battery level - using smart price-aware charging")
+                # Continue with normal decision process
             
             # Apply timing recommendation
             if timing_recommendation.should_wait:

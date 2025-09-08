@@ -26,10 +26,9 @@ optimization_rules:
 ```
 
 **Behavior**:
-- **12% SOC + 1.0 PLN/kWh**: Wait for better price (if weather allows)
-- **12% SOC + 0.3 PLN/kWh**: Charge immediately (acceptable price)
-- **11% SOC + 1.0 PLN/kWh**: Use normal critical logic (not exactly 12%)
-- **12% SOC + 0.5 PLN/kWh + PV improving**: Wait for PV improvement (weather-aware)
+- **10% SOC + 1.0 PLN/kWh**: Wait for better price
+- **10% SOC + 0.5 PLN/kWh**: Charge immediately (acceptable price)
+- **9% SOC + 1.0 PLN/kWh**: Use normal critical logic (not exactly 10%)
 
 ### Rule 2: Proactive Charging
 **Logic**: When PV is poor, weather won't improve, battery <80%, and price is not high → Charge proactively
@@ -70,16 +69,13 @@ optimization_rules:
 ```
 Battery Level Check:
 ├── ≤ 5% SOC → Emergency charging (always charge)
-├── 6-12% SOC → Smart critical charging (weather-aware)
-│   ├── Rule 1: 12% SOC + high price → Wait (if PV improving)
-│   ├── Price ≤ 0.35 PLN/kWh → Charge immediately
-│   ├── PV improving ≥2kW in 30min + price >0.4 PLN/kWh → Wait for PV
+├── 6-10% SOC → Smart critical charging
+│   ├── Rule 1: 10% SOC + high price → Wait
+│   ├── Price ≤ 0.6 PLN/kWh → Charge
 │   ├── Better price in ≤6h + ≥30% savings → Wait
 │   └── Otherwise → Charge
-├── 13-40% SOC → Normal logic + Rule 2
+├── 11-40% SOC → Normal logic + Rule 2
 │   ├── Rule 2: PV poor + battery <80% + price ≤0.7 PLN/kWh → Proactive charge
-│   ├── High consumption + low battery + price ≤0.35 PLN/kWh → Charge
-│   ├── High consumption + low battery + price >0.35 PLN/kWh → Wait for better price
 │   └── Normal price analysis
 └── >40% SOC → Normal logic only
 ```
