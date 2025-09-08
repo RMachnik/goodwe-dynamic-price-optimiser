@@ -417,6 +417,7 @@ class TestWeatherAwareDecisions(unittest.TestCase):
         current_time = datetime.now()
         current_hour = current_time.hour
         current_minute = (current_time.minute // 15) * 15  # Round to nearest 15 minutes
+        current_date = current_time.strftime('%Y-%m-%d')
         
         very_low_price_data = {
             'value': [
