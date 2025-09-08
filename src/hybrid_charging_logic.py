@@ -70,7 +70,8 @@ class HybridChargingLogic:
         
         # Decision thresholds
         self.min_savings_threshold_pln = self.config.get('min_savings_threshold_pln', 50.0)
-        self.critical_battery_threshold = self.config.get('critical_battery_threshold', 20.0)  # 20% SOC
+        self.critical_battery_threshold = self.config.get('critical_battery_threshold', 10.0)  # 10% SOC - price aware
+        self.emergency_battery_threshold = self.config.get('emergency_battery_threshold', 5.0)  # 5% SOC - always charge
         self.low_battery_threshold = self.config.get('low_battery_threshold', 40.0)  # 40% SOC
         
         # Hybrid charging parameters
@@ -173,9 +174,13 @@ class HybridChargingLogic:
         battery_soc = current_data.get('battery', {}).get('soc_percent', 50)
         current_pv_kw = current_data.get('photovoltaic', {}).get('current_power_kw', 0)
         
-        # Critical battery level - charge immediately
-        if battery_soc <= self.critical_battery_threshold:
+        # Emergency battery level - charge immediately regardless of price
+        if battery_soc <= self.emergency_battery_threshold:
             return self._create_emergency_charging_decision(current_data, price_data, energy_needed_kwh)
+        
+        # Critical battery level - smart price-aware charging
+        if battery_soc <= self.critical_battery_threshold:
+            return self._create_smart_critical_charging_decision(current_data, price_data, energy_needed_kwh, timing_analysis)
         
         # Get optimal price window
         optimal_window_data = timing_analysis.get('optimal_window')
@@ -216,8 +221,8 @@ class HybridChargingLogic:
     
     def _create_emergency_charging_decision(self, current_data: Dict[str, Any], 
                                           price_data: Dict[str, Any], energy_needed_kwh: float) -> ChargingDecision:
-        """Create emergency charging decision for critical battery level"""
-        logger.warning("Critical battery level - charging immediately")
+        """Create emergency charging decision for emergency battery level"""
+        logger.warning("Emergency battery level - charging immediately regardless of price")
         
         # Use current price for emergency charging
         current_price = self._get_current_price(price_data)
@@ -237,11 +242,106 @@ class HybridChargingLogic:
             estimated_cost_pln=estimated_cost_pln,
             estimated_savings_pln=0.0,  # No savings for emergency charging
             confidence=1.0,
-            reason=f'Critical battery level ({current_data.get("battery", {}).get("soc_percent", 0)}%) - charging immediately',
+            reason=f'Emergency battery level ({current_data.get("battery", {}).get("soc_percent", 0)}%) - charging immediately',
             start_time=datetime.now(),
             end_time=datetime.now() + timedelta(hours=charging_time_hours),
             grid_contribution_kwh=energy_needed_kwh
         )
+    
+    def _create_smart_critical_charging_decision(self, current_data: Dict[str, Any], 
+                                                price_data: Dict[str, Any], 
+                                                energy_needed_kwh: float,
+                                                timing_analysis: Dict[str, Any]) -> ChargingDecision:
+        """Create smart critical charging decision that considers price and timing"""
+        battery_soc = current_data.get('battery', {}).get('soc_percent', 0)
+        logger.warning(f"Critical battery level ({battery_soc}%) - analyzing price and timing")
+        
+        # Get current price and optimal window
+        current_price = self._get_current_price(price_data)
+        optimal_window_data = timing_analysis.get('optimal_window')
+        
+        if not optimal_window_data:
+            # No price data available - charge immediately for safety
+            charging_time_hours = energy_needed_kwh / self.charging_rate_kw
+            energy_cost_pln = energy_needed_kwh * (current_price / 1000.0) if current_price else 0.0
+            estimated_cost_pln = energy_cost_pln / self.grid_charging_efficiency
+            
+            return ChargingDecision(
+                action='start_charging',
+                charging_source='grid',
+                duration_hours=charging_time_hours,
+                energy_kwh=energy_needed_kwh,
+                estimated_cost_pln=estimated_cost_pln,
+                estimated_savings_pln=0.0,
+                confidence=0.8,
+                reason=f'Critical battery ({battery_soc}%) - no price data available',
+                start_time=datetime.now(),
+                end_time=datetime.now() + timedelta(hours=charging_time_hours),
+                grid_contribution_kwh=energy_needed_kwh
+            )
+        
+        optimal_window = self._create_price_window_from_data(optimal_window_data)
+        max_critical_price = 0.6  # PLN/kWh - configurable threshold
+        
+        if current_price and current_price <= max_critical_price:
+            # Price is acceptable for critical charging
+            charging_time_hours = energy_needed_kwh / self.charging_rate_kw
+            energy_cost_pln = energy_needed_kwh * (current_price / 1000.0)
+            estimated_cost_pln = energy_cost_pln / self.grid_charging_efficiency
+            
+            return ChargingDecision(
+                action='start_charging',
+                charging_source='grid',
+                duration_hours=charging_time_hours,
+                energy_kwh=energy_needed_kwh,
+                estimated_cost_pln=estimated_cost_pln,
+                estimated_savings_pln=0.0,
+                confidence=0.9,
+                reason=f'Critical battery ({battery_soc}%) + acceptable price ({current_price:.3f} PLN/kWh)',
+                start_time=datetime.now(),
+                end_time=datetime.now() + timedelta(hours=charging_time_hours),
+                grid_contribution_kwh=energy_needed_kwh
+            )
+        else:
+            # Price is high - wait for better price if timing analysis recommends it
+            recommendation = timing_analysis.get('recommendation', 'wait')
+            if recommendation == 'wait' and optimal_window:
+                charging_time_hours = energy_needed_kwh / self.charging_rate_kw
+                energy_cost_pln = energy_needed_kwh * (optimal_window.avg_price_pln / 1000.0)
+                estimated_cost_pln = energy_cost_pln / self.grid_charging_efficiency
+                
+                return ChargingDecision(
+                    action='wait',
+                    charging_source='wait',
+                    duration_hours=charging_time_hours,
+                    energy_kwh=energy_needed_kwh,
+                    estimated_cost_pln=estimated_cost_pln,
+                    estimated_savings_pln=0.0,
+                    confidence=0.7,
+                    reason=f'Critical battery ({battery_soc}%) but waiting for better price ({optimal_window.avg_price_pln:.3f} PLN/kWh in {optimal_window.start_time.strftime("%H:%M")})',
+                    start_time=optimal_window.start_time,
+                    end_time=optimal_window.end_time,
+                    grid_contribution_kwh=energy_needed_kwh
+                )
+            else:
+                # Charge now despite high price
+                charging_time_hours = energy_needed_kwh / self.charging_rate_kw
+                energy_cost_pln = energy_needed_kwh * (current_price / 1000.0) if current_price else 0.0
+                estimated_cost_pln = energy_cost_pln / self.grid_charging_efficiency
+                
+                return ChargingDecision(
+                    action='start_charging',
+                    charging_source='grid',
+                    duration_hours=charging_time_hours,
+                    energy_kwh=energy_needed_kwh,
+                    estimated_cost_pln=estimated_cost_pln,
+                    estimated_savings_pln=0.0,
+                    confidence=0.8,
+                    reason=f'Critical battery ({battery_soc}%) + high price ({current_price:.3f} PLN/kWh) - charging now',
+                    start_time=datetime.now(),
+                    end_time=datetime.now() + timedelta(hours=charging_time_hours),
+                    grid_contribution_kwh=energy_needed_kwh
+                )
     
     def _create_pv_charging_decision(self, current_data: Dict[str, Any], pv_forecasts: List[Dict],
                                    optimal_window: PriceWindow, energy_needed_kwh: float) -> ChargingDecision:

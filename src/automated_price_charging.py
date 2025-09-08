@@ -41,6 +41,10 @@ class AutomatedPriceCharger:
             self.config_path = str(current_dir / "config" / "master_coordinator_config.yaml")
         else:
             self.config_path = config_path
+        
+        # Load configuration first
+        self._load_config()
+        
         self.goodwe_charger = GoodWeFastCharger(self.config_path)
         self.data_collector = EnhancedDataCollector(self.config_path)
         self.price_api_url = "https://api.raporty.pse.pl/api/csdac-pln"
@@ -51,15 +55,58 @@ class AutomatedPriceCharger:
         self.decision_history = []
         
         # Smart charging thresholds
-        self.critical_battery_threshold = 20  # % - Always charge if below this
+        self.critical_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('critical', 10)  # % - Price-aware charging
+        self.emergency_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('emergency', 5)  # % - Always charge regardless of price
         self.low_battery_threshold = 30  # % - Consider charging if below this
         self.medium_battery_threshold = 50  # % - Only charge if conditions are favorable
         self.price_savings_threshold = 0.3  # 30% savings required to wait
         self.overproduction_threshold = 500  # W - Significant overproduction
         self.high_consumption_threshold = 1000  # W - High consumption
         
+        # Smart critical charging configuration
+        smart_critical_config = self.config.get('timing_awareness', {}).get('smart_critical_charging', {})
+        self.smart_critical_enabled = smart_critical_config.get('enabled', True)
+        self.max_critical_price = smart_critical_config.get('max_critical_price_pln', 0.6)  # PLN/kWh
+        self.max_wait_hours = smart_critical_config.get('max_wait_hours', 6)  # hours
+        self.min_price_savings_percent = smart_critical_config.get('min_price_savings_percent', 30)  # %
+        self.emergency_override_price = smart_critical_config.get('emergency_override_price', True)
+        
+        # Advanced optimization rules
+        optimization_rules = smart_critical_config.get('optimization_rules', {})
+        self.wait_at_10_percent_if_high_price = optimization_rules.get('wait_at_10_percent_if_high_price', True)
+        self.high_price_threshold = optimization_rules.get('high_price_threshold_pln', 0.8)  # PLN/kWh
+        self.proactive_charging_enabled = optimization_rules.get('proactive_charging_enabled', True)
+        self.pv_poor_threshold = optimization_rules.get('pv_poor_threshold_w', 200)  # Watts
+        self.battery_target_threshold = optimization_rules.get('battery_target_threshold', 80)  # %
+        self.weather_improvement_hours = optimization_rules.get('weather_improvement_hours', 6)  # hours
+        self.max_proactive_price = optimization_rules.get('max_proactive_price_pln', 0.7)  # PLN/kWh
+        
+        # Super low price charging rules
+        self.super_low_price_enabled = optimization_rules.get('super_low_price_charging_enabled', True)
+        self.super_low_price_threshold = optimization_rules.get('super_low_price_threshold_pln', 0.3)  # PLN/kWh
+        self.super_low_price_target_soc = optimization_rules.get('super_low_price_target_soc', 100)  # %
+        self.super_low_price_min_duration = optimization_rules.get('super_low_price_min_duration_hours', 1.0)  # hours
+        
+        # PV preference during super low prices
+        pv_preference_config = optimization_rules.get('super_low_price_pv_preference', {})
+        self.pv_excellent_threshold = pv_preference_config.get('pv_excellent_threshold_w', 3000)  # Watts
+        self.weather_stable_threshold = pv_preference_config.get('weather_stable_threshold', 0.8)  # confidence
+        self.house_usage_low_threshold = pv_preference_config.get('house_usage_low_threshold_w', 1000)  # Watts
+        self.pv_charging_time_limit = pv_preference_config.get('pv_charging_time_limit_hours', 2.0)  # hours
+        
         # Load electricity pricing configuration
         self._load_pricing_config()
+    
+    def _load_config(self):
+        """Load configuration from config file"""
+        try:
+            import yaml
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                self.config = yaml.safe_load(f) or {}
+            logger.info(f"Loaded configuration from {self.config_path}")
+        except Exception as e:
+            logger.error(f"Failed to load configuration: {e}")
+            self.config = {}
     
     def _load_pricing_config(self):
         """Load electricity pricing configuration from config file"""
@@ -315,19 +362,259 @@ class AutomatedPriceCharger:
             logger.error(f"Error analyzing prices: {e}")
             return None, None, None
     
+    def _smart_critical_charging_decision(self, battery_soc: int, current_price: Optional[float],
+                                        cheapest_price: Optional[float], cheapest_hour: Optional[int]) -> Dict[str, any]:
+        """Smart critical charging decision that considers price and timing"""
+        
+        if not self.smart_critical_enabled:
+            # Fallback to old behavior if smart critical charging is disabled
+            return {
+                'should_charge': True,
+                'reason': f'Critical battery level ({battery_soc}% < {self.critical_battery_threshold}%) - smart charging disabled',
+                'priority': 'critical',
+                'confidence': 1.0
+            }
+        
+        # If no price data available, charge immediately for safety
+        if not current_price or not cheapest_price or not cheapest_hour:
+            return {
+                'should_charge': True,
+                'reason': f'Critical battery level ({battery_soc}%) - no price data available',
+                'priority': 'critical',
+                'confidence': 0.8
+            }
+        
+        # Calculate savings and timing
+        savings_percent = self._calculate_savings(current_price, cheapest_price)
+        hours_to_wait = cheapest_hour - datetime.now().hour
+        if hours_to_wait < 0:
+            hours_to_wait += 24  # Next day
+        
+        # OPTIMIZATION RULE 1: At 10% SOC with high price, always wait for price drop
+        if (self.wait_at_10_percent_if_high_price and 
+            battery_soc == 10 and 
+            current_price > self.high_price_threshold):
+            return {
+                'should_charge': False,
+                'reason': f'Critical battery (10%) but high price ({current_price:.3f} PLN/kWh > {self.high_price_threshold} PLN/kWh) - waiting for price drop',
+                'priority': 'critical',
+                'confidence': 0.9
+            }
+        
+        # Decision logic for critical battery
+        if current_price <= self.max_critical_price:
+            # Price is acceptable for critical charging
+            return {
+                'should_charge': True,
+                'reason': f'Critical battery ({battery_soc}%) + acceptable price ({current_price:.3f} PLN/kWh ≤ {self.max_critical_price} PLN/kWh)',
+                'priority': 'critical',
+                'confidence': 0.9
+            }
+        
+        elif hours_to_wait <= self.max_wait_hours and savings_percent >= self.min_price_savings_percent:
+            # Wait for much better price if it's not too long and savings are significant
+            return {
+                'should_charge': False,
+                'reason': f'Critical battery ({battery_soc}%) but much cheaper price in {hours_to_wait}h ({cheapest_price:.3f} vs {current_price:.3f} PLN/kWh, {savings_percent:.1f}% savings)',
+                'priority': 'critical',
+                'confidence': 0.7
+            }
+        
+        else:
+            # Price is high but waiting too long or insufficient savings - charge now
+            return {
+                'should_charge': True,
+                'reason': f'Critical battery ({battery_soc}%) + high price ({current_price:.3f} PLN/kWh) but waiting {hours_to_wait}h for {savings_percent:.1f}% savings not optimal',
+                'priority': 'critical',
+                'confidence': 0.8
+            }
+
+    def _check_proactive_charging_conditions(self, battery_soc: int, overproduction: int, 
+                                           current_price: Optional[float], cheapest_price: Optional[float], 
+                                           cheapest_hour: Optional[int]) -> Optional[Dict[str, any]]:
+        """Check if proactive charging conditions are met"""
+        
+        # Get current PV power (assuming it's passed as negative overproduction)
+        current_pv_power = abs(overproduction) if overproduction < 0 else 0
+        
+        # Condition 1: PV is poor (below threshold)
+        if current_pv_power > self.pv_poor_threshold:
+            return None  # PV is good, no need for proactive charging
+        
+        # Condition 2: Battery is below target threshold
+        if battery_soc >= self.battery_target_threshold:
+            return None  # Battery is already well charged
+        
+        # Condition 3: Price is not high (below max proactive price)
+        if not current_price or current_price > self.max_proactive_price:
+            return None  # Price is too high for proactive charging
+        
+        # Condition 4: Weather won't improve significantly in next few hours
+        # This is a simplified check - in real implementation, you'd check weather forecast
+        # For now, we'll assume if PV is poor now, it won't improve much
+        weather_will_improve = self._check_weather_improvement()
+        if weather_will_improve:
+            return None  # Weather will improve, wait for PV
+        
+        # All conditions met - proactive charging recommended
+        return {
+            'should_charge': True,
+            'reason': f'Proactive charging: PV poor ({current_pv_power}W < {self.pv_poor_threshold}W), battery low ({battery_soc}% < {self.battery_target_threshold}%), price good ({current_price:.3f} PLN/kWh ≤ {self.max_proactive_price} PLN/kWh), weather poor',
+            'priority': 'proactive',
+            'confidence': 0.8
+        }
+    
+    def _check_weather_improvement(self) -> bool:
+        """Check if weather will improve in the next few hours"""
+        # This is a simplified implementation
+        # In a real system, you would:
+        # 1. Get weather forecast for next 6 hours
+        # 2. Check cloud cover, precipitation, solar irradiance
+        # 3. Determine if PV production will improve significantly
+        
+        # For now, return False (weather won't improve) to enable proactive charging
+        # This can be enhanced with actual weather data integration
+        return False
+
+    def _check_weather_stability(self) -> bool:
+        """Check if weather conditions are stable for PV charging"""
+        # This is a simplified implementation
+        # In a real system, you would:
+        # 1. Get weather forecast for next 2-4 hours
+        # 2. Check cloud cover trends (stable vs increasing)
+        # 3. Check precipitation probability
+        # 4. Check wind conditions (affects PV efficiency)
+        
+        # For now, return True (weather stable) to enable PV preference
+        # This can be enhanced with actual weather data integration
+        return True
+
+    def _check_house_usage_low(self) -> bool:
+        """Check if house usage is low enough for PV charging"""
+        # This is a simplified implementation
+        # In a real system, you would:
+        # 1. Get current house consumption
+        # 2. Check if PV power > house consumption + charging needs
+        # 3. Consider forecasted consumption patterns
+        
+        # For now, return True (house usage low) to enable PV preference
+        # This can be enhanced with actual consumption data integration
+        return True
+
+    def _check_super_low_price_conditions(self, battery_soc: int, overproduction: int, 
+                                         current_price: Optional[float], cheapest_price: Optional[float], 
+                                         cheapest_hour: Optional[int]) -> Optional[Dict[str, any]]:
+        """Check if super low price charging conditions are met with PV preference logic"""
+        
+        # Condition 1: Current price is super low
+        if not current_price or current_price > self.super_low_price_threshold:
+            return None  # Price is not super low
+        
+        # Condition 2: Battery is not already at target SOC
+        if battery_soc >= self.super_low_price_target_soc:
+            return None  # Battery is already fully charged
+        
+        # Condition 3: Super low price period has sufficient duration
+        if cheapest_hour:
+            hours_to_wait = cheapest_hour - datetime.now().hour
+            if hours_to_wait < 0:
+                hours_to_wait += 24  # Next day
+            
+            # Check if super low price period is long enough
+            if hours_to_wait < self.super_low_price_min_duration:
+                return None  # Super low price period too short
+        
+        # Get current conditions
+        current_pv_power = abs(overproduction) if overproduction < 0 else 0
+        battery_capacity = 10.0  # kWh (configurable)
+        charging_rate = 3.0  # kW (configurable)
+        
+        # Calculate energy needed to reach target SOC
+        energy_needed = (self.super_low_price_target_soc - battery_soc) / 100 * battery_capacity
+        
+        # Calculate charging times
+        if current_pv_power > 0:
+            pv_charging_time = energy_needed / (current_pv_power / 1000)  # Convert W to kW
+        else:
+            pv_charging_time = float('inf')  # No PV available
+        
+        grid_charging_time = energy_needed / charging_rate
+        
+        # NEW LOGIC: Check if PV conditions are excellent for charging
+        pv_excellent = current_pv_power >= self.pv_excellent_threshold  # PV power ≥ 3kW
+        weather_stable = self._check_weather_stability()  # Weather stability check
+        house_usage_low = self._check_house_usage_low()  # House usage check
+        
+        # Decision logic with PV preference
+        if pv_excellent and weather_stable and house_usage_low:
+            # PV is excellent, weather is stable, house usage is low - prefer PV charging
+            if pv_charging_time <= self.pv_charging_time_limit:
+                # PV can charge fully within time limit - use PV charging
+                return {
+                    'should_charge': True,
+                    'reason': f'Super low price ({current_price:.3f} PLN/kWh) + PV excellent ({current_pv_power}W) + weather stable + house usage low - charging from PV to {self.super_low_price_target_soc}%',
+                    'priority': 'super_low_price_pv',
+                    'confidence': 0.9,
+                    'charging_source': 'pv',
+                    'target_soc': self.super_low_price_target_soc,
+                    'estimated_cost': 0.0,  # PV charging is free
+                    'energy_needed': energy_needed,
+                    'charging_time_hours': pv_charging_time
+                }
+            else:
+                # PV excellent but takes too long - use grid charging for speed
+                return {
+                    'should_charge': True,
+                    'reason': f'Super low price ({current_price:.3f} PLN/kWh) + PV excellent ({current_pv_power}W) but slow ({pv_charging_time:.1f}h > {self.pv_charging_time_limit}h) - charging from grid to {self.super_low_price_target_soc}%',
+                    'priority': 'super_low_price_grid',
+                    'confidence': 0.95,
+                    'charging_source': 'grid',
+                    'target_soc': self.super_low_price_target_soc,
+                    'estimated_cost': current_price * energy_needed,
+                    'energy_needed': energy_needed,
+                    'charging_time_hours': grid_charging_time
+                }
+        else:
+            # PV not excellent or conditions not ideal - use grid charging
+            pv_conditions = []
+            if not pv_excellent:
+                pv_conditions.append(f"PV insufficient ({current_pv_power}W < {self.pv_excellent_threshold}W)")
+            if not weather_stable:
+                pv_conditions.append("weather unstable")
+            if not house_usage_low:
+                pv_conditions.append("house usage high")
+            
+            return {
+                'should_charge': True,
+                'reason': f'Super low price ({current_price:.3f} PLN/kWh) + {", ".join(pv_conditions)} - charging from grid to {self.super_low_price_target_soc}%',
+                'priority': 'super_low_price_grid',
+                'confidence': 0.95,
+                'charging_source': 'grid',
+                'target_soc': self.super_low_price_target_soc,
+                'estimated_cost': current_price * energy_needed,
+                'energy_needed': energy_needed,
+                'charging_time_hours': grid_charging_time
+            }
+
     def _make_charging_decision(self, battery_soc: int, overproduction: int, grid_power: int,
                               grid_direction: str, current_price: Optional[float],
                               cheapest_price: Optional[float], cheapest_hour: Optional[int]) -> Dict[str, any]:
         """Make the final charging decision based on all factors"""
         
-        # CRITICAL: Battery below critical threshold
-        if battery_soc < self.critical_battery_threshold:
+        # EMERGENCY: Battery below emergency threshold - always charge regardless of price
+        if battery_soc < self.emergency_battery_threshold:
             return {
                 'should_charge': True,
-                'reason': f'Critical battery level ({battery_soc}% < {self.critical_battery_threshold}%)',
-                'priority': 'critical',
+                'reason': f'Emergency battery level ({battery_soc}% < {self.emergency_battery_threshold}%) - charging immediately',
+                'priority': 'emergency',
                 'confidence': 1.0
             }
+        
+        # CRITICAL: Battery below critical threshold - smart price-aware charging
+        if battery_soc < self.critical_battery_threshold:
+            return self._smart_critical_charging_decision(
+                battery_soc, current_price, cheapest_price, cheapest_hour
+            )
         
         # HIGH: PV overproduction - no need to charge from grid
         if overproduction > self.overproduction_threshold:
@@ -347,6 +634,22 @@ class AutomatedPriceCharger:
                 'priority': 'high',
                 'confidence': 0.8
             }
+        
+        # OPTIMIZATION RULE 3: Super low price grid charging - always charge fully from grid during super low prices
+        if self.super_low_price_enabled:
+            super_low_decision = self._check_super_low_price_conditions(
+                battery_soc, overproduction, current_price, cheapest_price, cheapest_hour
+            )
+            if super_low_decision:
+                return super_low_decision
+        
+        # OPTIMIZATION RULE 2: Proactive charging when PV is poor, weather won't improve, battery <80%, and price is not high
+        if self.proactive_charging_enabled:
+            proactive_decision = self._check_proactive_charging_conditions(
+                battery_soc, overproduction, current_price, cheapest_price, cheapest_hour
+            )
+            if proactive_decision:
+                return proactive_decision
         
         # MEDIUM: Price analysis
         if current_price and cheapest_price and cheapest_hour:
@@ -398,7 +701,7 @@ class AutomatedPriceCharger:
             return False
         
         if force_start:
-            logger.info("Starting charging due to critical battery level (overriding price check)")
+            logger.info("Starting charging due to emergency battery level (overriding price check)")
         else:
             logger.info("Starting price-based charging...")
         
