@@ -70,8 +70,11 @@ class HybridChargingLogic:
         
         # Decision thresholds
         self.min_savings_threshold_pln = self.config.get('min_savings_threshold_pln', 50.0)
-        self.critical_battery_threshold = self.config.get('critical_battery_threshold', 10.0)  # 10% SOC - price aware
-        self.emergency_battery_threshold = self.config.get('emergency_battery_threshold', 5.0)  # 5% SOC - always charge
+        
+        # Get thresholds from timing_analysis section if available, otherwise use defaults
+        timing_config = self.config.get('timing_analysis', {})
+        self.critical_battery_threshold = timing_config.get('critical_battery_soc', self.config.get('critical_battery_threshold', 10.0))  # SOC - price aware
+        self.emergency_battery_threshold = timing_config.get('urgent_charging_soc', self.config.get('emergency_battery_threshold', 5.0))  # SOC - always charge
         self.low_battery_threshold = self.config.get('low_battery_threshold', 40.0)  # 40% SOC
         
         # Hybrid charging parameters
@@ -172,7 +175,9 @@ class HybridChargingLogic:
         """Make the optimal charging decision based on all factors"""
         
         battery_soc = current_data.get('battery', {}).get('soc_percent', 50)
-        current_pv_kw = current_data.get('photovoltaic', {}).get('current_power_kw', 0)
+        # Handle different PV data formats
+        pv_data = current_data.get('photovoltaic', current_data.get('pv', {}))
+        current_pv_kw = pv_data.get('current_power_kw', pv_data.get('power', 0)) / 1000.0  # Convert W to kW
         
         # Emergency battery level - charge immediately regardless of price
         if battery_soc <= self.emergency_battery_threshold:
@@ -441,9 +446,18 @@ class HybridChargingLogic:
         # Use specific reason from timing analysis if available
         if timing_analysis and 'pv_timing' in timing_analysis:
             pv_timing = timing_analysis['pv_timing']
-            reason = pv_timing.get('reason', "Grid charging recommended due to insufficient PV conditions")
+            pv_reason = pv_timing.get('reason', '')
+            # If PV timing shows PV is insufficient, use that reason
+            if 'too low' in pv_reason.lower() or 'insufficient' in pv_reason.lower():
+                reason = f"Grid charging - {pv_reason}"
+            else:
+                reason = f"Grid charging recommended due to insufficient PV conditions"
         else:
             reason = f"Grid charging recommended due to insufficient PV conditions"
+        
+        # Add low price window information if available
+        if optimal_window.duration_hours < 2.0:  # Short window
+            reason += f" - Low price window ({optimal_window.duration_hours:.1f}h)"
         
         return ChargingDecision(
             action='start_grid_charging',

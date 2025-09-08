@@ -948,10 +948,10 @@ class MultiFactorDecisionEngine:
                 logger.info("Emergency battery level - overriding timing recommendation")
                 return 'start_charging'
             
-            # Critical battery level - smart price-aware charging (let decision engine handle)
-            if battery_soc <= 10:
-                logger.info("Critical battery level - using smart price-aware charging")
-                # Continue with normal decision process
+            # Critical battery level - override weather recommendations and charge immediately
+            if battery_soc <= 20:  # Critical threshold should match config
+                logger.info("Critical battery level - overriding weather recommendation to charge immediately")
+                return 'start_charging'
             
             # Apply timing recommendation
             if timing_recommendation.should_wait:
