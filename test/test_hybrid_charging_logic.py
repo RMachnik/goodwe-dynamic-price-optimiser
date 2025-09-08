@@ -230,15 +230,16 @@ class TestHybridChargingLogic(unittest.TestCase):
         # Critical scenario: Low price window ending soon, insufficient PV
         current_data = self.mock_current_data.copy()
         current_data['pv']['power'] = 800.0  # 800W PV (insufficient for fast charging)
-        current_data['battery']['soc_percent'] = 30.0  # 30% SOC
+        current_data['battery']['soc_percent'] = 25.0  # 25% SOC (low but not critical)
         current_data['battery']['capacity_kwh'] = 10.0
         
         # Very low price with short window
         price_data = self.mock_price_data.copy()
         price_data['current_price'] = 0.03  # Very low price
         # Use future prices to avoid being filtered out as past prices
-        price_data['prices'] = [0.03, 0.04, 0.05, 0.06]  # Short window (1 hour)
-        price_data['price_window_remaining_hours'] = 2.0  # Short window
+        # Provide 4 price points (1 hour) to make window shorter and more urgent
+        price_data['prices'] = [0.03, 0.04, 0.05, 0.06]  # 1-hour window (more urgent)
+        price_data['price_window_remaining_hours'] = 1.0  # Very short window
         
         # PV forecast shows slow improvement
         pv_forecast = [

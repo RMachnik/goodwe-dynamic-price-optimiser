@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from pathlib import Path
 import sys
 import os
+import pytest
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -82,6 +83,7 @@ class TestMultiSessionManager(unittest.TestCase):
             self.assertFalse(manager.enabled)
     
     @patch('multi_session_manager.PolishElectricityAnalyzer')
+    @pytest.mark.asyncio
     async def test_create_daily_plan_success(self, mock_analyzer_class):
         """Test successful daily plan creation"""
         # Mock price analyzer
@@ -131,6 +133,7 @@ class TestMultiSessionManager(unittest.TestCase):
         self.assertEqual(plan.sessions[1].priority, 2)
     
     @patch('multi_session_manager.PolishElectricityAnalyzer')
+    @pytest.mark.asyncio
     async def test_create_daily_plan_no_windows(self, mock_analyzer_class):
         """Test daily plan creation when no optimal windows found"""
         # Mock price analyzer
@@ -147,6 +150,7 @@ class TestMultiSessionManager(unittest.TestCase):
         self.assertIsNone(plan)
     
     @patch('multi_session_manager.PolishElectricityAnalyzer')
+    @pytest.mark.asyncio
     async def test_create_daily_plan_no_price_data(self, mock_analyzer_class):
         """Test daily plan creation when no price data available"""
         # Mock price analyzer
@@ -161,11 +165,13 @@ class TestMultiSessionManager(unittest.TestCase):
         # Verify no plan created
         self.assertIsNone(plan)
     
+    @pytest.mark.asyncio
     async def test_get_next_session_no_plan(self):
         """Test getting next session when no plan exists"""
         session = await self.manager.get_next_session()
         self.assertIsNone(session)
     
+    @pytest.mark.asyncio
     async def test_get_next_session_with_plan(self):
         """Test getting next session with existing plan"""
         # Create mock plan with sessions
@@ -219,6 +225,7 @@ class TestMultiSessionManager(unittest.TestCase):
         self.assertIsNotNone(next_session)
         self.assertEqual(next_session.session_id, 'test_2')
     
+    @pytest.mark.asyncio
     async def test_start_session(self):
         """Test starting a charging session"""
         session = ChargingSession(
@@ -243,6 +250,7 @@ class TestMultiSessionManager(unittest.TestCase):
         self.assertIsNotNone(session.started_at)
         self.assertEqual(self.manager.active_session, session)
     
+    @pytest.mark.asyncio
     async def test_complete_session(self):
         """Test completing a charging session"""
         session = ChargingSession(
@@ -273,6 +281,7 @@ class TestMultiSessionManager(unittest.TestCase):
         self.assertIsNone(self.manager.active_session)
         self.assertIn(session, self.manager.session_history)
     
+    @pytest.mark.asyncio
     async def test_cancel_session(self):
         """Test cancelling a charging session"""
         session = ChargingSession(
@@ -449,6 +458,7 @@ class TestMultiSessionIntegration(unittest.TestCase):
     @patch('master_coordinator.MultiSessionManager')
     @patch('master_coordinator.AutomatedPriceCharger')
     @patch('master_coordinator.EnhancedDataCollector')
+    @pytest.mark.asyncio
     async def test_master_coordinator_multi_session_integration(self, mock_data_collector, mock_charger, mock_multi_session):
         """Test Master Coordinator integration with multi-session manager"""
         # Mock components
@@ -482,6 +492,7 @@ class TestMultiSessionIntegration(unittest.TestCase):
         self.assertIsNotNone(coordinator.multi_session_manager)
     
     @patch('master_coordinator.MultiSessionManager')
+    @pytest.mark.asyncio
     async def test_handle_multi_session_logic(self, mock_multi_session_class):
         """Test multi-session logic handling"""
         # Mock multi-session manager

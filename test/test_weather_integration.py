@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch, AsyncMock
 from datetime import datetime, timedelta
 import sys
 from pathlib import Path
+import pytest
 
 # Add src directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -184,6 +185,7 @@ class TestWeatherDataCollector(unittest.TestCase):
         self.assertFalse(self.weather_collector._is_cache_valid())
     
     @patch('aiohttp.ClientSession')
+    @pytest.mark.asyncio
     async def test_fetch_imgw_data_success(self, mock_session):
         """Test successful IMGW data fetching"""
         # Mock response
@@ -204,6 +206,7 @@ class TestWeatherDataCollector(unittest.TestCase):
         self.assertEqual(result['temperature'], 15.2)
     
     @patch('aiohttp.ClientSession')
+    @pytest.mark.asyncio
     async def test_fetch_openmeteo_data_success(self, mock_session):
         """Test successful Open-Meteo data fetching"""
         # Mock response
@@ -480,6 +483,7 @@ class TestWeatherIntegrationIntegration(unittest.TestCase):
         }
     
     @patch('aiohttp.ClientSession')
+    @pytest.mark.asyncio
     async def test_full_weather_data_collection(self, mock_session):
         """Test complete weather data collection flow"""
         # Mock IMGW response

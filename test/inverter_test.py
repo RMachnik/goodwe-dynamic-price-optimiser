@@ -5,6 +5,7 @@ import goodwe
 import logging
 import sys
 import os
+import pytest
 
 
 def test_inverter_connection():
@@ -43,10 +44,10 @@ def test_inverter_connection():
                 print(
                     f"\t{sensor.id_:30}:\t{sensor.name} = {response[sensor.id_]} {sensor.unit}"
                 )
-        return True
+        assert True, "Inverter connection successful"
     except Exception as e:
         print(f"Inverter connection test skipped: {e}")
-        return False
+        pytest.skip(f"Inverter not available: {e}")
 
 
 if __name__ == "__main__":
