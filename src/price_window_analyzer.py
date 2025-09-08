@@ -525,7 +525,7 @@ class PriceWindowAnalyzer:
         pv_timing = self._analyze_pv_timing(pv_forecasts, energy_needed_kwh, optimal_window, current_pv_power, current_price)
         
         # Determine recommendation
-        recommendation = self._determine_recommendation(optimal_window, pv_timing)
+        recommendation = self._determine_recommendation(optimal_window, pv_timing, pv_forecasts, current_pv_power)
         
         return {
             'recommendation': recommendation,
@@ -552,12 +552,37 @@ class PriceWindowAnalyzer:
             }
         
         # Consider price window duration first - if it's very short, prefer grid charging
-        if optimal_window.duration_hours < 1.5:  # Very short window (< 1.5 hours)
-            return {
-                'can_charge_with_pv': False,
-                'estimated_time_hours': float('inf'),
-                'reason': f'Low price window ({optimal_window.duration_hours:.1f}h) too short for PV charging'
-            }
+        # But allow PV charging if current PV is sufficient and price is very low
+        if optimal_window.duration_hours < 1.0:  # Very short window (< 1 hour)
+            # Check if current PV is sufficient for immediate charging
+            if current_pv_power >= 1000:  # At least 1kW current PV
+                # Allow PV charging for very short windows if PV is sufficient
+                available_for_charging = current_pv_power * 0.8 / 1000.0  # 80% for charging, convert to kW
+                pv_charging_time = energy_needed_kwh / available_for_charging
+                
+                return {
+                    'can_charge_with_pv': True,
+                    'estimated_time_hours': pv_charging_time,
+                    'avg_pv_power_kw': current_pv_power / 1000.0,
+                    'available_for_charging_kw': available_for_charging,
+                    'reason': f'Current PV sufficient ({current_pv_power}W) for immediate charging despite short window'
+                }
+            else:
+                # Check if PV is improving significantly - if so, recommend waiting
+                max_forecast_power = max([f.get('forecasted_power_kw', f.get('power_kw', 0.0)) for f in pv_forecasts])
+                current_pv_kw = current_pv_power / 1000.0
+                if max_forecast_power > current_pv_kw * 1.5:  # PV improving by more than 50%
+                    return {
+                        'can_charge_with_pv': False,
+                        'estimated_time_hours': float('inf'),
+                        'reason': f'PV improvement expected (up to {max_forecast_power:.1f} kW), waiting for better conditions'
+                    }
+                else:
+                    return {
+                        'can_charge_with_pv': False,
+                        'estimated_time_hours': float('inf'),
+                        'reason': f'Low price window ({optimal_window.duration_hours:.1f}h) too short for PV charging'
+                    }
         
         # Check if PV can complete charging within the optimal window
         window_start = optimal_window.start_time
@@ -591,7 +616,7 @@ class PriceWindowAnalyzer:
         avg_pv_power = statistics.mean(pv_during_window)
         
         # Consider current PV power - if it's very low, be more conservative
-        if current_pv_power < 500:  # Less than 500W current PV
+        if current_pv_power < 300:  # Less than 300W current PV (very low)
             # When current PV is very low, assume PV charging is not viable
             return {
                 'can_charge_with_pv': False,
@@ -601,9 +626,20 @@ class PriceWindowAnalyzer:
         
         # Consider current price - if it's not very low, be more conservative about PV charging
         if current_price > 0.3:  # Price above 0.3 PLN/kWh (medium to high)
-            # Check if PV is improving
+            # Check if PV is improving significantly
             max_forecast_power = max([f.get('forecasted_power_kw', f.get('power_kw', 0.0)) for f in pv_forecasts])
-            if max_forecast_power > current_pv_power / 1000.0:  # PV is improving
+            current_pv_kw = current_pv_power / 1000.0
+            
+            # If current PV is very low (< 500W), prefer grid charging over waiting
+            if current_pv_power < 500:
+                return {
+                    'can_charge_with_pv': False,
+                    'estimated_time_hours': float('inf'),
+                    'reason': f'Current PV too low ({current_pv_power}W), insufficient for reliable charging'
+                }
+            
+            # If PV is improving significantly (>50% improvement), recommend waiting
+            if max_forecast_power > current_pv_kw * 1.5:  # PV improving by more than 50%
                 return {
                     'can_charge_with_pv': False,
                     'estimated_time_hours': float('inf'),
@@ -636,7 +672,8 @@ class PriceWindowAnalyzer:
                 'reason': 'Insufficient PV production during optimal window'
             }
     
-    def _determine_recommendation(self, optimal_window: PriceWindow, pv_timing: Dict[str, Any]) -> str:
+    def _determine_recommendation(self, optimal_window: PriceWindow, pv_timing: Dict[str, Any], 
+                                 pv_forecasts: List[Dict] = None, current_pv_power: float = 0.0) -> str:
         """Determine the optimal charging recommendation"""
         
         # If PV can complete charging in time, prefer PV
@@ -652,7 +689,11 @@ class PriceWindowAnalyzer:
             return 'wait'
         
         # If PV timing shows PV improvement expected, recommend waiting
+        # But if current PV is very low (< 500W), prefer grid charging over waiting
         if 'PV improvement expected' in pv_timing.get('reason', ''):
+            # Check if current PV is very low - if so, recommend grid charging
+            if current_pv_power < 500:  # Very low PV power
+                return 'grid_charging'
             return 'wait'
         
         # If PV timing shows price window too short, recommend grid charging
@@ -660,11 +701,20 @@ class PriceWindowAnalyzer:
             return 'grid_charging'
         
         # If price window is very short (< 1 hour), prefer grid charging over hybrid
+        # But check if PV is improving significantly - if so, recommend waiting
         if optimal_window.duration_hours < 1.0:
+            # Check if PV is improving significantly
+            max_forecast_power = max([f.get('forecasted_power_kw', f.get('power_kw', 0.0)) for f in pv_forecasts])
+            current_pv_kw = current_pv_power / 1000.0
+            if max_forecast_power > current_pv_kw * 1.5:  # PV improving by more than 50%
+                return 'wait'
             return 'grid_charging'
         
         # If price window is very good and PV timing is insufficient, recommend hybrid
+        # But if current PV is very insufficient (< 800W) OR window is very short (< 1.5h), prefer grid charging over hybrid
         if optimal_window.savings_potential_pln > self.min_savings_threshold_pln * 1.5:
+            if current_pv_power < 800 or optimal_window.duration_hours < 1.5:  # Low PV or short window - prefer grid charging
+                return 'grid_charging'
             return 'hybrid_charging'
         
         # If price window is good but not great, wait for better conditions
