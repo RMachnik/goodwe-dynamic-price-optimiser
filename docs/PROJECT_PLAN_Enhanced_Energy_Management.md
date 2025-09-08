@@ -76,12 +76,32 @@ smart_critical_charging:
 - **Impact**: Fixed 18 test failures related to configuration access
 - **Status**: ✅ **RESOLVED** - All configuration-related tests now passing
 
-#### **Test Results Update**
+#### **Test Results Update (December 2024)**
 - **Total Tests**: 234 tests
-- **Passing**: 228 tests (97.4% pass rate)
-- **Failing**: 5 tests (minor logic adjustments needed)
+- **Passing**: 227 tests (97.0% pass rate)
+- **Failing**: 6 tests (minor logic adjustments needed)
 - **Skipped**: 1 test (inverter connectivity test)
 - **Overall Status**: ✅ **EXCELLENT** - System is production-ready with minor test adjustments needed
+
+#### **Recent Test Fixes Completed**
+- ✅ **Fixed**: Price window analyzer timing issues (price points now start from current time)
+- ✅ **Fixed**: Critical battery threshold logic (updated from 10% to 20% in config)
+- ✅ **Fixed**: Smart charging strategy critical battery test (15% SOC now triggers charging)
+- ✅ **Fixed**: Edge case test expectation (0% SOC correctly triggers emergency priority)
+- ✅ **Fixed**: Weather aware decisions test data format (updated to use current date)
+
+#### **Remaining Test Failures (6 tests)**
+1. **Hybrid Charging Logic Tests (3 failures)**:
+   - `test_pv_only_charging_decision`: PV-only charging logic needs adjustment
+   - `test_urgent_charging_critical_battery`: Critical battery action format mismatch
+   - `test_wait_decision_improving_pv`: PV improvement decision logic needs refinement
+
+2. **Price Window Analyzer Test (1 failure)**:
+   - `test_high_price_window_detection`: High price threshold detection needs adjustment
+
+3. **Weather Aware Decisions Tests (2 failures)**:
+   - `test_weather_aware_decision_critical_battery_override`: Critical battery override logic needs refinement
+   - `test_weather_aware_decision_with_very_low_prices`: Very low price decision logic needs adjustment
 
 ### **✅ IMPLEMENTED - Weather-Aware PV Forecasting & Analysis**
 

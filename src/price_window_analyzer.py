@@ -201,11 +201,13 @@ class PriceWindowAnalyzer:
                         final_price = market_price + 0.0892
                         return final_price
             elif 'prices' in price_data:
-                # Simple format with just prices array
+                # Simple format with just prices array (for testing)
                 prices = price_data['prices']
                 if prices:
                     # For testing, return the first price or current_price if available
-                    return price_data.get('current_price', prices[0])
+                    current_price = price_data.get('current_price', prices[0])
+                    # Add SC component for consistency
+                    return current_price + 0.0892
             
             logger.warning("Current time not found in price data")
             return None
@@ -232,11 +234,13 @@ class PriceWindowAnalyzer:
             elif 'prices' in price_data:
                 # Simple format with just prices array - create time points
                 prices = price_data['prices']
-                # Start from current time instead of midnight
-                base_time = current_time.replace(minute=0, second=0, microsecond=0)
+                # Start from current time to ensure future prices
+                base_time = current_time
                 for i, price in enumerate(prices):
                     item_time = base_time + timedelta(minutes=15 * i)
-                    price_points.append((item_time, price))
+                    # Add SC component for consistency
+                    final_price = price + 0.0892
+                    price_points.append((item_time, final_price))
             
             # Sort by time
             price_points.sort(key=lambda x: x[0])
@@ -302,11 +306,13 @@ class PriceWindowAnalyzer:
             elif 'prices' in price_data:
                 # Simple format with just prices array - create time points
                 prices = price_data['prices']
-                # Start from current time instead of midnight
-                base_time = current_time.replace(minute=0, second=0, microsecond=0)
+                # Start from current time to ensure future prices
+                base_time = current_time
                 for i, price in enumerate(prices):
                     item_time = base_time + timedelta(minutes=15 * i)
-                    price_points.append((item_time, price))
+                    # Add SC component for consistency
+                    final_price = price + 0.0892
+                    price_points.append((item_time, final_price))
             
             # Sort by time
             price_points.sort(key=lambda x: x[0])

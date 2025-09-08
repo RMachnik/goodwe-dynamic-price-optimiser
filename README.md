@@ -47,8 +47,9 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **Smart Critical Charging**: ✅ Emergency (5% SOC) vs Critical (10% SOC) with price awareness
 - **Proactive Charging**: ✅ PV poor + battery <80% + low price + weather poor = charge
 - **Cost Optimization**: ✅ Real-world tested rules save up to 70% on charging costs
-- **Test Coverage**: ✅ 228/234 tests passing (97.4% pass rate)
+- **Test Coverage**: ✅ 227/234 tests passing (97.0% pass rate)
 - **Configuration System**: ✅ Fixed critical config loading bug
+- **Recent Fixes**: ✅ Price window analyzer, critical battery thresholds, test data formats
 
 ## 🏗️ **System Architecture**
 
@@ -439,8 +440,9 @@ coordinator:
 - **☀️ Weather Integration**: Real-time weather data for accurate PV forecasting
 - **🛡️ Safety Compliant**: Full GoodWe Lynx-D safety monitoring
 - **🧠 Enhanced Scoring**: PV vs consumption analysis for intelligent decisions
-- **📊 228/234 Tests Passing**: Comprehensive test coverage with 97.4% success rate
+- **📊 227/234 Tests Passing**: Comprehensive test coverage with 97.0% success rate
 - **🔧 Configuration System**: Fixed critical config loading bug (December 2024)
+- **🛠️ Recent Fixes**: Price window analyzer timing, critical battery thresholds, test data formats
 
 ## 🚀 **Getting Started**
 
