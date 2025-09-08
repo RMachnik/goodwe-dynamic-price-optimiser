@@ -358,7 +358,7 @@ class PVForecaster:
         hours_to_charge = 0
         
         for forecast in forecasts:
-            pv_power_kw = forecast['forecasted_power_kw']
+            pv_power_kw = forecast.get('forecasted_power_kw', forecast.get('power_kw', 0.0))
             
             # Assume we can use 80% of PV power for charging (20% for house consumption)
             available_for_charging = pv_power_kw * 0.8
