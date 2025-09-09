@@ -17,7 +17,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 import threading
@@ -196,6 +196,15 @@ class LogWebServer:
             try:
                 state = self._get_current_system_state()
                 return jsonify(state)
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/battery-selling')
+        def get_battery_selling():
+            """Get battery selling decision history and analytics"""
+            try:
+                selling_data = self._get_battery_selling_data()
+                return jsonify(selling_data)
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
     
@@ -588,6 +597,69 @@ class LogWebServer:
                 'timestamp': datetime.now().isoformat()
             }
     
+    def _get_battery_selling_data(self) -> Dict[str, Any]:
+        """Get battery selling decision history and analytics"""
+        try:
+            # Check if there are any battery selling decision files
+            project_root = Path(__file__).parent.parent
+            selling_files = list((project_root / "out" / "energy_data").glob("battery_selling_decision_*.json"))
+            
+            selling_decisions = []
+            total_revenue = 0.0
+            total_energy_sold = 0.0
+            active_sessions = 0
+            
+            for file_path in sorted(selling_files, key=lambda x: x.stat().st_mtime, reverse=True)[:50]:  # Last 50 decisions
+                try:
+                    with open(file_path, 'r') as f:
+                        decision_data = json.load(f)
+                        selling_decisions.append(decision_data)
+                        
+                        # Calculate totals
+                        if decision_data.get('action') == 'battery_selling':
+                            total_revenue += decision_data.get('expected_revenue_pln', 0)
+                            total_energy_sold += decision_data.get('energy_sold_kwh', 0)
+                            if decision_data.get('decision') == 'start_selling':
+                                active_sessions += 1
+                                
+                except Exception as e:
+                    logger.warning(f"Failed to read battery selling file {file_path}: {e}")
+            
+            # Calculate analytics
+            avg_revenue_per_session = total_revenue / len(selling_decisions) if selling_decisions else 0
+            avg_energy_per_session = total_energy_sold / len(selling_decisions) if selling_decisions else 0
+            
+            # Get recent activity (last 24 hours)
+            recent_cutoff = datetime.now() - timedelta(hours=24)
+            recent_decisions = [
+                d for d in selling_decisions 
+                if datetime.fromisoformat(d['timestamp'].replace('Z', '+00:00')) > recent_cutoff
+            ]
+            
+            return {
+                'decisions': selling_decisions,
+                'analytics': {
+                    'total_sessions': len(selling_decisions),
+                    'total_revenue_pln': round(total_revenue, 2),
+                    'total_energy_sold_kwh': round(total_energy_sold, 2),
+                    'avg_revenue_per_session_pln': round(avg_revenue_per_session, 2),
+                    'avg_energy_per_session_kwh': round(avg_energy_per_session, 2),
+                    'active_sessions': active_sessions,
+                    'recent_24h_sessions': len(recent_decisions),
+                    'recent_24h_revenue_pln': round(sum(d.get('expected_revenue_pln', 0) for d in recent_decisions), 2)
+                },
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get battery selling data: {e}")
+            return {
+                'decisions': [],
+                'analytics': {},
+                'error': str(e),
+                'timestamp': datetime.now().isoformat()
+            }
+    
     def _get_dashboard_template(self) -> str:
         """Get HTML dashboard template"""
         return """
@@ -701,6 +773,18 @@ class LogWebServer:
         .metric:last-child { border-bottom: none; }
         .metric-value { font-weight: bold; font-size: 1.1em; color: var(--text-primary); }
         .metric-label { color: var(--text-secondary); }
+        .recent-activity { margin-top: 10px; }
+        .activity-item { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            padding: 5px 0; 
+            border-bottom: 1px solid var(--border-light); 
+        }
+        .activity-item:last-child { border-bottom: none; }
+        .activity-time { color: var(--text-secondary); font-size: 0.9em; }
+        .activity-action { font-weight: bold; color: var(--text-primary); }
+        .activity-revenue { color: var(--success); font-weight: bold; }
         .decision-item { 
             padding: 15px; 
             margin: 10px 0; 
@@ -711,6 +795,7 @@ class LogWebServer:
         }
         .decision-item.wait { border-left-color: var(--warning); }
         .decision-item.charging { border-left-color: var(--success); }
+        .decision-item.selling { border-left-color: var(--accent-primary); background: linear-gradient(135deg, var(--bg-tertiary), #e8f4fd); }
         .decision-time { color: var(--text-secondary); font-size: 0.9em; }
         .decision-action { font-weight: bold; margin: 5px 0; color: var(--text-primary); }
         .decision-reason { color: var(--text-primary); font-style: italic; }
@@ -786,6 +871,97 @@ class LogWebServer:
         .tab-content.active { display: block; }
         .savings-positive { color: var(--success); font-weight: bold; }
         .savings-negative { color: var(--error); font-weight: bold; }
+        
+        /* No Data and Waiting States */
+        .no-data-state, .waiting-state {
+            text-align: center;
+            padding: 20px;
+            border-radius: 8px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+        }
+        
+        .no-data-icon, .waiting-icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+            opacity: 0.7;
+        }
+        
+        .no-data-message h4, .waiting-message h4 {
+            margin: 0 0 10px 0;
+            color: var(--text-primary);
+            font-size: 1.2em;
+        }
+        
+        .no-data-message p, .waiting-message p {
+            margin: 0 0 15px 0;
+            color: var(--text-secondary);
+        }
+        
+        .waiting-details {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 15px;
+        }
+        
+        .waiting-count {
+            font-weight: bold;
+            color: var(--accent-primary);
+        }
+        
+        .waiting-reason {
+            font-style: italic;
+            color: var(--text-secondary);
+            font-size: 0.9em;
+        }
+        
+        .waiting-metrics {
+            margin-top: 20px;
+            text-align: left;
+        }
+        
+        .metric-value.waiting {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+        
+        .monitoring-state {
+            padding: 15px;
+            border-radius: 8px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+        }
+        
+        .metric-value.monitoring {
+            color: var(--accent-primary);
+            font-weight: bold;
+        }
+        
+        .monitoring-note {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+        }
+        
+        .monitoring-note small {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+        
+        .current-conditions {
+            margin-top: 10px;
+            padding: 8px;
+            background: var(--card-bg);
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+        }
+        
+        .current-conditions small {
+            color: var(--text-secondary);
+            font-family: monospace;
+        }
         .system-health { display: flex; align-items: center; gap: 10px; }
         .health-indicator { 
             padding: 5px 10px; 
@@ -859,6 +1035,7 @@ class LogWebServer:
         <div class="tabs">
             <div class="tab active" onclick="showTab('overview')">Overview</div>
             <div class="tab" onclick="showTab('decisions')">Decisions</div>
+            <div class="tab" onclick="showTab('battery-selling')">Battery Selling</div>
             <div class="tab" onclick="showTab('metrics')">Metrics</div>
             <div class="tab" onclick="showTab('logs')">Logs</div>
         </div>
@@ -886,6 +1063,11 @@ class LogWebServer:
                 </div>
                 
                 <div class="card">
+                    <h3>Battery Selling Status</h3>
+                    <div id="battery-selling-status">Loading...</div>
+                </div>
+                
+                <div class="card">
                     <h3>Cost & Savings</h3>
                     <div id="cost-savings">Loading...</div>
                 </div>
@@ -897,6 +1079,20 @@ class LogWebServer:
             <div class="card">
                 <h3>Recent Charging Decisions</h3>
                 <div id="decisions-list">Loading...</div>
+            </div>
+        </div>
+        
+        <!-- Battery Selling Tab -->
+        <div id="battery-selling" class="tab-content">
+            <div class="grid">
+                <div class="card">
+                    <h3>Battery Selling Analytics</h3>
+                    <div id="battery-selling-analytics">Loading...</div>
+                </div>
+                <div class="card">
+                    <h3>Recent Selling Decisions</h3>
+                    <div id="battery-selling-decisions">Loading...</div>
+                </div>
             </div>
         </div>
         
@@ -973,6 +1169,8 @@ class LogWebServer:
             // Load data for the tab
             if (tabName === 'decisions') {
                 loadDecisions();
+            } else if (tabName === 'battery-selling') {
+                loadBatterySelling();
             } else if (tabName === 'metrics') {
                 loadMetrics();
             }
@@ -1065,24 +1263,75 @@ class LogWebServer:
                         return;
                     }
                     
+                    const hasChargingDecisions = data.charging_decisions > 0;
+                    const hasAnyDecisions = data.total_decisions > 0;
+                    
+                    if (!hasAnyDecisions) {
+                        // No decisions at all
+                        document.getElementById('performance-metrics').innerHTML = `
+                            <div class="no-data-state">
+                                <div class="no-data-icon">📊</div>
+                                <div class="no-data-message">
+                                    <h4>No Performance Data</h4>
+                                    <p>System hasn't made any decisions yet</p>
+                                </div>
+                            </div>
+                        `;
+                        return;
+                    }
+                    
+                    if (!hasChargingDecisions) {
+                        // Only wait decisions - show monitoring state
+                        const waitPercentage = data.total_decisions > 0 ? ((data.wait_decisions / data.total_decisions) * 100).toFixed(1) : 0;
+                        document.getElementById('performance-metrics').innerHTML = `
+                            <div class="monitoring-state">
+                                <div class="metric" title="Total number of decisions made by the system (charging + waiting)">
+                                    <span class="metric-label">Total Decisions</span>
+                                    <span class="metric-value">${data.total_decisions}</span>
+                                </div>
+                                <div class="metric" title="Number of decisions that resulted in actual charging">
+                                    <span class="metric-label">Charging Decisions</span>
+                                    <span class="metric-value waiting">0</span>
+                                </div>
+                                <div class="metric" title="Number of decisions to wait for better conditions">
+                                    <span class="metric-label">Wait Decisions</span>
+                                    <span class="metric-value">${data.wait_decisions} (${waitPercentage}%)</span>
+                                </div>
+                                <div class="metric" title="Current system operational status">
+                                    <span class="metric-label">System Status</span>
+                                    <span class="metric-value monitoring">Monitoring</span>
+                                </div>
+                                <div class="metric" title="Average confidence level of all decisions made">
+                                    <span class="metric-label">Avg Confidence</span>
+                                    <span class="metric-value">${(data.avg_confidence * 100).toFixed(1)}%</span>
+                                </div>
+                                <div class="monitoring-note">
+                                    <small>System is actively monitoring conditions for optimal charging opportunities</small>
+                                </div>
+                            </div>
+                        `;
+                        return;
+                    }
+                    
+                    // Normal state with charging decisions
                     const metricsHtml = `
-                        <div class="metric">
+                        <div class="metric" title="Total number of decisions made by the system (charging + waiting)">
                             <span class="metric-label">Total Decisions</span>
                             <span class="metric-value">${data.total_decisions}</span>
                         </div>
-                        <div class="metric">
+                        <div class="metric" title="Number of decisions that resulted in actual charging">
                             <span class="metric-label">Charging Decisions</span>
                             <span class="metric-value">${data.charging_decisions}</span>
                         </div>
-                        <div class="metric">
+                        <div class="metric" title="Number of decisions to wait for better conditions">
                             <span class="metric-label">Wait Decisions</span>
                             <span class="metric-value">${data.wait_decisions}</span>
                         </div>
-                        <div class="metric">
+                        <div class="metric" title="Overall system efficiency score based on confidence, savings, and charging ratio (0-100)">
                             <span class="metric-label">Efficiency Score</span>
                             <span class="metric-value">${data.efficiency_score}/100</span>
                         </div>
-                        <div class="metric">
+                        <div class="metric" title="Average confidence level of all decisions made">
                             <span class="metric-label">Avg Confidence</span>
                             <span class="metric-value">${(data.avg_confidence * 100).toFixed(1)}%</span>
                         </div>
@@ -1103,25 +1352,148 @@ class LogWebServer:
                         return;
                     }
                     
+                    // Check if there are any charging decisions
+                    const hasChargingDecisions = data.charging_decisions > 0;
+                    const hasAnyDecisions = data.total_decisions > 0;
+                    
+                    if (!hasAnyDecisions) {
+                        // No decisions at all
+                        document.getElementById('cost-savings').innerHTML = `
+                            <div class="no-data-state">
+                                <div class="no-data-icon">⏳</div>
+                                <div class="no-data-message">
+                                    <h4>System Starting Up</h4>
+                                    <p>Waiting for first decision data...</p>
+                                </div>
+                            </div>
+                        `;
+                        return;
+                    }
+                    
+                    if (!hasChargingDecisions) {
+                        // Only wait decisions - show waiting state
+                        // Get current state context
+                        fetch('/current-state')
+                            .then(response => response.json())
+                            .then(currentState => {
+                                const batteryLevel = currentState.battery_soc || 'Unknown';
+                                const pvPower = currentState.pv_power || 0;
+                                const currentPrice = currentState.pricing?.current_price_pln_kwh || 0;
+                                const cheapestPrice = currentState.pricing?.cheapest_price_pln_kwh || 0;
+                                
+                                let waitingReason = 'Looking for better conditions';
+                                if (currentPrice > 0 && cheapestPrice > 0) {
+                                    if (currentPrice > cheapestPrice * 1.2) {
+                                        waitingReason = `Current price (${currentPrice.toFixed(2)} PLN/kWh) is high - waiting for lower prices`;
+                                    } else {
+                                        waitingReason = `Monitoring price trends (current: ${currentPrice.toFixed(2)} PLN/kWh)`;
+                                    }
+                                } else if (pvPower > 0) {
+                                    waitingReason = `PV generating ${pvPower}W - waiting for optimal charging conditions`;
+                                } else if (batteryLevel < 20) {
+                                    waitingReason = `Battery low (${batteryLevel}%) - waiting for optimal charging conditions`;
+                                }
+                                
+                                document.getElementById('cost-savings').innerHTML = `
+                                    <div class="waiting-state">
+                                        <div class="waiting-icon">🔍</div>
+                                        <div class="waiting-message">
+                                            <h4>Monitoring Mode</h4>
+                                            <p>System is waiting for optimal charging conditions</p>
+                                            <div class="waiting-details">
+                                                <span class="waiting-count">${data.wait_decisions} wait decisions</span>
+                                                <span class="waiting-reason">${waitingReason}</span>
+                                                <div class="current-conditions">
+                                                    <small>Battery: ${batteryLevel}% | PV: ${pvPower}W | Price: ${currentPrice.toFixed(2)} PLN/kWh</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                <div class="waiting-metrics">
+                                    <div class="metric" title="Total energy charged from grid or PV during charging decisions">
+                                        <span class="metric-label">Total Energy Charged</span>
+                                        <span class="metric-value waiting">0 kWh</span>
+                                    </div>
+                                    <div class="metric" title="Total cost of all charging operations in PLN">
+                                        <span class="metric-label">Total Cost</span>
+                                        <span class="metric-value waiting">0 PLN</span>
+                                    </div>
+                                    <div class="metric" title="Total savings compared to charging at average market price">
+                                        <span class="metric-label">Total Savings</span>
+                                        <span class="metric-value waiting">0 PLN</span>
+                                    </div>
+                                    <div class="metric" title="Percentage of savings compared to baseline pricing">
+                                        <span class="metric-label">Savings %</span>
+                                        <span class="metric-value waiting">0%</span>
+                                    </div>
+                                    <div class="metric" title="Average cost per kilowatt-hour of charged energy">
+                                        <span class="metric-label">Avg Cost/kWh</span>
+                                        <span class="metric-value waiting">N/A</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                            })
+                            .catch(error => {
+                                // Fallback if current state fetch fails
+                                document.getElementById('cost-savings').innerHTML = `
+                                    <div class="waiting-state">
+                                        <div class="waiting-icon">🔍</div>
+                                        <div class="waiting-message">
+                                            <h4>Monitoring Mode</h4>
+                                            <p>System is waiting for optimal charging conditions</p>
+                                            <div class="waiting-details">
+                                                <span class="waiting-count">${data.wait_decisions} wait decisions</span>
+                                                <span class="waiting-reason">Looking for better prices or PV conditions</span>
+                                            </div>
+                                        </div>
+                                        <div class="waiting-metrics">
+                                            <div class="metric" title="Total energy charged from grid or PV during charging decisions">
+                                                <span class="metric-label">Total Energy Charged</span>
+                                                <span class="metric-value waiting">0 kWh</span>
+                                            </div>
+                                            <div class="metric" title="Total cost of all charging operations in PLN">
+                                                <span class="metric-label">Total Cost</span>
+                                                <span class="metric-value waiting">0 PLN</span>
+                                            </div>
+                                            <div class="metric" title="Total savings compared to charging at average market price">
+                                                <span class="metric-label">Total Savings</span>
+                                                <span class="metric-value waiting">0 PLN</span>
+                                            </div>
+                                            <div class="metric" title="Percentage of savings compared to baseline pricing">
+                                                <span class="metric-label">Savings %</span>
+                                                <span class="metric-value waiting">0%</span>
+                                            </div>
+                                            <div class="metric" title="Average cost per kilowatt-hour of charged energy">
+                                                <span class="metric-label">Avg Cost/kWh</span>
+                                                <span class="metric-value waiting">N/A</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                `;
+                            });
+                        return;
+                    }
+                    
+                    // Normal state with charging decisions
                     const savingsClass = data.total_savings_pln >= 0 ? 'savings-positive' : 'savings-negative';
                     const savingsHtml = `
-                        <div class="metric">
+                        <div class="metric" title="Total energy charged from grid or PV during charging decisions">
                             <span class="metric-label">Total Energy Charged</span>
                             <span class="metric-value">${data.total_energy_charged_kwh} kWh</span>
                         </div>
-                        <div class="metric">
+                        <div class="metric" title="Total cost of all charging operations in PLN">
                             <span class="metric-label">Total Cost</span>
                             <span class="metric-value">${data.total_cost_pln} PLN</span>
                         </div>
-                        <div class="metric">
+                        <div class="metric" title="Total savings compared to charging at average market price">
                             <span class="metric-label">Total Savings</span>
                             <span class="metric-value ${savingsClass}">${data.total_savings_pln} PLN</span>
                         </div>
-                        <div class="metric">
+                        <div class="metric" title="Percentage of savings compared to baseline pricing">
                             <span class="metric-label">Savings %</span>
                             <span class="metric-value ${savingsClass}">${data.savings_percentage}%</span>
                         </div>
-                        <div class="metric">
+                        <div class="metric" title="Average cost per kilowatt-hour of charged energy">
                             <span class="metric-label">Avg Cost/kWh</span>
                             <span class="metric-value">${data.avg_cost_per_kwh_pln} PLN</span>
                         </div>
@@ -1180,6 +1552,104 @@ class LogWebServer:
                 })
                 .catch(error => {
                     document.getElementById('decisions-list').innerHTML = `<p>Error loading decisions: ${error.message}</p>`;
+                });
+        }
+        
+        function loadBatterySelling() {
+            // Load analytics
+            fetch('/battery-selling')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('battery-selling-analytics').innerHTML = `<p>Error: ${data.error}</p>`;
+                        document.getElementById('battery-selling-decisions').innerHTML = `<p>Error: ${data.error}</p>`;
+                        return;
+                    }
+                    
+                    // Display analytics
+                    const analytics = data.analytics;
+                    const analyticsHtml = `
+                        <div class="metrics-grid">
+                            <div class="metric">
+                                <span class="metric-label">Total Sessions:</span>
+                                <span class="metric-value">${analytics.total_sessions || 0}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Total Revenue:</span>
+                                <span class="metric-value">${analytics.total_revenue_pln || 0} PLN</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Energy Sold:</span>
+                                <span class="metric-value">${analytics.total_energy_sold_kwh || 0} kWh</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Avg Revenue/Session:</span>
+                                <span class="metric-value">${analytics.avg_revenue_per_session_pln || 0} PLN</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Active Sessions:</span>
+                                <span class="metric-value">${analytics.active_sessions || 0}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">24h Revenue:</span>
+                                <span class="metric-value">${analytics.recent_24h_revenue_pln || 0} PLN</span>
+                            </div>
+                        </div>
+                    `;
+                    document.getElementById('battery-selling-analytics').innerHTML = analyticsHtml;
+                    
+                    // Display recent decisions
+                    const decisionsHtml = data.decisions.map(decision => {
+                        const decisionClass = decision.decision === 'start_selling' ? 'selling' : 'wait';
+                        const confidencePercent = (decision.confidence * 100).toFixed(1);
+                        const revenue = decision.expected_revenue_pln || 0;
+                        const energy = decision.energy_sold_kwh || 0;
+                        const price = decision.current_price_pln || 0;
+                        
+                        return `
+                            <div class="decision-item ${decisionClass}">
+                                <div class="decision-time">${new Date(decision.timestamp).toLocaleString()}</div>
+                                <div class="decision-action">${decision.decision.replace('_', ' ').toUpperCase()}</div>
+                                <div class="decision-reason">${decision.reasoning}</div>
+                                ${decision.decision === 'start_selling' ? `
+                                    <div class="metric">
+                                        <span class="metric-label">Revenue:</span>
+                                        <span class="metric-value">${revenue.toFixed(2)} PLN</span>
+                                    </div>
+                                    <div class="metric">
+                                        <span class="metric-label">Energy:</span>
+                                        <span class="metric-value">${energy.toFixed(2)} kWh</span>
+                                    </div>
+                                    <div class="metric">
+                                        <span class="metric-label">Price:</span>
+                                        <span class="metric-value">${price.toFixed(3)} PLN/kWh</span>
+                                    </div>
+                                    <div class="metric">
+                                        <span class="metric-label">Power:</span>
+                                        <span class="metric-value">${decision.selling_power_w || 0}W</span>
+                                    </div>
+                                    <div class="metric">
+                                        <span class="metric-label">Duration:</span>
+                                        <span class="metric-value">${(decision.estimated_duration_hours || 0).toFixed(1)}h</span>
+                                    </div>
+                                    <div class="metric">
+                                        <span class="metric-label">Confidence:</span>
+                                        <span class="metric-value">${confidencePercent}%</span>
+                                    </div>
+                                    <div class="metric">
+                                        <span class="metric-label">Safety:</span>
+                                        <span class="metric-value">${decision.safety_checks_passed ? '✓' : '✗'}</span>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    document.getElementById('battery-selling-decisions').innerHTML = decisionsHtml || '<p>No battery selling decisions found</p>';
+                })
+                .catch(error => {
+                    document.getElementById('battery-selling-analytics').innerHTML = `<p>Error loading analytics: ${error.message}</p>`;
+                    document.getElementById('battery-selling-decisions').innerHTML = `<p>Error loading decisions: ${error.message}</p>`;
                 });
         }
         
@@ -1377,17 +1847,76 @@ class LogWebServer:
             return div.innerHTML;
         }
         
+        function loadBatterySellingStatus() {
+            fetch('/battery-selling')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('battery-selling-status').innerHTML = `<p>Error: ${data.error}</p>`;
+                        return;
+                    }
+                    
+                    const analytics = data.analytics;
+                    const recentDecisions = data.decisions.slice(0, 3); // Last 3 decisions
+                    
+                    let statusHtml = `
+                        <div class="metrics-grid">
+                            <div class="metric">
+                                <span class="metric-label">Total Revenue:</span>
+                                <span class="metric-value">${analytics.total_revenue_pln || 0} PLN</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Energy Sold:</span>
+                                <span class="metric-value">${analytics.total_energy_sold_kwh || 0} kWh</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">Active Sessions:</span>
+                                <span class="metric-value">${analytics.active_sessions || 0}</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">24h Revenue:</span>
+                                <span class="metric-value">${analytics.recent_24h_revenue_pln || 0} PLN</span>
+                            </div>
+                        </div>
+                    `;
+                    
+                    if (recentDecisions.length > 0) {
+                        statusHtml += '<h4>Recent Activity:</h4><div class="recent-activity">';
+                        recentDecisions.forEach(decision => {
+                            const time = new Date(decision.timestamp).toLocaleString();
+                            const action = decision.decision.replace('_', ' ').toUpperCase();
+                            const revenue = decision.expected_revenue_pln || 0;
+                            statusHtml += `
+                                <div class="activity-item">
+                                    <span class="activity-time">${time}</span>
+                                    <span class="activity-action">${action}</span>
+                                    ${revenue > 0 ? `<span class="activity-revenue">+${revenue.toFixed(2)} PLN</span>` : ''}
+                                </div>
+                            `;
+                        });
+                        statusHtml += '</div>';
+                    }
+                    
+                    document.getElementById('battery-selling-status').innerHTML = statusHtml;
+                })
+                .catch(error => {
+                    document.getElementById('battery-selling-status').innerHTML = `<p>Error loading status: ${error.message}</p>`;
+                });
+        }
+        
         // Initialize
         updateStatus();
         loadCurrentState();
         loadPerformanceMetrics();
         loadCostSavings();
+        loadBatterySellingStatus();
         loadLogs();
         setInterval(() => {
             updateStatus();
             loadCurrentState();
             loadPerformanceMetrics();
             loadCostSavings();
+            loadBatterySellingStatus();
         }, 30000); // Update every 30 seconds
 
         // Theme-aware chart colors
@@ -1832,31 +2361,37 @@ class LogWebServer:
         return sorted(decisions, key=lambda x: x['timestamp'], reverse=True)
     
     def _get_system_metrics(self) -> Dict[str, Any]:
-        """Get system performance metrics"""
+        """Get system performance metrics including historical data"""
         try:
-            # Calculate basic metrics from decision history
-            decisions = self._get_decision_history().get('decisions', [])
+            # Get current decision history
+            current_decisions = self._get_decision_history().get('decisions', [])
             
-            if not decisions:
+            # Get historical decisions from previous days
+            historical_decisions = self._get_historical_decisions()
+            
+            # Combine current and historical decisions
+            all_decisions = current_decisions + historical_decisions
+            
+            if not all_decisions:
                 return {'error': 'No decision data available'}
             
             # Calculate metrics
-            total_decisions = len(decisions)
-            charging_decisions = [d for d in decisions if d.get('action') != 'wait']
-            wait_decisions = [d for d in decisions if d.get('action') == 'wait']
+            total_decisions = len(all_decisions)
+            charging_decisions = [d for d in all_decisions if d.get('action') != 'wait']
+            wait_decisions = [d for d in all_decisions if d.get('action') == 'wait']
             
             total_energy_charged = sum(d.get('energy_kwh', 0) for d in charging_decisions)
             total_cost = sum(d.get('estimated_cost_pln', 0) for d in charging_decisions)
             total_savings = sum(d.get('estimated_savings_pln', 0) for d in charging_decisions)
             
             # Calculate averages
-            avg_confidence = sum(d.get('confidence', 0) for d in decisions) / total_decisions if total_decisions > 0 else 0
+            avg_confidence = sum(d.get('confidence', 0) for d in all_decisions) / total_decisions if total_decisions > 0 else 0
             avg_energy_per_charge = total_energy_charged / len(charging_decisions) if charging_decisions else 0
             avg_cost_per_kwh = total_cost / total_energy_charged if total_energy_charged > 0 else 0
             
             # Decision type breakdown
             decision_breakdown = {}
-            for decision in decisions:
+            for decision in all_decisions:
                 action = decision.get('action', 'unknown')
                 decision_breakdown[action] = decision_breakdown.get(action, 0) + 1
             
@@ -1880,11 +2415,63 @@ class LogWebServer:
                 'avg_cost_per_kwh_pln': round(avg_cost_per_kwh, 3),
                 'decision_breakdown': decision_breakdown,
                 'source_breakdown': source_breakdown,
-                'efficiency_score': self._calculate_efficiency_score(decisions)
+                'efficiency_score': self._calculate_efficiency_score(all_decisions)
             }
         except Exception as e:
             logger.error(f"Error getting system metrics: {e}")
             return {'error': str(e)}
+    
+    def _get_historical_decisions(self) -> List[Dict[str, Any]]:
+        """Get historical charging decisions from previous days"""
+        historical_decisions = []
+        try:
+            # Look for decision files in the energy_data directory
+            energy_data_dir = Path(__file__).parent.parent / "out" / "energy_data"
+            if not energy_data_dir.exists():
+                return historical_decisions
+            
+            # Get all charging decision files, sorted by modification time (newest first)
+            decision_files = sorted(
+                energy_data_dir.glob("charging_decision_*.json"),
+                key=lambda x: x.stat().st_mtime,
+                reverse=True
+            )
+            
+            # Process up to the last 7 days of data (or 50 files max)
+            processed_files = 0
+            max_files = 50
+            
+            for decision_file in decision_files:
+                if processed_files >= max_files:
+                    break
+                    
+                try:
+                    with open(decision_file, 'r') as f:
+                        decision_data = json.load(f)
+                    
+                    # Convert to the expected format if needed
+                    if isinstance(decision_data, dict):
+                        # Single decision
+                        historical_decisions.append(decision_data)
+                    elif isinstance(decision_data, list):
+                        # Multiple decisions
+                        historical_decisions.extend(decision_data)
+                    
+                    processed_files += 1
+                    
+                except (json.JSONDecodeError, IOError) as e:
+                    logger.warning(f"Error reading historical decision file {decision_file}: {e}")
+                    continue
+            
+            # Sort by timestamp (newest first)
+            historical_decisions.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+            
+            logger.info(f"Loaded {len(historical_decisions)} historical decisions from {processed_files} files")
+            
+        except Exception as e:
+            logger.error(f"Error loading historical decisions: {e}")
+        
+        return historical_decisions
     
     def _calculate_efficiency_score(self, decisions: List[Dict[str, Any]]) -> float:
         """Calculate overall system efficiency score (0-100)"""

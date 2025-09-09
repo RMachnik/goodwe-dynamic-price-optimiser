@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from battery_selling_engine import BatterySellingEngine, SellingDecision, SellingOpportunity
 from battery_selling_monitor import BatterySellingMonitor, SafetyStatus, SafetyCheck
+from battery_selling_analytics import BatterySellingAnalytics, SellingSessionRecord
 
 
 class TestBatterySellingEngine:
@@ -57,9 +58,9 @@ class TestBatterySellingEngine:
         assert engine.safety_margin_soc == 50.0
         assert engine.min_selling_price_pln == 0.50
         assert engine.max_daily_cycles == 2
-        assert engine.battery_capacity_kwh == 20.0
-        assert engine.usable_energy_per_cycle == 6.0  # 30% of 20kWh
-        assert engine.net_sellable_energy == 5.7  # 6.0 * 0.95 efficiency
+        assert engine.battery_capacity_kwh == 10.0
+        assert engine.usable_energy_per_cycle == 3.0  # 30% of 10kWh
+        assert engine.net_sellable_energy == 2.85  # 3.0 * 0.95 efficiency
     
     def test_safety_conditions_check(self, engine):
         """Test safety conditions checking"""
@@ -177,8 +178,7 @@ class TestBatterySellingEngine:
             opportunity = await engine.analyze_selling_opportunity(current_data, price_data)
             
             assert opportunity.decision == SellingDecision.WAIT
-            # Phase 2: Updated to match new dynamic threshold messaging
-            assert "below" in opportunity.reasoning and "threshold" in opportunity.reasoning
+            assert "below minimum selling threshold" in opportunity.reasoning
         
         # Poor selling opportunity (low price)
         current_data['battery']['soc_percent'] = 85
@@ -372,4 +372,263 @@ class TestBatterySellingMonitor:
         assert 'configuration' in status
 
 
-# Tests are executed via pytest; do not run as a script.
+class TestBatterySellingAnalytics:
+    """Test battery selling analytics and revenue tracking"""
+    
+    @pytest.fixture
+    def config(self):
+        """Test configuration"""
+        return {
+            'battery_management': {'capacity_kwh': 10.0},
+            'battery_selling': {'expected_annual_revenue_pln': 260.0}
+        }
+    
+    @pytest.fixture
+    def analytics(self, config):
+        """Battery selling analytics instance"""
+        analytics = BatterySellingAnalytics(config)
+        # Clear any existing data for clean test
+        analytics.session_records = []
+        analytics.daily_summaries = []
+        analytics.monthly_reports = []
+        return analytics
+    
+    def test_initialization(self, analytics):
+        """Test analytics initialization"""
+        assert analytics.battery_capacity_kwh == 10.0
+        assert analytics.expected_annual_revenue == 260.0
+        assert analytics.data_dir.exists()
+    
+    def test_record_session(self, analytics):
+        """Test session recording"""
+        session_data = {
+            'session_id': 'test_session_001',
+            'start_time': datetime.now() - timedelta(hours=2),
+            'end_time': datetime.now(),
+            'start_soc': 85.0,
+            'end_soc': 55.0,
+            'average_price_pln': 0.60,
+            'selling_power_w': 5000,
+            'duration_hours': 2.0,
+            'safety_checks_passed': True,
+            'risk_level': 'low'
+        }
+        
+        analytics.record_session(session_data)
+        
+        assert len(analytics.session_records) == 1
+        record = analytics.session_records[0]
+        assert record.session_id == 'test_session_001'
+        assert record.energy_sold_kwh > 0
+        assert record.revenue_pln > 0
+    
+    def test_revenue_summary(self, analytics):
+        """Test revenue summary calculation"""
+        # Add some test data
+        for i in range(5):
+            session_data = {
+                'session_id': f'test_session_{i:03d}',
+                'start_time': datetime.now() - timedelta(days=i),
+                'end_time': datetime.now() - timedelta(days=i) + timedelta(hours=1),
+                'start_soc': 85.0,
+                'end_soc': 75.0,
+                'average_price_pln': 0.60,
+                'selling_power_w': 5000,
+                'duration_hours': 1.0,
+                'safety_checks_passed': True,
+                'risk_level': 'low'
+            }
+            analytics.record_session(session_data)
+        
+        summary = analytics.get_revenue_summary(days=7)
+        
+        assert 'total_sessions' in summary
+        assert 'total_revenue_pln' in summary
+        assert 'average_daily_revenue_pln' in summary
+        assert summary['total_sessions'] == 5
+        assert summary['total_revenue_pln'] > 0
+    
+    def test_performance_metrics(self, analytics):
+        """Test performance metrics calculation"""
+        # Add test data
+        session_data = {
+            'session_id': 'test_session_001',
+            'start_time': datetime.now() - timedelta(hours=1),
+            'end_time': datetime.now(),
+            'start_soc': 85.0,
+            'end_soc': 55.0,
+            'average_price_pln': 0.60,
+            'selling_power_w': 5000,
+            'duration_hours': 1.0,
+            'safety_checks_passed': True,
+            'risk_level': 'low'
+        }
+        analytics.record_session(session_data)
+        
+        metrics = analytics.get_performance_metrics()
+        
+        assert 'overall' in metrics
+        assert 'safety' in metrics
+        assert 'efficiency' in metrics
+        assert 'pricing' in metrics
+        assert metrics['overall']['total_sessions'] == 1
+    
+    def test_daily_breakdown(self, analytics):
+        """Test daily breakdown calculation"""
+        # Add test data
+        session_data = {
+            'session_id': 'test_session_001',
+            'start_time': datetime.now() - timedelta(days=1),
+            'end_time': datetime.now() - timedelta(days=1) + timedelta(hours=1),
+            'start_soc': 85.0,
+            'end_soc': 75.0,
+            'average_price_pln': 0.60,
+            'selling_power_w': 5000,
+            'duration_hours': 1.0,
+            'safety_checks_passed': True,
+            'risk_level': 'low'
+        }
+        analytics.record_session(session_data)
+        
+        breakdown = analytics.get_daily_breakdown(days=7)
+        
+        assert len(breakdown) >= 1
+        assert 'date' in breakdown[0]
+        assert 'revenue_pln' in breakdown[0]
+        assert 'sessions' in breakdown[0]
+    
+    def test_export_data(self, analytics):
+        """Test data export functionality"""
+        # Add some test data
+        session_data = {
+            'session_id': 'test_session_001',
+            'start_time': datetime.now() - timedelta(hours=1),
+            'end_time': datetime.now(),
+            'start_soc': 85.0,
+            'end_soc': 55.0,
+            'average_price_pln': 0.60,
+            'selling_power_w': 5000,
+            'duration_hours': 1.0,
+            'safety_checks_passed': True,
+            'risk_level': 'low'
+        }
+        analytics.record_session(session_data)
+        
+        export_file = analytics.export_data('json')
+        
+        assert export_file
+        assert Path(export_file).exists()
+        
+        # Clean up
+        Path(export_file).unlink()
+
+
+class TestIntegration:
+    """Integration tests for battery selling system"""
+    
+    @pytest.fixture
+    def config(self):
+        """Test configuration"""
+        return {
+            'battery_selling': {
+                'enabled': True,
+                'min_selling_price_pln': 0.50,
+                'min_battery_soc': 80.0,
+                'safety_margin_soc': 50.0,
+                'max_daily_cycles': 2,
+                'peak_hours': [17, 18, 19, 20, 21],
+                'grid_export_limit_w': 5000,
+                'battery_dod_limit': 50,
+                'safety_checks': {
+                    'battery_temp_max': 50.0,
+                    'battery_temp_min': -20.0,
+                    'grid_voltage_min': 200.0,
+                    'grid_voltage_max': 250.0,
+                    'night_hours': [22, 23, 0, 1, 2, 3, 4, 5]
+                }
+            },
+            'battery_management': {'capacity_kwh': 10.0}
+        }
+    
+    @pytest.fixture
+    def system(self, config):
+        """Complete battery selling system"""
+        engine = BatterySellingEngine(config)
+        monitor = BatterySellingMonitor(config)
+        analytics = BatterySellingAnalytics(config)
+        # Clear any existing data for clean test
+        analytics.session_records = []
+        analytics.daily_summaries = []
+        analytics.monthly_reports = []
+        return engine, monitor, analytics
+    
+    @pytest.mark.asyncio
+    async def test_complete_selling_workflow(self, system):
+        """Test complete battery selling workflow"""
+        engine, monitor, analytics = system
+        
+        # Mock inverter
+        mock_inverter = Mock()
+        
+        # Test data
+        current_data = {
+            'battery': {'soc_percent': 90, 'temperature': 25, 'voltage': 400},
+            'pv': {'power_w': 500},
+            'consumption': {'power_w': 3000},
+            'grid': {'voltage': 230},
+            'inverter': {'error_codes': []}
+        }
+        price_data = {'current_price_pln': 0.80}
+        
+        # Mock day time to avoid night time warning
+        with patch('battery_selling_monitor.datetime') as mock_datetime:
+            mock_datetime.now.return_value.hour = 14  # 2 PM
+            # Check safety conditions
+            safety_report = await monitor.check_safety_conditions(mock_inverter, current_data)
+            assert safety_report.overall_status == SafetyStatus.SAFE
+        
+        # Mock day time for engine as well
+        with patch('battery_selling_engine.datetime') as mock_datetime:
+            mock_datetime.now.return_value.hour = 14  # 2 PM
+            # Analyze selling opportunity
+            opportunity = await engine.analyze_selling_opportunity(current_data, price_data)
+            assert opportunity.decision == SellingDecision.START_SELLING
+            assert opportunity.safety_checks_passed
+        
+        # Record session (simulate completed session)
+        session_data = {
+            'session_id': 'integration_test_001',
+            'start_time': datetime.now() - timedelta(hours=1),
+            'end_time': datetime.now(),
+            'start_soc': 85.0,
+            'end_soc': 55.0,
+            'average_price_pln': 0.60,
+            'selling_power_w': 5000,
+            'duration_hours': 1.0,
+            'safety_checks_passed': True,
+            'risk_level': 'low'
+        }
+        analytics.record_session(session_data)
+        
+        # Verify analytics
+        summary = analytics.get_revenue_summary(days=1)
+        assert summary['total_sessions'] == 1
+        assert summary['total_revenue_pln'] > 0
+    
+    def test_configuration_validation(self, config):
+        """Test configuration validation"""
+        # Test valid configuration
+        engine = BatterySellingEngine(config)
+        assert engine.min_selling_soc == 80.0
+        assert engine.safety_margin_soc == 50.0
+        
+        # Test invalid configuration (should use defaults)
+        invalid_config = {'battery_selling': {}}
+        engine = BatterySellingEngine(invalid_config)
+        assert engine.min_selling_soc == 80.0  # Default value
+        assert engine.safety_margin_soc == 50.0  # Default value
+
+
+if __name__ == "__main__":
+    # Run tests
+    pytest.main([__file__, "-v"])

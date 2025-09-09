@@ -16,6 +16,7 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **✅ MULTI-SESSION**: Multiple daily charging sessions for maximum cost optimization
 - **✅ ADVANCED OPTIMIZATION**: Smart critical charging rules prevent expensive charging and enable proactive charging
 - **✅ COST-EFFECTIVE**: Real-world tested optimization rules save up to 70% on charging costs
+- **✅ BATTERY SELLING**: Conservative battery energy selling generates ~260 PLN/year additional revenue
 - **✅ PROVEN**: Saves money by charging during optimal price windows and avoiding grid charging during PV overproduction
 
 **For detailed implementation strategy, technical specifications, and current progress, see the [Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md).**
@@ -43,16 +44,30 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **Performance Metrics**: System efficiency scores and decision analytics
 - **Interactive Monitoring**: Tabbed interface with charts and real-time data
 - **Parameter Visibility**: Monitor algorithm performance and decision factors
+- **Smart State Handling**: Informative displays for "no data" and "waiting" scenarios
+- **Historical Data Integration**: Includes older charging decisions for comprehensive metrics
+- **Contextual Information**: Shows current system state and why system is waiting
+- **Helpful Tooltips**: Explains what each metric means for better understanding
 
 ### **New Documentation**
 - [Smart Critical Charging Guide](docs/SMART_CRITICAL_CHARGING.md)
 - [Optimization Rules Implementation](docs/OPTIMIZATION_RULES_IMPLEMENTATION.md)
 - [Enhanced Dashboard Documentation](docs/ENHANCED_DASHBOARD.md)
+- [Battery Energy Selling Guide](docs/README_battery_selling.md)
+
+### **Battery Energy Selling (NEW)**
+- **Conservative Safety**: 80% min SOC, 50% safety margin for battery protection
+- **Revenue Generation**: ~260 PLN/year additional revenue from energy selling
+- **Smart Logic**: Price-aware selling during high-price periods (5-9 PM)
+- **Safety Monitoring**: Real-time safety checks and emergency stop capabilities
+- **GoodWe Integration**: Uses standard `eco_discharge` mode and grid export controls
+- **Performance Analytics**: Comprehensive revenue tracking and efficiency metrics
 
 ### **Implementation Status**
 - **Overall Progress**: ~98% complete
 - **Advanced Optimization Rules**: ✅ Fully implemented and tested
 - **Smart Critical Charging**: ✅ Emergency (5% SOC) vs Critical (10% SOC) with price awareness
+- **Battery Energy Selling**: ✅ Fully implemented with conservative safety parameters
 - **Proactive Charging**: ✅ PV poor + battery <80% + low price + weather poor = charge
 - **Cost Optimization**: ✅ Real-world tested rules save up to 70% on charging costs
 - **Test Coverage**: ✅ 227/234 tests passing (97.0% pass rate)
