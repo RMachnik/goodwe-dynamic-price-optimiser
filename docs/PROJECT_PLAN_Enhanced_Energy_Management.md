@@ -1023,6 +1023,7 @@ The enhanced dashboard provides comprehensive monitoring and decision intelligen
 - **Tabbed Interface**: Overview, Decisions, Metrics, and Logs tabs
 - **Real-time Updates**: Auto-refreshing data every 30 seconds
 - **Responsive Design**: Works on desktop and mobile devices
+- **Dark Mode Support**: Toggle between light and dark themes with persistent preference
 - **API Endpoints**: `/decisions`, `/metrics`, `/current-state` for data access
 
 > **📖 For detailed dashboard documentation, see [Enhanced Dashboard Documentation](ENHANCED_DASHBOARD.md)**
