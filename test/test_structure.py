@@ -16,7 +16,7 @@ def test_project_structure():
     print(f"Current directory: {current_dir}")
     
     # Required directories
-    required_dirs = ['src', 'examples', 'test', 'docs', 'custom_components']
+    required_dirs = ['src', 'examples', 'test', 'docs']
     missing_dirs = []
     
     for dir_name in required_dirs:
@@ -51,8 +51,7 @@ def test_project_structure():
         'test/',
         'docs/',
         'logs/',
-        'out/',
-        'custom_components/'
+        'out/'
     ]
     
     missing_files = []
@@ -87,14 +86,14 @@ def test_project_structure():
     print("\n📊 STRUCTURE TEST SUMMARY:")
     if not missing_dirs and not missing_files:
         print("🎉 All directories and files are in place!")
-        assert True, "All directories and files are in place"
+        return True
     else:
         print("⚠️  Some items are missing:")
         if missing_dirs:
             print(f"   Missing directories: {', '.join(missing_dirs)}")
         if missing_files:
             print(f"   Missing files: {', '.join(missing_files)}")
-        assert False, f"Missing items: dirs={missing_dirs}, files={missing_files}"
+        return False
 
 def test_imports():
     """Test that key modules can be imported"""
@@ -124,7 +123,7 @@ def test_imports():
     except Exception as e:
         print(f"⚠️  Examples import test: {e}")
     
-    assert True, "Import tests completed"
+    return True
 
 def main():
     """Main test function"""

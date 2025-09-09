@@ -192,8 +192,6 @@ goodwe-dynamic-price-optimiser/
 │   ├── README_MASTER_COORDINATOR.md
 │   ├── GOODWE_LYNX_D_SAFETY_COMPLIANCE.md
 │   └── DOCKER_DEPLOYMENT.md                # 🐳 Comprehensive Docker guide
-├── custom_components/                      # Home Assistant integration
-│   └── goodwe/                            # GoodWe custom component
 ├── requirements.txt                        # Python dependencies
 └── README.md                               # This file
 ```
