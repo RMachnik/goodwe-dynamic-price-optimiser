@@ -599,51 +599,214 @@ class LogWebServer:
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: #f8f9fa; }
+        :root {
+            --bg-primary: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f8f9fa;
+            --text-primary: #2c3e50;
+            --text-secondary: #7f8c8d;
+            --text-muted: #95a5a6;
+            --border-color: #ecf0f1;
+            --border-light: #bdc3c7;
+            --shadow: rgba(0,0,0,0.1);
+            --shadow-light: rgba(0,0,0,0.05);
+            --accent-primary: #3498db;
+            --accent-secondary: #2c3e50;
+            --success: #27ae60;
+            --warning: #f39c12;
+            --error: #e74c3c;
+            --gradient-primary: linear-gradient(135deg, #2c3e50, #3498db);
+            --gradient-success: linear-gradient(90deg, #e74c3c, #f39c12, #27ae60);
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2d2d2d;
+            --bg-tertiary: #3a3a3a;
+            --text-primary: #e8e8e8;
+            --text-secondary: #b0b0b0;
+            --text-muted: #808080;
+            --border-color: #404040;
+            --border-light: #555555;
+            --shadow: rgba(0,0,0,0.3);
+            --shadow-light: rgba(0,0,0,0.2);
+            --accent-primary: #4a9eff;
+            --accent-secondary: #4a9eff;
+            --success: #2ecc71;
+            --warning: #f1c40f;
+            --error: #e74c3c;
+            --gradient-primary: linear-gradient(135deg, #2d2d2d, #4a9eff);
+            --gradient-success: linear-gradient(90deg, #e74c3c, #f1c40f, #2ecc71);
+        }
+
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 0; 
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
         .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
-        .header { background: linear-gradient(135deg, #2c3e50, #3498db); color: white; padding: 30px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .card { background: white; padding: 25px; margin-bottom: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .card h3 { margin-top: 0; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        .header { 
+            background: var(--gradient-primary); 
+            color: white; 
+            padding: 30px; 
+            border-radius: 10px; 
+            margin-bottom: 20px; 
+            box-shadow: 0 4px 6px var(--shadow);
+            position: relative;
+        }
+        .theme-toggle {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        .theme-toggle:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        .card { 
+            background: var(--bg-secondary); 
+            padding: 25px; 
+            margin-bottom: 20px; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 10px var(--shadow);
+            transition: background-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .card h3 { 
+            margin-top: 0; 
+            color: var(--text-primary); 
+            border-bottom: 2px solid var(--accent-primary); 
+            padding-bottom: 10px; 
+        }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
         .status-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; }
-        .status-running { background-color: #27ae60; }
-        .status-stopped { background-color: #e74c3c; }
-        .status-unknown { background-color: #f39c12; }
-        .metric { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #ecf0f1; }
+        .status-running { background-color: var(--success); }
+        .status-stopped { background-color: var(--error); }
+        .status-unknown { background-color: var(--warning); }
+        .metric { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            padding: 10px 0; 
+            border-bottom: 1px solid var(--border-color); 
+        }
         .metric:last-child { border-bottom: none; }
-        .metric-value { font-weight: bold; font-size: 1.1em; }
-        .metric-label { color: #7f8c8d; }
-        .decision-item { padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #3498db; background: #f8f9fa; }
-        .decision-item.wait { border-left-color: #f39c12; }
-        .decision-item.charging { border-left-color: #27ae60; }
-        .decision-time { color: #7f8c8d; font-size: 0.9em; }
-        .decision-action { font-weight: bold; margin: 5px 0; }
-        .decision-reason { color: #2c3e50; font-style: italic; }
-        .confidence-bar { width: 100%; height: 8px; background: #ecf0f1; border-radius: 4px; margin: 5px 0; }
-        .confidence-fill { height: 100%; background: linear-gradient(90deg, #e74c3c, #f39c12, #27ae60); border-radius: 4px; }
+        .metric-value { font-weight: bold; font-size: 1.1em; color: var(--text-primary); }
+        .metric-label { color: var(--text-secondary); }
+        .decision-item { 
+            padding: 15px; 
+            margin: 10px 0; 
+            border-radius: 8px; 
+            border-left: 4px solid var(--accent-primary); 
+            background: var(--bg-tertiary); 
+            transition: background-color 0.3s ease;
+        }
+        .decision-item.wait { border-left-color: var(--warning); }
+        .decision-item.charging { border-left-color: var(--success); }
+        .decision-time { color: var(--text-secondary); font-size: 0.9em; }
+        .decision-action { font-weight: bold; margin: 5px 0; color: var(--text-primary); }
+        .decision-reason { color: var(--text-primary); font-style: italic; }
+        .confidence-bar { 
+            width: 100%; 
+            height: 8px; 
+            background: var(--border-color); 
+            border-radius: 4px; 
+            margin: 5px 0; 
+        }
+        .confidence-fill { 
+            height: 100%; 
+            background: var(--gradient-success); 
+            border-radius: 4px; 
+        }
         .chart-container { position: relative; height: 300px; margin: 20px 0; }
-        .log-container { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 8px; font-family: 'Courier New', monospace; font-size: 12px; max-height: 400px; overflow-y: auto; }
+        .log-container { 
+            background: var(--bg-tertiary); 
+            color: var(--text-primary); 
+            padding: 15px; 
+            border-radius: 8px; 
+            font-family: 'Courier New', monospace; 
+            font-size: 12px; 
+            max-height: 400px; 
+            overflow-y: auto; 
+            border: 1px solid var(--border-color);
+        }
         .controls { margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 10px; }
-        .controls input, .controls select, .controls button { padding: 8px 12px; border: 1px solid #bdc3c7; border-radius: 4px; }
-        .controls button { background: #3498db; color: white; border: none; cursor: pointer; }
-        .controls button:hover { background: #2980b9; }
+        .controls input, .controls select, .controls button { 
+            padding: 8px 12px; 
+            border: 1px solid var(--border-light); 
+            border-radius: 4px; 
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            transition: all 0.3s ease;
+        }
+        .controls button { 
+            background: var(--accent-primary); 
+            color: white; 
+            border: none; 
+            cursor: pointer; 
+        }
+        .controls button:hover { 
+            background: var(--accent-secondary); 
+            opacity: 0.9;
+        }
         .log-line { margin: 2px 0; }
-        .log-error { color: #e74c3c; }
-        .log-warning { color: #f39c12; }
-        .log-info { color: #3498db; }
-        .log-debug { color: #95a5a6; }
-        .tabs { display: flex; border-bottom: 2px solid #ecf0f1; margin-bottom: 20px; }
-        .tab { padding: 10px 20px; cursor: pointer; border-bottom: 2px solid transparent; }
-        .tab.active { border-bottom-color: #3498db; color: #3498db; font-weight: bold; }
+        .log-error { color: var(--error); }
+        .log-warning { color: var(--warning); }
+        .log-info { color: var(--accent-primary); }
+        .log-debug { color: var(--text-muted); }
+        .tabs { 
+            display: flex; 
+            border-bottom: 2px solid var(--border-color); 
+            margin-bottom: 20px; 
+        }
+        .tab { 
+            padding: 10px 20px; 
+            cursor: pointer; 
+            border-bottom: 2px solid transparent; 
+            color: var(--text-secondary);
+            transition: all 0.3s ease;
+        }
+        .tab:hover {
+            color: var(--text-primary);
+        }
+        .tab.active { 
+            border-bottom-color: var(--accent-primary); 
+            color: var(--accent-primary); 
+            font-weight: bold; 
+        }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
-        .savings-positive { color: #27ae60; font-weight: bold; }
-        .savings-negative { color: #e74c3c; font-weight: bold; }
+        .savings-positive { color: var(--success); font-weight: bold; }
+        .savings-negative { color: var(--error); font-weight: bold; }
         .system-health { display: flex; align-items: center; gap: 10px; }
-        .health-indicator { padding: 5px 10px; border-radius: 15px; color: white; font-size: 0.9em; }
-        .health-good { background: #27ae60; }
-        .health-warning { background: #f39c12; }
-        .health-error { background: #e74c3c; }
+        .health-indicator { 
+            padding: 5px 10px; 
+            border-radius: 15px; 
+            color: white; 
+            font-size: 0.9em; 
+        }
+        .health-good { background: var(--success); }
+        .health-warning { background: var(--warning); }
+        .health-error { background: var(--error); }
+        
+        /* Dark mode specific adjustments */
+        [data-theme="dark"] .log-container {
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        
+        /* Smooth transitions for theme switching */
+        * {
+            transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+        }
     </style>
 </head>
 <body>
@@ -651,6 +814,9 @@ class LogWebServer:
         <div class="header">
             <h1>🔋 GoodWe Master Coordinator - Enhanced Dashboard</h1>
             <p>Intelligent Energy Management & Decision Monitoring</p>
+            <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle">
+                🌙 Dark Mode
+            </button>
         </div>
         
         <!-- Tabs -->
@@ -989,13 +1155,14 @@ class LogWebServer:
                     }
                     
                     const decisionCtx = document.getElementById('decisionChart').getContext('2d');
+                    const colors = getChartColors();
                     decisionChart = new Chart(decisionCtx, {
                         type: 'doughnut',
                         data: {
                             labels: Object.keys(data.decision_breakdown),
                             datasets: [{
                                 data: Object.values(data.decision_breakdown),
-                                backgroundColor: ['#3498db', '#27ae60', '#f39c12', '#e74c3c']
+                                backgroundColor: colors.colors
                             }]
                         },
                         options: {
@@ -1004,7 +1171,13 @@ class LogWebServer:
                             plugins: {
                                 title: {
                                     display: true,
-                                    text: 'Decision Types Distribution'
+                                    text: 'Decision Types Distribution',
+                                    color: colors.text
+                                },
+                                legend: {
+                                    labels: {
+                                        color: colors.text
+                                    }
                                 }
                             }
                         }
@@ -1032,7 +1205,31 @@ class LogWebServer:
                             plugins: {
                                 title: {
                                     display: true,
-                                    text: 'Cost Analysis'
+                                    text: 'Cost Analysis',
+                                    color: colors.text
+                                },
+                                legend: {
+                                    labels: {
+                                        color: colors.text
+                                    }
+                                }
+                            },
+                            scales: {
+                                x: {
+                                    ticks: {
+                                        color: colors.text
+                                    },
+                                    grid: {
+                                        color: colors.grid
+                                    }
+                                },
+                                y: {
+                                    ticks: {
+                                        color: colors.text
+                                    },
+                                    grid: {
+                                        color: colors.grid
+                                    }
                                 }
                             }
                         }
@@ -1149,6 +1346,56 @@ class LogWebServer:
             loadPerformanceMetrics();
             loadCostSavings();
         }, 30000); // Update every 30 seconds
+
+        // Theme-aware chart colors
+        function getChartColors() {
+            const isDark = document.body.getAttribute('data-theme') === 'dark';
+            return {
+                text: isDark ? '#e8e8e8' : '#2c3e50',
+                grid: isDark ? '#404040' : '#ecf0f1',
+                background: isDark ? '#2d2d2d' : '#ffffff',
+                colors: ['#3498db', '#27ae60', '#f39c12', '#e74c3c', '#9b59b6', '#1abc9c']
+            };
+        }
+
+        // Dark mode functionality
+        function toggleTheme() {
+            const body = document.body;
+            const themeToggle = document.getElementById('theme-toggle');
+            const currentTheme = body.getAttribute('data-theme');
+            
+            if (currentTheme === 'dark') {
+                body.removeAttribute('data-theme');
+                themeToggle.innerHTML = '🌙 Dark Mode';
+                localStorage.setItem('theme', 'light');
+            } else {
+                body.setAttribute('data-theme', 'dark');
+                themeToggle.innerHTML = '☀️ Light Mode';
+                localStorage.setItem('theme', 'dark');
+            }
+            
+            // Update charts for dark mode
+            updateChartsForTheme();
+        }
+
+        function updateChartsForTheme() {
+            // Reload metrics to recreate charts with new theme colors
+            loadMetrics();
+        }
+
+        // Initialize theme on page load
+        function initializeTheme() {
+            const savedTheme = localStorage.getItem('theme');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            
+            if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+                document.body.setAttribute('data-theme', 'dark');
+                document.getElementById('theme-toggle').innerHTML = '☀️ Light Mode';
+            }
+        }
+
+        // Initialize theme when page loads
+        document.addEventListener('DOMContentLoaded', initializeTheme);
     </script>
 </body>
 </html>

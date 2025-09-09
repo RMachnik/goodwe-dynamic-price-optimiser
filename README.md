@@ -374,6 +374,7 @@ open http://localhost:8080
 - **Performance Metrics**: Cost savings, efficiency scoring, and system health
 - **Interactive Analytics**: Charts and visualizations for data analysis
 - **System Monitoring**: Real-time status, logs, and health indicators
+- **Dark Mode Support**: Toggle between light and dark themes with persistent preference
 
 ### **Testing the Master Coordinator**
 ```bash

@@ -97,12 +97,20 @@ The dashboard is organized into four main tabs:
 - **Real-time Updates**: Auto-refreshing data without page reload
 - **Interactive Charts**: Chart.js visualizations for data analysis
 - **Color-coded Status**: Visual indicators for system health and decision quality
+- **Dark Mode Support**: Toggle between light and dark themes with persistent preference
 
 ### **Navigation**
 - **Tab Navigation**: Click tabs to switch between views
 - **Auto-refresh**: Data updates automatically every 30 seconds
 - **Manual Refresh**: Refresh button for immediate updates
 - **Log Streaming**: Toggle real-time log streaming on/off
+
+### **Dark Mode**
+- **Theme Toggle**: Click the 🌙/☀️ button in the top-right corner to switch themes
+- **Persistent Preference**: Your theme choice is saved in browser localStorage
+- **System Preference**: Automatically detects your system's dark mode preference on first visit
+- **Chart Adaptation**: All charts automatically adapt to the selected theme
+- **Smooth Transitions**: Seamless theme switching with smooth color transitions
 
 ## 📊 **Decision Intelligence**
 
