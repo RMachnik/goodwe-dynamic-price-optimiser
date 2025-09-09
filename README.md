@@ -37,9 +37,17 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **Solution 2**: Super low price charging rule now charges fully from grid during super low prices
 - **Result 2**: Up to 66.7% savings + full battery ready for PV selling at high prices
 
+### **Enhanced Dashboard**
+- **Decision Intelligence**: Real-time visibility into charging decisions and reasoning
+- **Cost & Savings Tracking**: Live monitoring of energy costs and optimization savings
+- **Performance Metrics**: System efficiency scores and decision analytics
+- **Interactive Monitoring**: Tabbed interface with charts and real-time data
+- **Parameter Visibility**: Monitor algorithm performance and decision factors
+
 ### **New Documentation**
 - [Smart Critical Charging Guide](docs/SMART_CRITICAL_CHARGING.md)
 - [Optimization Rules Implementation](docs/OPTIMIZATION_RULES_IMPLEMENTATION.md)
+- [Enhanced Dashboard Documentation](docs/ENHANCED_DASHBOARD.md)
 
 ### **Implementation Status**
 - **Overall Progress**: ~98% complete
@@ -349,6 +357,23 @@ sudo journalctl -u goodwe-master-coordinator -f
 - **📝 Detailed Logging**: Complete audit trail of all decisions
 
 ## 📊 **Usage Examples**
+
+### **Enhanced Dashboard**
+The system includes a comprehensive web dashboard for monitoring and analysis. See the [Enhanced Dashboard Documentation](docs/ENHANCED_DASHBOARD.md) for detailed information.
+
+```bash
+# Start the enhanced dashboard
+python src/log_web_server.py --port 8080
+
+# Access the dashboard
+open http://localhost:8080
+```
+
+**Key Features:**
+- **Decision Intelligence**: Real-time charging decision monitoring and analysis
+- **Performance Metrics**: Cost savings, efficiency scoring, and system health
+- **Interactive Analytics**: Charts and visualizations for data analysis
+- **System Monitoring**: Real-time status, logs, and health indicators
 
 ### **Testing the Master Coordinator**
 ```bash

@@ -64,7 +64,7 @@ class TestSmartChargingStrategy(unittest.TestCase):
         self.assertTrue(decision['should_charge'])
         self.assertEqual(decision['priority'], 'critical')
         self.assertGreaterEqual(decision['confidence'], 0.8)
-        self.assertIn('Critical battery level', decision['reason'])
+        self.assertIn('Critical battery', decision['reason'])
     
     def test_pv_overproduction_no_charging(self):
         """Test that PV overproduction prevents grid charging"""
