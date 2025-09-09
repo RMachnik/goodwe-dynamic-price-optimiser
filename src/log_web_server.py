@@ -797,10 +797,35 @@ class LogWebServer:
         .health-warning { background: var(--warning); }
         .health-error { background: var(--error); }
         
+        .data-source-real { color: var(--success); }
+        .data-source-mock { color: var(--warning); }
+        
+        .sync-indicator {
+            font-size: 12px;
+            opacity: 0.8;
+            transition: all 0.3s ease;
+        }
+        .sync-indicator.synced { color: var(--success); }
+        .sync-indicator.manual { color: var(--warning); }
+        
+        .sync-toggle {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        .sync-toggle:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
         /* Dark mode specific adjustments */
         [data-theme="dark"] .log-container {
-            background: #1e1e1e;
-            color: #d4d4d4;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
         }
         
         /* Smooth transitions for theme switching */
@@ -814,9 +839,20 @@ class LogWebServer:
         <div class="header">
             <h1>🔋 GoodWe Master Coordinator - Enhanced Dashboard</h1>
             <p>Intelligent Energy Management & Decision Monitoring</p>
-            <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle">
-                🌙 Dark Mode
-            </button>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                <div id="data-source-indicator" style="font-size: 14px; opacity: 0.8;">
+                    📊 Data Source: <span id="data-source-text">Loading...</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span id="sync-status" class="sync-indicator" style="font-size: 12px; opacity: 0.8;">Loading...</span>
+                    <button class="sync-toggle" onclick="toggleOSSync()" id="sync-toggle" title="Toggle OS sync">
+                        🔄
+                    </button>
+                    <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle">
+                        🌙 Dark Mode
+                    </button>
+                </div>
+            </div>
         </div>
         
         <!-- Tabs -->
@@ -975,6 +1011,13 @@ class LogWebServer:
                         document.getElementById('current-state').innerHTML = `<p>Error: ${data.error}</p>`;
                         return;
                     }
+                    
+                    // Update data source indicator
+                    const dataSource = data.data_source || 'mock';
+                    const dataSourceText = dataSource === 'real_inverter' ? 'Real Inverter Data' : 'Mock Data';
+                    const dataSourceElement = document.getElementById('data-source-text');
+                    dataSourceElement.textContent = dataSourceText;
+                    dataSourceElement.className = dataSource === 'real_inverter' ? 'data-source-real' : 'data-source-mock';
                     
                     const stateHtml = `
                         <div class="metric">
@@ -1196,7 +1239,7 @@ class LogWebServer:
                             datasets: [{
                                 label: 'PLN',
                                 data: [data.total_cost_pln, data.total_savings_pln, data.total_cost_pln - data.total_savings_pln],
-                                backgroundColor: ['#e74c3c', '#27ae60', '#3498db']
+                                backgroundColor: getChartColors().colors.slice(0, 3)
                             }]
                         },
                         options: {
@@ -1354,7 +1397,9 @@ class LogWebServer:
                 text: isDark ? '#e8e8e8' : '#2c3e50',
                 grid: isDark ? '#404040' : '#ecf0f1',
                 background: isDark ? '#2d2d2d' : '#ffffff',
-                colors: ['#3498db', '#27ae60', '#f39c12', '#e74c3c', '#9b59b6', '#1abc9c']
+                colors: isDark ? 
+                    ['#4a9eff', '#2ecc71', '#f1c40f', '#e74c3c', '#9b59b6', '#1abc9c'] :
+                    ['#3498db', '#27ae60', '#f39c12', '#e74c3c', '#9b59b6', '#1abc9c']
             };
         }
 
@@ -1363,19 +1408,61 @@ class LogWebServer:
             const body = document.body;
             const themeToggle = document.getElementById('theme-toggle');
             const currentTheme = body.getAttribute('data-theme');
+            const isAutoSync = localStorage.getItem('theme-sync') === 'true';
             
-            if (currentTheme === 'dark') {
-                body.removeAttribute('data-theme');
-                themeToggle.innerHTML = '🌙 Dark Mode';
-                localStorage.setItem('theme', 'light');
+            if (isAutoSync) {
+                // Toggle auto-sync off and set manual theme
+                localStorage.setItem('theme-sync', 'false');
+                if (currentTheme === 'dark') {
+                    body.removeAttribute('data-theme');
+                    themeToggle.innerHTML = '🌙 Dark Mode';
+                    localStorage.setItem('theme', 'light');
+                } else {
+                    body.setAttribute('data-theme', 'dark');
+                    themeToggle.innerHTML = '☀️ Light Mode';
+                    localStorage.setItem('theme', 'dark');
+                }
+                updateSyncStatus(false);
             } else {
-                body.setAttribute('data-theme', 'dark');
-                themeToggle.innerHTML = '☀️ Light Mode';
-                localStorage.setItem('theme', 'dark');
+                // Toggle between manual themes
+                if (currentTheme === 'dark') {
+                    body.removeAttribute('data-theme');
+                    themeToggle.innerHTML = '🌙 Dark Mode';
+                    localStorage.setItem('theme', 'light');
+                } else {
+                    body.setAttribute('data-theme', 'dark');
+                    themeToggle.innerHTML = '☀️ Light Mode';
+                    localStorage.setItem('theme', 'dark');
+                }
+                updateSyncStatus(false);
             }
             
             // Update charts for dark mode
             updateChartsForTheme();
+        }
+        
+        // Toggle OS sync
+        function toggleOSSync() {
+            const isAutoSync = localStorage.getItem('theme-sync') === 'true';
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            
+            if (isAutoSync) {
+                // Turn off auto-sync, keep current theme
+                localStorage.setItem('theme-sync', 'false');
+                updateSyncStatus(false);
+            } else {
+                // Turn on auto-sync
+                localStorage.setItem('theme-sync', 'true');
+                if (prefersDark) {
+                    document.body.setAttribute('data-theme', 'dark');
+                    document.getElementById('theme-toggle').innerHTML = '☀️ Light Mode';
+                } else {
+                    document.body.removeAttribute('data-theme');
+                    document.getElementById('theme-toggle').innerHTML = '🌙 Dark Mode';
+                }
+                updateSyncStatus(true);
+                updateChartsForTheme();
+            }
         }
 
         function updateChartsForTheme() {
@@ -1386,16 +1473,70 @@ class LogWebServer:
         // Initialize theme on page load
         function initializeTheme() {
             const savedTheme = localStorage.getItem('theme');
+            const isAutoSync = localStorage.getItem('theme-sync') === 'true';
             const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
             
-            if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+            if (isAutoSync) {
+                // Auto-sync with OS
+                if (prefersDark) {
+                    document.body.setAttribute('data-theme', 'dark');
+                    document.getElementById('theme-toggle').innerHTML = '☀️ Light Mode';
+                } else {
+                    document.body.removeAttribute('data-theme');
+                    document.getElementById('theme-toggle').innerHTML = '🌙 Dark Mode';
+                }
+                updateSyncStatus(true);
+            } else if (savedTheme === 'dark') {
+                // Manual dark mode
                 document.body.setAttribute('data-theme', 'dark');
                 document.getElementById('theme-toggle').innerHTML = '☀️ Light Mode';
+                updateSyncStatus(false);
+            } else if (!savedTheme && prefersDark) {
+                // First visit - use OS preference
+                document.body.setAttribute('data-theme', 'dark');
+                document.getElementById('theme-toggle').innerHTML = '☀️ Light Mode';
+                updateSyncStatus(true);
+            } else {
+                // Default to light mode
+                document.body.removeAttribute('data-theme');
+                document.getElementById('theme-toggle').innerHTML = '🌙 Dark Mode';
+                updateSyncStatus(false);
+            }
+        }
+        
+        // Listen for OS theme changes
+        function setupOSThemeListener() {
+            const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+            mediaQuery.addEventListener('change', (e) => {
+                const isAutoSync = localStorage.getItem('theme-sync') === 'true';
+                if (isAutoSync) {
+                    if (e.matches) {
+                        document.body.setAttribute('data-theme', 'dark');
+                        document.getElementById('theme-toggle').innerHTML = '☀️ Light Mode';
+                    } else {
+                        document.body.removeAttribute('data-theme');
+                        document.getElementById('theme-toggle').innerHTML = '🌙 Dark Mode';
+                    }
+                    updateChartsForTheme();
+                    updateSyncStatus(true);
+                }
+            });
+        }
+        
+        // Update sync status indicator
+        function updateSyncStatus(isSynced) {
+            const syncIndicator = document.getElementById('sync-status');
+            if (syncIndicator) {
+                syncIndicator.textContent = isSynced ? '🔄 Synced with OS' : '🔒 Manual';
+                syncIndicator.className = isSynced ? 'sync-indicator synced' : 'sync-indicator manual';
             }
         }
 
         // Initialize theme when page loads
-        document.addEventListener('DOMContentLoaded', initializeTheme);
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeTheme();
+            setupOSThemeListener();
+        });
     </script>
 </body>
 </html>
@@ -1762,12 +1903,267 @@ class LogWebServer:
         except Exception:
             return 0.0
     
+    def _get_real_inverter_data(self) -> Optional[Dict[str, Any]]:
+        """Get real data from GoodWe inverter or master coordinator"""
+        try:
+            # Try to get real-time data from the master coordinator logs
+            # This is a simple approach to get the latest status
+            try:
+                log_file = Path(__file__).parent.parent / "logs" / "enhanced_data_collector.log"
+                if log_file.exists():
+                    # Read the last few lines to find the latest status
+                    with open(log_file, 'r') as f:
+                        lines = f.readlines()
+                    
+                    # Look for the latest status line
+                    latest_status = None
+                    for line in reversed(lines[-50:]):  # Check last 50 lines
+                        if "Status - State:" in line:
+                            latest_status = line.strip()
+                            break
+                    
+                    if latest_status:
+                        # Parse the status line: "Status - State: monitoring, Battery: 70%, PV: 0W, Charging: False"
+                        import re
+                        battery_match = re.search(r'Battery: (\d+)%', latest_status)
+                        pv_match = re.search(r'PV: (\d+)W', latest_status)
+                        charging_match = re.search(r'Charging: (True|False)', latest_status)
+                        
+                        if battery_match and pv_match and charging_match:
+                            battery_soc = int(battery_match.group(1))
+                            pv_power = int(pv_match.group(1))
+                            is_charging = charging_match.group(1) == 'True'
+                            
+                            logger.info(f"Successfully parsed real data: Battery {battery_soc}%, PV {pv_power}W, Charging {is_charging}")
+                            
+                            # Create real data structure
+                            real_data = {
+                                'timestamp': datetime.now().isoformat(),
+                                'battery': {
+                                    'soc_percent': battery_soc,
+                                    'charging_status': is_charging
+                                },
+                                'photovoltaic': {
+                                    'current_power_w': pv_power
+                                },
+                                'house_consumption': {
+                                    'current_power_w': 0  # Will be calculated
+                                },
+                                'grid': {
+                                    'current_power_w': 0  # Will be calculated
+                                }
+                            }
+                            
+                            return self._convert_real_data_to_dashboard_format(real_data)
+                    
+            except Exception as e:
+                logger.warning(f"Failed to parse log data: {e}")
+                return None
+            
+            # Fallback: Try to get data directly from the enhanced data collector
+            try:
+                from enhanced_data_collector import EnhancedDataCollector
+                import asyncio
+                
+                # Create a temporary data collector to get current data
+                data_collector = EnhancedDataCollector()
+                if asyncio.run(data_collector.initialize()):
+                    asyncio.run(data_collector.collect_comprehensive_data())
+                    current_data = data_collector.get_current_data()
+                    
+                    if current_data and current_data.get('battery', {}).get('soc_percent') != 'Unknown':
+                        logger.info("Successfully retrieved real-time data from inverter")
+                        return self._convert_real_data_to_dashboard_format(current_data)
+                    else:
+                        logger.warning("Data collector returned unknown values")
+                        return None
+                else:
+                    logger.warning("Failed to initialize data collector")
+                    return None
+                    
+            except Exception as e:
+                logger.warning(f"Failed to get real-time data: {e}")
+                return None
+            
+            # Fallback: Check for recent state files
+            project_root = Path(__file__).parent.parent
+            data_files = list((project_root / "out").glob("coordinator_state_*.json"))
+            
+            if not data_files:
+                logger.info("No coordinator state files found")
+                return None
+            
+            # Get the most recent data file
+            latest_file = max(data_files, key=lambda x: x.stat().st_mtime)
+            
+            # Check if the file is recent (within last 10 minutes for service data)
+            file_age = datetime.now().timestamp() - latest_file.stat().st_mtime
+            if file_age > 600:  # 10 minutes
+                logger.warning(f"Latest data file is {file_age/60:.1f} minutes old")
+                return None
+            
+            with open(latest_file, 'r') as f:
+                real_data = json.load(f)
+            
+            # Extract relevant data from the real system
+            battery_data = real_data.get('battery', {})
+            pv_data = real_data.get('photovoltaic', {})
+            consumption_data = real_data.get('house_consumption', {})
+            grid_data = real_data.get('grid', {})
+            
+            # Convert real data to dashboard format
+            state = {
+                'timestamp': real_data.get('timestamp', datetime.now().isoformat()),
+                'data_source': 'real_inverter',
+                'battery': {
+                    'soc_percent': battery_data.get('soc_percent', 'Unknown'),
+                    'temperature_c': battery_data.get('temperature', 'Unknown'),
+                    'charging_status': 'charging' if battery_data.get('charging_status', False) else 'idle',
+                    'health_status': 'good' if battery_data.get('soc_percent', 0) > 20 else 'warning'
+                },
+                'photovoltaic': {
+                    'current_power_w': pv_data.get('current_power_w', 0),
+                    'daily_generation_kwh': pv_data.get('daily_generation_kwh', 0),
+                    'efficiency_percent': pv_data.get('efficiency_percent', 0)
+                },
+                'house_consumption': {
+                    'current_power_w': consumption_data.get('current_power_w', 0),
+                    'daily_consumption_kwh': consumption_data.get('daily_consumption_kwh', 0)
+                },
+                'grid': {
+                    'current_power_w': grid_data.get('current_power_w', 0),
+                    'flow_direction': 'export' if grid_data.get('current_power_w', 0) < 0 else 'import',
+                    'daily_import_kwh': grid_data.get('daily_import_kwh', 0),
+                    'daily_export_kwh': grid_data.get('daily_export_kwh', 0)
+                },
+                'pricing': {
+                    'current_price_pln_kwh': real_data.get('pricing', {}).get('current_price_pln_kwh', 0.45),
+                    'average_price_pln_kwh': real_data.get('pricing', {}).get('average_price_pln_kwh', 0.68),
+                    'cheapest_price_pln_kwh': real_data.get('pricing', {}).get('cheapest_price_pln_kwh', 0.23),
+                    'cheapest_hour': real_data.get('pricing', {}).get('cheapest_hour', '02:00'),
+                    'price_trend': real_data.get('pricing', {}).get('price_trend', 'stable')
+                },
+                'weather': {
+                    'condition': real_data.get('weather', {}).get('condition', 'unknown'),
+                    'temperature_c': real_data.get('weather', {}).get('temperature_c', 20),
+                    'cloud_cover_percent': real_data.get('weather', {}).get('cloud_cover_percent', 50),
+                    'forecast_4h': real_data.get('weather', {}).get('forecast_4h', 'stable')
+                },
+                'decision_factors': {
+                    'price_score': real_data.get('decision_factors', {}).get('price_score', 75),
+                    'battery_score': real_data.get('decision_factors', {}).get('battery_score', 70),
+                    'pv_score': real_data.get('decision_factors', {}).get('pv_score', 80),
+                    'consumption_score': real_data.get('decision_factors', {}).get('consumption_score', 75),
+                    'weather_score': real_data.get('decision_factors', {}).get('weather_score', 80),
+                    'overall_confidence': real_data.get('decision_factors', {}).get('overall_confidence', 75)
+                },
+                'recommendations': {
+                    'primary_action': real_data.get('recommendations', {}).get('primary_action', 'wait'),
+                    'reason': real_data.get('recommendations', {}).get('reason', 'Monitoring system conditions'),
+                    'confidence': real_data.get('recommendations', {}).get('confidence', 0.75),
+                    'alternative_actions': real_data.get('recommendations', {}).get('alternative_actions', [])
+                },
+                'system_health': {
+                    'status': 'healthy' if real_data.get('system_health', {}).get('status') == 'healthy' else 'warning',
+                    'last_error': real_data.get('system_health', {}).get('last_error'),
+                    'uptime_hours': real_data.get('system_health', {}).get('uptime_hours', 0),
+                    'data_quality': real_data.get('system_health', {}).get('data_quality', 'good')
+                }
+            }
+            
+            logger.info(f"Successfully loaded real data from {latest_file.name}")
+            return state
+            
+        except Exception as e:
+            logger.error(f"Error getting real inverter data: {e}")
+            return None
+    
+    def _convert_real_data_to_dashboard_format(self, real_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert real inverter data to dashboard format"""
+        try:
+            battery_data = real_data.get('battery', {})
+            pv_data = real_data.get('photovoltaic', {})
+            consumption_data = real_data.get('house_consumption', {})
+            grid_data = real_data.get('grid', {})
+            
+            # Convert real data to dashboard format
+            state = {
+                'timestamp': real_data.get('timestamp', datetime.now().isoformat()),
+                'data_source': 'real_inverter',
+                'battery': {
+                    'soc_percent': battery_data.get('soc_percent', 'Unknown'),
+                    'temperature_c': battery_data.get('temperature', 'Unknown'),
+                    'charging_status': 'charging' if battery_data.get('charging_status', False) else 'idle',
+                    'health_status': 'good' if battery_data.get('soc_percent', 0) > 20 else 'warning'
+                },
+                'photovoltaic': {
+                    'current_power_w': pv_data.get('current_power_w', 0),
+                    'daily_generation_kwh': pv_data.get('daily_production_kwh', 0),
+                    'efficiency_percent': pv_data.get('efficiency_percent', 0)
+                },
+                'house_consumption': {
+                    'current_power_w': consumption_data.get('current_power_w', 0),
+                    'daily_consumption_kwh': consumption_data.get('daily_total_kwh', 0)
+                },
+                'grid': {
+                    'current_power_w': grid_data.get('power_w', 0),
+                    'flow_direction': 'export' if grid_data.get('power_w', 0) < 0 else 'import',
+                    'daily_import_kwh': grid_data.get('today_imported_kwh', 0),
+                    'daily_export_kwh': grid_data.get('today_exported_kwh', 0)
+                },
+                'pricing': {
+                    'current_price_pln_kwh': 0.45,  # Placeholder - not relevant for GoodWe
+                    'average_price_pln_kwh': 0.68,
+                    'cheapest_price_pln_kwh': 0.23,
+                    'cheapest_hour': '02:00',
+                    'price_trend': 'stable'
+                },
+                'weather': {
+                    'condition': 'unknown',
+                    'temperature_c': 20,
+                    'cloud_cover_percent': 50,
+                    'forecast_4h': 'stable'
+                },
+                'decision_factors': {
+                    'price_score': 75,
+                    'battery_score': 70,
+                    'pv_score': 80,
+                    'consumption_score': 75,
+                    'weather_score': 80,
+                    'overall_confidence': 75
+                },
+                'recommendations': {
+                    'primary_action': 'wait',
+                    'reason': 'Monitoring system conditions',
+                    'confidence': 0.75,
+                    'alternative_actions': []
+                },
+                'system_health': {
+                    'status': 'healthy',
+                    'last_error': None,
+                    'uptime_hours': 0,
+                    'data_quality': 'good'
+                }
+            }
+            
+            return state
+            
+        except Exception as e:
+            logger.error(f"Error converting real data: {e}")
+            return None
+    
     def _get_current_system_state(self) -> Dict[str, Any]:
         """Get current system state and decision factors"""
         try:
-            # This would ideally connect to the master coordinator to get real-time data
-            # For now, we'll create a comprehensive mock state
+            # Try to get real data from the master coordinator or data collector
+            logger.info("Attempting to get real inverter data...")
+            real_data = self._get_real_inverter_data()
+            if real_data:
+                logger.info("Real data retrieved successfully, returning real data")
+                return real_data
             
+            # Fallback to mock data if no real data available
+            logger.info("No real data available, using mock data for demonstration")
             current_time = datetime.now()
             
             # Mock current system state
