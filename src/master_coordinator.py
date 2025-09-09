@@ -45,6 +45,8 @@ from weather_data_collector import WeatherDataCollector
 from pv_consumption_analyzer import PVConsumptionAnalyzer
 from pv_trend_analyzer import PVTrendAnalyzer
 from multi_session_manager import MultiSessionManager
+from battery_selling_engine import BatterySellingEngine
+from battery_selling_monitor import BatterySellingMonitor
 
 # Setup logging
 project_root = Path(__file__).parent.parent
@@ -99,6 +101,8 @@ class MasterCoordinator:
         self.weather_collector = None
         self.pv_consumption_analyzer = None
         self.multi_session_manager = None
+        self.battery_selling_engine = None
+        self.battery_selling_monitor = None
         
         # System data
         self.current_data = {}
@@ -211,6 +215,16 @@ class MasterCoordinator:
             logger.info("Initializing Multi-Session Manager...")
             self.multi_session_manager = MultiSessionManager(self.config)
             logger.info("Multi-Session Manager initialized successfully")
+            
+            # Initialize battery selling engine
+            battery_selling_enabled = self.config.get('battery_selling', {}).get('enabled', False)
+            if battery_selling_enabled:
+                logger.info("Initializing Battery Selling Engine...")
+                self.battery_selling_engine = BatterySellingEngine(self.config)
+                self.battery_selling_monitor = BatterySellingMonitor(self.config)
+                logger.info("Battery Selling Engine initialized successfully")
+            else:
+                logger.info("Battery selling disabled in configuration")
             
             # Initialize log web server
             logger.info("Initializing Log Web Server...")
@@ -479,7 +493,7 @@ class MasterCoordinator:
         return time_since_last.total_seconds() >= self.decision_interval
     
     async def _make_charging_decision(self):
-        """Make intelligent charging decision using enhanced smart strategy with multi-session support"""
+        """Make intelligent charging decision using enhanced smart strategy with multi-session support and battery selling"""
         try:
             logger.info("Making charging decision...")
             
@@ -494,6 +508,10 @@ class MasterCoordinator:
             if not price_data:
                 logger.warning("No price data available, skipping decision")
                 return
+            
+            # Check battery selling opportunities if enabled
+            if self.battery_selling_engine and self.battery_selling_monitor:
+                await self._handle_battery_selling_logic(price_data)
             
             # Use smart charging strategy
             decision = self.charging_controller.make_smart_charging_decision(
@@ -599,6 +617,52 @@ class MasterCoordinator:
         except Exception as e:
             logger.error(f"Failed to save decision to file: {e}")
     
+    async def _save_battery_selling_decision(self, selling_opportunity, current_price_pln: float):
+        """Save battery selling decision data to file for dashboard consumption"""
+        try:
+            import json
+            from pathlib import Path
+            
+            # Create energy_data directory if it doesn't exist
+            project_root = Path(__file__).parent.parent
+            energy_data_dir = project_root / "out" / "energy_data"
+            energy_data_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Create filename with timestamp
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"battery_selling_decision_{timestamp}.json"
+            file_path = energy_data_dir / filename
+            
+            # Prepare selling decision data for dashboard
+            selling_data = {
+                'timestamp': datetime.now().isoformat(),
+                'action': 'battery_selling',
+                'decision': selling_opportunity.decision.value,
+                'confidence': selling_opportunity.confidence,
+                'expected_revenue_pln': selling_opportunity.expected_revenue_pln,
+                'selling_power_w': selling_opportunity.selling_power_w,
+                'estimated_duration_hours': selling_opportunity.estimated_duration_hours,
+                'reasoning': selling_opportunity.reasoning,
+                'safety_checks_passed': selling_opportunity.safety_checks_passed,
+                'risk_level': selling_opportunity.risk_level,
+                'current_price_pln': current_price_pln,
+                'battery_soc': self.current_data.get('battery', {}).get('soc_percent', 0),
+                'pv_power': self.current_data.get('photovoltaic', {}).get('current_power_w', 0),
+                'house_consumption': self.current_data.get('house_consumption', {}).get('current_power_w', 0),
+                'energy_sold_kwh': selling_opportunity.estimated_duration_hours * (selling_opportunity.selling_power_w / 1000),
+                'revenue_per_kwh_pln': current_price_pln,
+                'safety_status': self.current_data.get('battery_selling_safety', {}).get('overall_status', 'unknown')
+            }
+            
+            # Save to file
+            with open(file_path, 'w') as f:
+                json.dump(selling_data, f, indent=2)
+            
+            logger.debug(f"Battery selling decision saved to {filename}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save battery selling decision to file: {e}")
+    
     async def _handle_multi_session_logic(self):
         """Handle multi-session charging logic"""
         try:
@@ -637,6 +701,87 @@ class MasterCoordinator:
             
         except Exception as e:
             logger.error(f"Failed to handle multi-session logic: {e}")
+    
+    async def _handle_battery_selling_logic(self, price_data: Dict[str, Any]):
+        """Handle battery selling logic and decisions"""
+        try:
+            if not self.battery_selling_engine or not self.battery_selling_monitor:
+                return
+            
+            # Get current price for selling analysis
+            current_price_pln = 0
+            if price_data and 'value' in price_data:
+                try:
+                    now = datetime.now()
+                    current_time = now.replace(second=0, microsecond=0)
+                    
+                    for item in price_data['value']:
+                        item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                        if item_time <= current_time < item_time + timedelta(minutes=15):
+                            current_price_pln = float(item['csdac_pln']) + 0.0892  # SC component
+                            break
+                except Exception as e:
+                    logger.warning(f"Failed to extract current price for selling: {e}")
+                    return
+            
+            # Prepare price data for selling engine
+            selling_price_data = {
+                'current_price_pln': current_price_pln,
+                'price_data': price_data
+            }
+            
+            # Check safety conditions first
+            safety_report = await self.battery_selling_monitor.check_safety_conditions(
+                self.charging_controller.goodwe_charger.inverter, self.current_data
+            )
+            
+            if safety_report.emergency_stop_required:
+                logger.warning("Emergency stop required - stopping all battery selling operations")
+                await self.battery_selling_monitor.emergency_stop(self.charging_controller.goodwe_charger.inverter)
+                return
+            
+            # Analyze selling opportunity
+            selling_opportunity = await self.battery_selling_engine.analyze_selling_opportunity(
+                self.current_data, selling_price_data
+            )
+            
+            # Log selling analysis
+            logger.info(f"Battery selling analysis: {selling_opportunity.decision.value}")
+            logger.info(f"  - Confidence: {selling_opportunity.confidence:.2f}")
+            logger.info(f"  - Expected revenue: {selling_opportunity.expected_revenue_pln:.2f} PLN")
+            logger.info(f"  - Reasoning: {selling_opportunity.reasoning}")
+            
+            # Execute selling decision
+            if selling_opportunity.decision.value == "start_selling":
+                if selling_opportunity.safety_checks_passed:
+                    success = await self.battery_selling_engine.start_selling_session(
+                        self.charging_controller.goodwe_charger.inverter, selling_opportunity
+                    )
+                    if success:
+                        logger.info("Battery selling session started successfully")
+                    else:
+                        logger.error("Failed to start battery selling session")
+                else:
+                    logger.warning("Cannot start selling - safety checks failed")
+            
+            elif selling_opportunity.decision.value == "stop_selling":
+                # Stop any active selling sessions
+                for session in self.battery_selling_engine.active_sessions:
+                    await self.battery_selling_engine.stop_selling_session(
+                        self.charging_controller.goodwe_charger.inverter, session.session_id
+                    )
+                logger.info("Battery selling sessions stopped")
+            
+            # Update system data with selling status
+            self.current_data['battery_selling'] = self.battery_selling_engine.get_selling_status()
+            self.current_data['battery_selling_safety'] = self.battery_selling_monitor.get_safety_status()
+            
+            # Save battery selling decision if selling occurred
+            if selling_opportunity.decision.value == "start_selling":
+                await self._save_battery_selling_decision(selling_opportunity, current_price_pln)
+            
+        except Exception as e:
+            logger.error(f"Failed to handle battery selling logic: {e}")
     
     async def _execute_smart_decision(self, decision: Dict[str, Any]):
         """Execute the smart charging decision"""
