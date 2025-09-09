@@ -505,19 +505,68 @@ class MasterCoordinator:
             await self._execute_smart_decision(decision)
             
             # Record decision
-            self.decision_history.append({
+            decision_record = {
                 'timestamp': datetime.now(),
                 'decision': decision,
                 'reasoning': decision.get('reason', ''),
                 'confidence': decision.get('confidence', 0),
                 'priority': decision.get('priority', 'unknown')
-            })
+            }
+            self.decision_history.append(decision_record)
+            
+            # Save decision to file for dashboard
+            await self._save_decision_to_file(decision_record)
             
             self.last_decision_time = datetime.now()
             logger.info(f"Decision made: {decision.get('should_charge', False)} - {decision.get('reason', 'unknown')}")
             
         except Exception as e:
             logger.error(f"Failed to make charging decision: {e}")
+    
+    async def _save_decision_to_file(self, decision_record: Dict[str, Any]):
+        """Save decision data to file for dashboard consumption"""
+        try:
+            import json
+            from pathlib import Path
+            
+            # Create energy_data directory if it doesn't exist
+            project_root = Path(__file__).parent.parent
+            energy_data_dir = project_root / "out" / "energy_data"
+            energy_data_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Create filename with timestamp
+            timestamp = decision_record['timestamp'].strftime('%Y%m%d_%H%M%S')
+            filename = f"charging_decision_{timestamp}.json"
+            file_path = energy_data_dir / filename
+            
+            # Prepare decision data for dashboard
+            decision_data = {
+                'timestamp': decision_record['timestamp'].isoformat(),
+                'action': 'charge' if decision_record['decision'].get('should_charge', False) else 'wait',
+                'source': decision_record['decision'].get('charging_source', 'unknown'),
+                'duration': decision_record['decision'].get('duration_hours', 0),
+                'energy_kwh': decision_record['decision'].get('energy_kwh', 0),
+                'estimated_cost_pln': decision_record['decision'].get('estimated_cost_pln', 0),
+                'estimated_savings_pln': decision_record['decision'].get('estimated_savings_pln', 0),
+                'confidence': decision_record['confidence'],
+                'reason': decision_record['reasoning'],
+                'priority': decision_record['priority'],
+                'battery_soc': self.current_data.get('battery', {}).get('soc_percent', 0),
+                'pv_power': self.current_data.get('photovoltaic', {}).get('current_power_w', 0),
+                'house_consumption': self.current_data.get('house_consumption', {}).get('current_power_w', 0),
+                'current_price': decision_record['decision'].get('current_price', 0),
+                'cheapest_price': decision_record['decision'].get('cheapest_price', 0),
+                'cheapest_hour': decision_record['decision'].get('cheapest_hour', 0)
+            }
+            
+            # Save to file
+            with open(file_path, 'w') as f:
+                json.dump(decision_data, f, indent=2)
+            
+            logger.debug(f"Decision saved to {filename}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save decision to file: {e}")
     
     async def _handle_multi_session_logic(self):
         """Handle multi-session charging logic"""
