@@ -539,24 +539,55 @@ class MasterCoordinator:
             filename = f"charging_decision_{timestamp}.json"
             file_path = energy_data_dir / filename
             
+            # Get current price data for the decision
+            current_price_data = self.charging_controller.fetch_price_data_for_date(
+                decision_record['timestamp'].strftime('%Y-%m-%d')
+            )
+            
+            # Extract price information
+            current_price = 0
+            cheapest_price = 0
+            cheapest_hour = 0
+            
+            if current_price_data and 'value' in current_price_data:
+                try:
+                    # Get current price
+                    now = decision_record['timestamp']
+                    current_time = now.replace(second=0, microsecond=0)
+                    
+                    for item in current_price_data['value']:
+                        item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                        if item_time <= current_time < item_time + timedelta(minutes=15):
+                            current_price = float(item['csdac_pln']) + 0.0892  # SC component
+                            break
+                    
+                    # Find cheapest price
+                    prices = [(float(item['csdac_pln']) + 0.0892, datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M').hour) 
+                             for item in current_price_data['value']]
+                    if prices:
+                        cheapest_price, cheapest_hour = min(prices, key=lambda x: x[0])
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to extract price data: {e}")
+            
             # Prepare decision data for dashboard
             decision_data = {
                 'timestamp': decision_record['timestamp'].isoformat(),
                 'action': 'charge' if decision_record['decision'].get('should_charge', False) else 'wait',
-                'source': decision_record['decision'].get('charging_source', 'unknown'),
-                'duration': decision_record['decision'].get('duration_hours', 0),
-                'energy_kwh': decision_record['decision'].get('energy_kwh', 0),
-                'estimated_cost_pln': decision_record['decision'].get('estimated_cost_pln', 0),
-                'estimated_savings_pln': decision_record['decision'].get('estimated_savings_pln', 0),
+                'source': decision_record['decision'].get('charging_source', 'grid'),  # Default to grid
+                'duration': decision_record['decision'].get('charging_time_hours', 0),
+                'energy_kwh': decision_record['decision'].get('energy_needed', 0),
+                'estimated_cost_pln': decision_record['decision'].get('estimated_cost', 0),
+                'estimated_savings_pln': 0,  # Not calculated in basic decision
                 'confidence': decision_record['confidence'],
                 'reason': decision_record['reasoning'],
                 'priority': decision_record['priority'],
                 'battery_soc': self.current_data.get('battery', {}).get('soc_percent', 0),
                 'pv_power': self.current_data.get('photovoltaic', {}).get('current_power_w', 0),
                 'house_consumption': self.current_data.get('house_consumption', {}).get('current_power_w', 0),
-                'current_price': decision_record['decision'].get('current_price', 0),
-                'cheapest_price': decision_record['decision'].get('cheapest_price', 0),
-                'cheapest_hour': decision_record['decision'].get('cheapest_hour', 0)
+                'current_price': current_price,
+                'cheapest_price': cheapest_price,
+                'cheapest_hour': cheapest_hour
             }
             
             # Save to file
