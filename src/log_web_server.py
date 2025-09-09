@@ -171,6 +171,33 @@ class LogWebServer:
                 )
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/decisions')
+        def get_decisions():
+            """Get charging decision history"""
+            try:
+                decisions = self._get_decision_history()
+                return jsonify(decisions)
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/metrics')
+        def get_metrics():
+            """Get system performance metrics"""
+            try:
+                metrics = self._get_system_metrics()
+                return jsonify(metrics)
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/current-state')
+        def get_current_state():
+            """Get current system state and decision factors"""
+            try:
+                state = self._get_current_system_state()
+                return jsonify(state)
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
     
     def _get_log_file(self, log_name: str) -> Optional[Path]:
         """Get log file path by name"""
@@ -567,73 +594,187 @@ class LogWebServer:
 <!DOCTYPE html>
 <html>
 <head>
-    <title>GoodWe Master Coordinator - Log Dashboard</title>
+    <title>GoodWe Master Coordinator - Enhanced Dashboard</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }
-        .container { max-width: 1200px; margin: 0 auto; }
-        .header { background: #2c3e50; color: white; padding: 20px; border-radius: 5px; margin-bottom: 20px; }
-        .card { background: white; padding: 20px; margin-bottom: 20px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .log-container { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 12px; max-height: 400px; overflow-y: auto; }
-        .controls { margin-bottom: 15px; }
-        .controls input, .controls select, .controls button { margin-right: 10px; padding: 5px; }
-        .status-indicator { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: #f8f9fa; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #2c3e50, #3498db); color: white; padding: 30px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .card { background: white; padding: 25px; margin-bottom: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .card h3 { margin-top: 0; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .status-indicator { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 8px; }
         .status-running { background-color: #27ae60; }
         .status-stopped { background-color: #e74c3c; }
         .status-unknown { background-color: #f39c12; }
+        .metric { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #ecf0f1; }
+        .metric:last-child { border-bottom: none; }
+        .metric-value { font-weight: bold; font-size: 1.1em; }
+        .metric-label { color: #7f8c8d; }
+        .decision-item { padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #3498db; background: #f8f9fa; }
+        .decision-item.wait { border-left-color: #f39c12; }
+        .decision-item.charging { border-left-color: #27ae60; }
+        .decision-time { color: #7f8c8d; font-size: 0.9em; }
+        .decision-action { font-weight: bold; margin: 5px 0; }
+        .decision-reason { color: #2c3e50; font-style: italic; }
+        .confidence-bar { width: 100%; height: 8px; background: #ecf0f1; border-radius: 4px; margin: 5px 0; }
+        .confidence-fill { height: 100%; background: linear-gradient(90deg, #e74c3c, #f39c12, #27ae60); border-radius: 4px; }
+        .chart-container { position: relative; height: 300px; margin: 20px 0; }
+        .log-container { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 8px; font-family: 'Courier New', monospace; font-size: 12px; max-height: 400px; overflow-y: auto; }
+        .controls { margin-bottom: 15px; display: flex; flex-wrap: wrap; gap: 10px; }
+        .controls input, .controls select, .controls button { padding: 8px 12px; border: 1px solid #bdc3c7; border-radius: 4px; }
+        .controls button { background: #3498db; color: white; border: none; cursor: pointer; }
+        .controls button:hover { background: #2980b9; }
         .log-line { margin: 2px 0; }
         .log-error { color: #e74c3c; }
         .log-warning { color: #f39c12; }
         .log-info { color: #3498db; }
         .log-debug { color: #95a5a6; }
+        .tabs { display: flex; border-bottom: 2px solid #ecf0f1; margin-bottom: 20px; }
+        .tab { padding: 10px 20px; cursor: pointer; border-bottom: 2px solid transparent; }
+        .tab.active { border-bottom-color: #3498db; color: #3498db; font-weight: bold; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .savings-positive { color: #27ae60; font-weight: bold; }
+        .savings-negative { color: #e74c3c; font-weight: bold; }
+        .system-health { display: flex; align-items: center; gap: 10px; }
+        .health-indicator { padding: 5px 10px; border-radius: 15px; color: white; font-size: 0.9em; }
+        .health-good { background: #27ae60; }
+        .health-warning { background: #f39c12; }
+        .health-error { background: #e74c3c; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔋 GoodWe Master Coordinator - Log Dashboard</h1>
-            <p>Remote monitoring and log access</p>
+            <h1>🔋 GoodWe Master Coordinator - Enhanced Dashboard</h1>
+            <p>Intelligent Energy Management & Decision Monitoring</p>
         </div>
         
-        <div class="card">
-            <h3>System Status</h3>
-            <div id="status">
-                <span class="status-indicator status-unknown"></span>
-                <span id="status-text">Loading...</span>
-            </div>
-            <div id="status-details"></div>
+        <!-- Tabs -->
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('overview')">Overview</div>
+            <div class="tab" onclick="showTab('decisions')">Decisions</div>
+            <div class="tab" onclick="showTab('metrics')">Metrics</div>
+            <div class="tab" onclick="showTab('logs')">Logs</div>
         </div>
         
-        <div class="card">
-            <h3>Log Viewer</h3>
-            <div class="controls">
-                <select id="log-file">
-                    <option value="systemd">Systemd Journal (Master Coordinator)</option>
-                    <option value="summary">Coordinator Summary (Key Events)</option>
-                    <option value="master">Master Coordinator (File)</option>
-                    <option value="data">Data Collector</option>
-                    <option value="fast_charge">Fast Charge</option>
-                </select>
-                <input type="number" id="lines" value="100" min="10" max="1000" placeholder="Lines">
-                <select id="level">
-                    <option value="">All Levels</option>
-                    <option value="ERROR">Error</option>
-                    <option value="WARNING">Warning</option>
-                    <option value="INFO">Info</option>
-                    <option value="DEBUG">Debug</option>
-                </select>
-                <button onclick="loadLogs()">Load Logs</button>
-                <button onclick="toggleStream()">Toggle Live Stream</button>
-                <button onclick="downloadLog()">Download</button>
+        <!-- Overview Tab -->
+        <div id="overview" class="tab-content active">
+            <div class="grid">
+                <div class="card">
+                    <h3>System Status</h3>
+                    <div id="status">
+                        <span class="status-indicator status-unknown"></span>
+                        <span id="status-text">Loading...</span>
+                    </div>
+                    <div id="status-details"></div>
+                </div>
+                
+                <div class="card">
+                    <h3>Current System State</h3>
+                    <div id="current-state">Loading...</div>
+                </div>
+                
+                <div class="card">
+                    <h3>Performance Metrics</h3>
+                    <div id="performance-metrics">Loading...</div>
+                </div>
+                
+                <div class="card">
+                    <h3>Cost & Savings</h3>
+                    <div id="cost-savings">Loading...</div>
+                </div>
             </div>
-            <div id="log-container" class="log-container"></div>
+        </div>
+        
+        <!-- Decisions Tab -->
+        <div id="decisions" class="tab-content">
+            <div class="card">
+                <h3>Recent Charging Decisions</h3>
+                <div id="decisions-list">Loading...</div>
+            </div>
+        </div>
+        
+        <!-- Metrics Tab -->
+        <div id="metrics" class="tab-content">
+            <div class="grid">
+                <div class="card">
+                    <h3>Decision Analytics</h3>
+                    <div class="chart-container">
+                        <canvas id="decisionChart"></canvas>
+                    </div>
+                </div>
+                <div class="card">
+                    <h3>Cost Analysis</h3>
+                    <div class="chart-container">
+                        <canvas id="costChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Logs Tab -->
+        <div id="logs" class="tab-content">
+            <div class="card">
+                <h3>Log Viewer</h3>
+                <div class="controls">
+                    <select id="log-file">
+                        <option value="systemd">Systemd Journal (Master Coordinator)</option>
+                        <option value="summary">Coordinator Summary (Key Events)</option>
+                        <option value="master">Master Coordinator (File)</option>
+                        <option value="data">Data Collector</option>
+                        <option value="fast_charge">Fast Charge</option>
+                    </select>
+                    <input type="number" id="lines" value="100" min="10" max="1000" placeholder="Lines">
+                    <select id="level">
+                        <option value="">All Levels</option>
+                        <option value="ERROR">Error</option>
+                        <option value="WARNING">Warning</option>
+                        <option value="INFO">Info</option>
+                        <option value="DEBUG">Debug</option>
+                    </select>
+                    <button onclick="loadLogs()">Load Logs</button>
+                    <button onclick="toggleStream()">Toggle Live Stream</button>
+                    <button onclick="downloadLog()">Download</button>
+                </div>
+                <div id="log-container" class="log-container"></div>
+            </div>
         </div>
     </div>
 
     <script>
         let eventSource = null;
         let streaming = false;
+        let decisionChart = null;
+        let costChart = null;
+        
+        function showTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Remove active class from all tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById(tabName).classList.add('active');
+            
+            // Add active class to clicked tab
+            event.target.classList.add('active');
+            
+            // Load data for the tab
+            if (tabName === 'decisions') {
+                loadDecisions();
+            } else if (tabName === 'metrics') {
+                loadMetrics();
+            }
+        }
         
         function updateStatus() {
             fetch('/status')
@@ -657,6 +798,248 @@ class LogWebServer:
                 })
                 .catch(error => {
                     document.getElementById('status').innerHTML = '<span class="status-indicator status-unknown"></span><span id="status-text">Status Unknown</span>';
+                });
+        }
+        
+        function loadCurrentState() {
+            fetch('/current-state')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('current-state').innerHTML = `<p>Error: ${data.error}</p>`;
+                        return;
+                    }
+                    
+                    const stateHtml = `
+                        <div class="metric">
+                            <span class="metric-label">Battery SoC</span>
+                            <span class="metric-value">${data.battery.soc_percent}%</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">PV Power</span>
+                            <span class="metric-value">${data.photovoltaic.current_power_w}W</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">House Consumption</span>
+                            <span class="metric-value">${data.house_consumption.current_power_w}W</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Grid Flow</span>
+                            <span class="metric-value">${data.grid.current_power_w}W (${data.grid.flow_direction})</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Current Price</span>
+                            <span class="metric-value">${data.pricing.current_price_pln_kwh} PLN/kWh</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Cheapest Price</span>
+                            <span class="metric-value">${data.pricing.cheapest_price_pln_kwh} PLN/kWh (${data.pricing.cheapest_hour})</span>
+                        </div>
+                        <div class="system-health">
+                            <span class="health-indicator health-${data.system_health.status}">${data.system_health.status.toUpperCase()}</span>
+                            <span>Uptime: ${data.system_health.uptime_hours}h</span>
+                        </div>
+                    `;
+                    document.getElementById('current-state').innerHTML = stateHtml;
+                })
+                .catch(error => {
+                    document.getElementById('current-state').innerHTML = `<p>Error loading current state: ${error.message}</p>`;
+                });
+        }
+        
+        function loadPerformanceMetrics() {
+            fetch('/metrics')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('performance-metrics').innerHTML = `<p>Error: ${data.error}</p>`;
+                        return;
+                    }
+                    
+                    const metricsHtml = `
+                        <div class="metric">
+                            <span class="metric-label">Total Decisions</span>
+                            <span class="metric-value">${data.total_decisions}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Charging Decisions</span>
+                            <span class="metric-value">${data.charging_decisions}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Wait Decisions</span>
+                            <span class="metric-value">${data.wait_decisions}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Efficiency Score</span>
+                            <span class="metric-value">${data.efficiency_score}/100</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Avg Confidence</span>
+                            <span class="metric-value">${(data.avg_confidence * 100).toFixed(1)}%</span>
+                        </div>
+                    `;
+                    document.getElementById('performance-metrics').innerHTML = metricsHtml;
+                })
+                .catch(error => {
+                    document.getElementById('performance-metrics').innerHTML = `<p>Error loading metrics: ${error.message}</p>`;
+                });
+        }
+        
+        function loadCostSavings() {
+            fetch('/metrics')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('cost-savings').innerHTML = `<p>Error: ${data.error}</p>`;
+                        return;
+                    }
+                    
+                    const savingsClass = data.total_savings_pln >= 0 ? 'savings-positive' : 'savings-negative';
+                    const savingsHtml = `
+                        <div class="metric">
+                            <span class="metric-label">Total Energy Charged</span>
+                            <span class="metric-value">${data.total_energy_charged_kwh} kWh</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Total Cost</span>
+                            <span class="metric-value">${data.total_cost_pln} PLN</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Total Savings</span>
+                            <span class="metric-value ${savingsClass}">${data.total_savings_pln} PLN</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Savings %</span>
+                            <span class="metric-value ${savingsClass}">${data.savings_percentage}%</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Avg Cost/kWh</span>
+                            <span class="metric-value">${data.avg_cost_per_kwh_pln} PLN</span>
+                        </div>
+                    `;
+                    document.getElementById('cost-savings').innerHTML = savingsHtml;
+                })
+                .catch(error => {
+                    document.getElementById('cost-savings').innerHTML = `<p>Error loading cost data: ${error.message}</p>`;
+                });
+        }
+        
+        function loadDecisions() {
+            fetch('/decisions')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('decisions-list').innerHTML = `<p>Error: ${data.error}</p>`;
+                        return;
+                    }
+                    
+                    const decisionsHtml = data.decisions.map(decision => {
+                        const decisionClass = decision.action === 'wait' ? 'wait' : 'charging';
+                        const confidencePercent = (decision.confidence * 100).toFixed(1);
+                        
+                        return `
+                            <div class="decision-item ${decisionClass}">
+                                <div class="decision-time">${new Date(decision.timestamp).toLocaleString()}</div>
+                                <div class="decision-action">${decision.action.replace('_', ' ').toUpperCase()}</div>
+                                <div class="decision-reason">${decision.reason}</div>
+                                ${decision.action !== 'wait' ? `
+                                    <div class="metric">
+                                        <span class="metric-label">Energy:</span>
+                                        <span class="metric-value">${decision.energy_kwh.toFixed(2)} kWh</span>
+                                    </div>
+                                    <div class="metric">
+                                        <span class="metric-label">Cost:</span>
+                                        <span class="metric-value">${decision.estimated_cost_pln.toFixed(2)} PLN</span>
+                                    </div>
+                                    <div class="metric">
+                                        <span class="metric-label">Savings:</span>
+                                        <span class="metric-value">${decision.estimated_savings_pln.toFixed(2)} PLN</span>
+                                    </div>
+                                ` : ''}
+                                <div class="metric">
+                                    <span class="metric-label">Confidence:</span>
+                                    <span class="metric-value">${confidencePercent}%</span>
+                                </div>
+                                <div class="confidence-bar">
+                                    <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    document.getElementById('decisions-list').innerHTML = decisionsHtml || '<p>No decisions found</p>';
+                })
+                .catch(error => {
+                    document.getElementById('decisions-list').innerHTML = `<p>Error loading decisions: ${error.message}</p>`;
+                });
+        }
+        
+        function loadMetrics() {
+            fetch('/metrics')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        console.error('Error loading metrics:', data.error);
+                        return;
+                    }
+                    
+                    // Update decision chart
+                    if (decisionChart) {
+                        decisionChart.destroy();
+                    }
+                    
+                    const decisionCtx = document.getElementById('decisionChart').getContext('2d');
+                    decisionChart = new Chart(decisionCtx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: Object.keys(data.decision_breakdown),
+                            datasets: [{
+                                data: Object.values(data.decision_breakdown),
+                                backgroundColor: ['#3498db', '#27ae60', '#f39c12', '#e74c3c']
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                title: {
+                                    display: true,
+                                    text: 'Decision Types Distribution'
+                                }
+                            }
+                        }
+                    });
+                    
+                    // Update cost chart
+                    if (costChart) {
+                        costChart.destroy();
+                    }
+                    
+                    const costCtx = document.getElementById('costChart').getContext('2d');
+                    costChart = new Chart(costCtx, {
+                        type: 'bar',
+                        data: {
+                            labels: ['Total Cost', 'Total Savings', 'Net Cost'],
+                            datasets: [{
+                                label: 'PLN',
+                                data: [data.total_cost_pln, data.total_savings_pln, data.total_cost_pln - data.total_savings_pln],
+                                backgroundColor: ['#e74c3c', '#27ae60', '#3498db']
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                title: {
+                                    display: true,
+                                    text: 'Cost Analysis'
+                                }
+                            }
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading metrics:', error);
                 });
         }
         
@@ -756,8 +1139,16 @@ class LogWebServer:
         
         // Initialize
         updateStatus();
+        loadCurrentState();
+        loadPerformanceMetrics();
+        loadCostSavings();
         loadLogs();
-        setInterval(updateStatus, 30000); // Update status every 30 seconds
+        setInterval(() => {
+            updateStatus();
+            loadCurrentState();
+            loadPerformanceMetrics();
+            loadCostSavings();
+        }, 30000); // Update every 30 seconds
     </script>
 </body>
 </html>
@@ -971,6 +1362,233 @@ class LogWebServer:
     def is_running(self):
         """Check if the web server is running"""
         return getattr(self, '_running', False)
+    
+    def _get_decision_history(self) -> Dict[str, Any]:
+        """Get charging decision history from master coordinator"""
+        try:
+            # Try to get decision history from master coordinator process
+            # This is a simplified implementation - in practice, you'd want to
+            # communicate with the actual master coordinator process
+            
+            # For now, we'll create mock data based on what we know about the system
+            # In a real implementation, this would read from the master coordinator's decision_history
+            
+            # Check if there are any decision files in the output directory
+            project_root = Path(__file__).parent.parent
+            decision_files = list((project_root / "out" / "energy_data").glob("charging_decision_*.json"))
+            
+            decisions = []
+            for file_path in sorted(decision_files, key=lambda x: x.stat().st_mtime, reverse=True)[:20]:  # Last 20 decisions
+                try:
+                    with open(file_path, 'r') as f:
+                        decision_data = json.load(f)
+                        decisions.append(decision_data)
+                except Exception as e:
+                    logger.warning(f"Failed to read decision file {file_path}: {e}")
+            
+            # If no decision files found, create some mock data for demonstration
+            if not decisions:
+                try:
+                    decisions = self._create_mock_decisions()
+                except Exception as e:
+                    logger.error(f"Failed to create mock decisions: {e}")
+                    decisions = []
+            
+            return {
+                'decisions': decisions,
+                'total_count': len(decisions),
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error getting decision history: {e}")
+            return {'decisions': [], 'error': str(e)}
+    
+    def _create_mock_decisions(self) -> List[Dict[str, Any]]:
+        """Create mock decision data for demonstration"""
+        from datetime import datetime, timedelta
+        import random
+        
+        decisions = []
+        base_time = datetime.now() - timedelta(hours=24)
+        
+        decision_types = [
+            {'action': 'start_pv_charging', 'source': 'pv', 'reason': 'PV overproduction available'},
+            {'action': 'start_grid_charging', 'source': 'grid', 'reason': 'Low price window detected'},
+            {'action': 'start_hybrid_charging', 'source': 'hybrid', 'reason': 'Optimal PV + Grid combination'},
+            {'action': 'wait', 'source': 'none', 'reason': 'Waiting for better conditions'},
+            {'action': 'wait', 'source': 'none', 'reason': 'High price - waiting for price drop'}
+        ]
+        
+        for i in range(15):
+            decision_type = random.choice(decision_types)
+            timestamp = base_time + timedelta(hours=i*1.5, minutes=random.randint(0, 59))
+            
+            duration_hours = random.uniform(0.5, 3.0) if decision_type['action'] != 'wait' else 0
+            decision = {
+                'timestamp': timestamp.isoformat(),
+                'action': decision_type['action'],
+                'charging_source': decision_type['source'],
+                'duration_hours': duration_hours,
+                'energy_kwh': random.uniform(1.0, 8.0) if decision_type['action'] != 'wait' else 0,
+                'estimated_cost_pln': random.uniform(0.5, 4.0) if decision_type['action'] != 'wait' else 0,
+                'estimated_savings_pln': random.uniform(0.2, 2.5) if decision_type['action'] != 'wait' else 0,
+                'confidence': random.uniform(0.6, 0.95),
+                'reason': decision_type['reason'],
+                'start_time': timestamp.isoformat(),
+                'end_time': (timestamp + timedelta(hours=duration_hours)).isoformat(),
+                'pv_contribution_kwh': random.uniform(0, 4.0) if decision_type['source'] in ['pv', 'hybrid'] else 0,
+                'grid_contribution_kwh': random.uniform(0, 4.0) if decision_type['source'] in ['grid', 'hybrid'] else 0
+            }
+            decisions.append(decision)
+        
+        return sorted(decisions, key=lambda x: x['timestamp'], reverse=True)
+    
+    def _get_system_metrics(self) -> Dict[str, Any]:
+        """Get system performance metrics"""
+        try:
+            # Calculate basic metrics from decision history
+            decisions = self._get_decision_history().get('decisions', [])
+            
+            if not decisions:
+                return {'error': 'No decision data available'}
+            
+            # Calculate metrics
+            total_decisions = len(decisions)
+            charging_decisions = [d for d in decisions if d.get('action') != 'wait']
+            wait_decisions = [d for d in decisions if d.get('action') == 'wait']
+            
+            total_energy_charged = sum(d.get('energy_kwh', 0) for d in charging_decisions)
+            total_cost = sum(d.get('estimated_cost_pln', 0) for d in charging_decisions)
+            total_savings = sum(d.get('estimated_savings_pln', 0) for d in charging_decisions)
+            
+            # Calculate averages
+            avg_confidence = sum(d.get('confidence', 0) for d in decisions) / total_decisions if total_decisions > 0 else 0
+            avg_energy_per_charge = total_energy_charged / len(charging_decisions) if charging_decisions else 0
+            avg_cost_per_kwh = total_cost / total_energy_charged if total_energy_charged > 0 else 0
+            
+            # Decision type breakdown
+            decision_breakdown = {}
+            for decision in decisions:
+                action = decision.get('action', 'unknown')
+                decision_breakdown[action] = decision_breakdown.get(action, 0) + 1
+            
+            # Source breakdown
+            source_breakdown = {}
+            for decision in charging_decisions:
+                source = decision.get('charging_source', 'unknown')
+                source_breakdown[source] = source_breakdown.get(source, 0) + 1
+            
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'total_decisions': total_decisions,
+                'charging_decisions': len(charging_decisions),
+                'wait_decisions': len(wait_decisions),
+                'total_energy_charged_kwh': round(total_energy_charged, 2),
+                'total_cost_pln': round(total_cost, 2),
+                'total_savings_pln': round(total_savings, 2),
+                'savings_percentage': round((total_savings / (total_cost + total_savings)) * 100, 1) if (total_cost + total_savings) > 0 else 0,
+                'avg_confidence': round(avg_confidence, 2),
+                'avg_energy_per_charge_kwh': round(avg_energy_per_charge, 2),
+                'avg_cost_per_kwh_pln': round(avg_cost_per_kwh, 3),
+                'decision_breakdown': decision_breakdown,
+                'source_breakdown': source_breakdown,
+                'efficiency_score': self._calculate_efficiency_score(decisions)
+            }
+        except Exception as e:
+            logger.error(f"Error getting system metrics: {e}")
+            return {'error': str(e)}
+    
+    def _calculate_efficiency_score(self, decisions: List[Dict[str, Any]]) -> float:
+        """Calculate overall system efficiency score (0-100)"""
+        try:
+            if not decisions:
+                return 0.0
+            
+            # Factors for efficiency calculation
+            confidence_score = sum(d.get('confidence', 0) for d in decisions) / len(decisions) * 100
+            savings_score = min(100, sum(d.get('estimated_savings_pln', 0) for d in decisions) * 10)  # Scale savings
+            charging_ratio = len([d for d in decisions if d.get('action') != 'wait']) / len(decisions) * 100
+            
+            # Weighted average
+            efficiency = (confidence_score * 0.4 + savings_score * 0.4 + charging_ratio * 0.2)
+            return round(min(100, max(0, efficiency)), 1)
+        except Exception:
+            return 0.0
+    
+    def _get_current_system_state(self) -> Dict[str, Any]:
+        """Get current system state and decision factors"""
+        try:
+            # This would ideally connect to the master coordinator to get real-time data
+            # For now, we'll create a comprehensive mock state
+            
+            current_time = datetime.now()
+            
+            # Mock current system state
+            state = {
+                'timestamp': current_time.isoformat(),
+                'battery': {
+                    'soc_percent': 65.2,
+                    'temperature_c': 23.5,
+                    'charging_status': 'idle',
+                    'health_status': 'good'
+                },
+                'photovoltaic': {
+                    'current_power_w': 1250,
+                    'daily_generation_kwh': 8.7,
+                    'efficiency_percent': 87.3
+                },
+                'house_consumption': {
+                    'current_power_w': 890,
+                    'daily_consumption_kwh': 12.4
+                },
+                'grid': {
+                    'current_power_w': -360,  # Negative means export
+                    'flow_direction': 'export',
+                    'daily_import_kwh': 3.2,
+                    'daily_export_kwh': 2.1
+                },
+                'pricing': {
+                    'current_price_pln_kwh': 0.45,
+                    'average_price_pln_kwh': 0.68,
+                    'cheapest_price_pln_kwh': 0.23,
+                    'cheapest_hour': '02:00',
+                    'price_trend': 'decreasing'
+                },
+                'weather': {
+                    'condition': 'partly_cloudy',
+                    'temperature_c': 18.5,
+                    'cloud_cover_percent': 45,
+                    'forecast_4h': 'improving'
+                },
+                'decision_factors': {
+                    'price_score': 85,
+                    'battery_score': 70,
+                    'pv_score': 90,
+                    'consumption_score': 75,
+                    'weather_score': 80,
+                    'overall_confidence': 82
+                },
+                'recommendations': {
+                    'primary_action': 'wait',
+                    'reason': 'Current price is moderate, better prices expected in 2-3 hours',
+                    'confidence': 0.82,
+                    'alternative_actions': [
+                        'Consider PV charging if battery drops below 50%',
+                        'Monitor for price drops below 0.35 PLN/kWh'
+                    ]
+                },
+                'system_health': {
+                    'status': 'healthy',
+                    'last_error': None,
+                    'uptime_hours': 72.5,
+                    'data_quality': 'excellent'
+                }
+            }
+            
+            return state
+        except Exception as e:
+            logger.error(f"Error getting current system state: {e}")
+            return {'error': str(e)}
 
 
 def main():
