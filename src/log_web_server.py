@@ -2790,7 +2790,8 @@ class LogWebServer:
                 import asyncio
                 
                 # Create a temporary data collector to get current data
-                data_collector = EnhancedDataCollector()
+                config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
+                data_collector = EnhancedDataCollector(str(config_path))
                 if asyncio.run(data_collector.initialize()):
                     asyncio.run(data_collector.collect_comprehensive_data())
                     current_data = data_collector.get_current_data()
@@ -2830,10 +2831,11 @@ class LogWebServer:
                 real_data = json.load(f)
             
             # Extract relevant data from the real system
-            battery_data = real_data.get('battery', {})
-            pv_data = real_data.get('photovoltaic', {})
-            consumption_data = real_data.get('house_consumption', {})
-            grid_data = real_data.get('grid', {})
+            current_data = real_data.get('current_data', {})
+            battery_data = current_data.get('battery', {})
+            pv_data = current_data.get('photovoltaic', {})
+            consumption_data = current_data.get('house_consumption', {})
+            grid_data = current_data.get('grid', {})
             
             # Convert real data to dashboard format
             state = {
@@ -2868,10 +2870,10 @@ class LogWebServer:
                     'price_trend': real_data.get('pricing', {}).get('price_trend', 'stable')
                 },
                 'weather': {
-                    'condition': real_data.get('weather', {}).get('condition', 'unknown'),
-                    'temperature_c': real_data.get('weather', {}).get('temperature_c', 20),
-                    'cloud_cover_percent': real_data.get('weather', {}).get('cloud_cover_percent', 50),
-                    'forecast_4h': real_data.get('weather', {}).get('forecast_4h', 'stable')
+                    'condition': current_data.get('weather', {}).get('current_conditions', {}).get('source', 'unknown'),
+                    'temperature_c': current_data.get('weather', {}).get('current_conditions', {}).get('temperature', 20),
+                    'cloud_cover_percent': current_data.get('weather', {}).get('current_conditions', {}).get('cloud_cover_estimated', 50),
+                    'forecast_4h': current_data.get('weather', {}).get('forecast', {}).get('4h_trend', 'stable')
                 },
                 'decision_factors': {
                     'price_score': real_data.get('decision_factors', {}).get('price_score', 75),
