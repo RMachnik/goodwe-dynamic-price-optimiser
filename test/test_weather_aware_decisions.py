@@ -46,7 +46,7 @@ class TestWeatherAwareDecisions(unittest.TestCase):
             },
             'battery_management': {
                 'soc_thresholds': {
-                    'critical': 20  # Use same threshold as main config
+                    'critical': 12  # Use same threshold as main config
                 }
             }
         }

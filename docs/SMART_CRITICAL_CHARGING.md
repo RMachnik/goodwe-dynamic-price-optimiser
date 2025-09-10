@@ -12,11 +12,13 @@ The Smart Critical Charging feature optimizes battery charging decisions at low 
 - Example: Charged at 1.577 PLN/kWh when 0.468 PLN/kWh was available 3 hours later
 - Result: Unnecessary high-cost charging
 
-**New Behavior:**
+**Enhanced Behavior (January 2025):**
 - Emergency threshold: 5% SOC (always charge)
-- Critical threshold: 10% SOC (price-aware)
-- Considers price, timing, and savings potential
-- Result: Optimal charging decisions even at low battery levels
+- Critical threshold: 12% SOC (weather-aware price optimization)
+- Maximum critical charging price: 0.35 PLN/kWh (reduced from 0.6 PLN/kWh)
+- Considers PV forecast, weather conditions, price, and timing
+- Smart PV waiting: Only waits if ≥2kW improvement within 30 minutes AND price >0.4 PLN/kWh
+- Result: Optimal charging decisions with better cost control and renewable energy utilization
 
 ## Configuration
 
@@ -25,7 +27,7 @@ The Smart Critical Charging feature optimizes battery charging decisions at low 
 ```yaml
 battery_management:
   soc_thresholds:
-    critical: 10               # Critical level - price aware charging
+    critical: 12               # Critical level - weather-aware price optimization
     emergency: 5               # Emergency level - always charge regardless of price
     low: 40                    # Low level - charge during low/medium prices
     medium: 70                 # Medium level - charge during low prices only
@@ -38,7 +40,7 @@ battery_management:
 timing_awareness:
   smart_critical_charging:
     enabled: true                    # Enable smart critical charging logic
-    max_critical_price_pln: 0.6     # Maximum price to charge at critical level (PLN/kWh)
+    max_critical_price_pln: 0.35    # Maximum price to charge at critical level (PLN/kWh)
     max_wait_hours: 6               # Maximum hours to wait for better price
     min_price_savings_percent: 30  # Minimum savings % to wait for better price
     emergency_override_price: true  # Always charge at emergency level regardless of price
@@ -61,8 +63,8 @@ timing_awareness:
 The system analyzes three factors:
 
 1. **Current Price**
-   - If ≤ 0.6 PLN/kWh → Charge immediately
-   - If > 0.6 PLN/kWh → Continue analysis
+   - If ≤ 0.35 PLN/kWh → Charge immediately
+   - If > 0.35 PLN/kWh → Continue analysis
 
 2. **Better Price Available**
    - If better price within 6 hours AND savings ≥ 30% → Wait
@@ -83,9 +85,9 @@ The system analyzes three factors:
 
 ### Scenario 2: Acceptable Price
 - **Battery**: 8% SOC
-- **Current Price**: 0.5 PLN/kWh
+- **Current Price**: 0.3 PLN/kWh
 - **Decision**: Charge immediately
-- **Reason**: "Critical battery (8%) + acceptable price (0.500 PLN/kWh ≤ 0.6 PLN/kWh)"
+- **Reason**: "Critical battery (8%) + acceptable price (0.300 PLN/kWh ≤ 0.35 PLN/kWh)"
 
 ### Scenario 3: High Price, Good Savings Soon
 - **Battery**: 8% SOC
@@ -110,6 +112,22 @@ The system analyzes three factors:
 - **Savings**: 10% (insufficient)
 - **Decision**: Charge now
 - **Reason**: "Critical battery (8%) + high price (1.000 PLN/kWh) but waiting 2h for 10.0% savings not optimal"
+
+### Scenario 6: Weather-Aware Critical Charging (NEW)
+- **Battery**: 10% SOC (critical level)
+- **Current Price**: 0.5 PLN/kWh (above 0.35 PLN/kWh threshold)
+- **PV Forecast**: 1kW now → 3.5kW in 30 minutes (significant improvement)
+- **Decision**: Wait for PV improvement
+- **Reason**: "Critical battery (10%) but waiting for PV improvement: PV improvement of 2.5kW expected in 0.5h"
+- **Benefit**: Uses renewable energy instead of expensive grid charging
+
+### Scenario 7: Weather-Aware Immediate Charging
+- **Battery**: 10% SOC (critical level)
+- **Current Price**: 0.3 PLN/kWh (below 0.35 PLN/kWh threshold)
+- **PV Forecast**: 1kW now → 3.5kW in 30 minutes
+- **Decision**: Charge immediately
+- **Reason**: "Critical battery (10%) + acceptable price (0.300 PLN/kWh ≤ 0.35 PLN/kWh)"
+- **Benefit**: Price is acceptable, no need to wait
 
 ## Implementation Details
 

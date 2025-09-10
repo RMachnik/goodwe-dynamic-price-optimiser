@@ -105,7 +105,7 @@ class TestHybridChargingLogic(unittest.TestCase):
             'timing_analysis': {
                 'max_wait_time_hours': 2.0,
                 'min_price_savings_percent': 30.0,
-                'critical_battery_soc': 20.0,
+                'critical_battery_soc': 12.0,
                 'urgent_charging_soc': 15.0
             },
             'price_analysis': {
