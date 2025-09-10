@@ -579,26 +579,43 @@ class LogWebServer:
                     'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
                 }
             
+            # Get data source information
+            try:
+                current_state = self._get_current_system_state()
+                data_source = current_state.get('data_source', 'unknown')
+            except Exception:
+                data_source = 'unknown'
+            
             return {
                 'status': 'running',
                 'timestamp': datetime.now().isoformat(),
                 'coordinator_running': coordinator_running,
                 'coordinator_pid': coordinator_pid,
                 'log_files': log_files,
-                'server_uptime': time.time() - self.start_time if hasattr(self, 'start_time') else 0
+                'server_uptime': time.time() - self.start_time if hasattr(self, 'start_time') else 0,
+                'data_source': data_source
             }
         except ImportError:
+            # Get data source information even without psutil
+            try:
+                current_state = self._get_current_system_state()
+                data_source = current_state.get('data_source', 'unknown')
+            except Exception:
+                data_source = 'unknown'
+                
             return {
                 'status': 'running',
                 'timestamp': datetime.now().isoformat(),
                 'coordinator_running': 'unknown',
-                'note': 'psutil not available for process monitoring'
+                'note': 'psutil not available for process monitoring',
+                'data_source': data_source
             }
         except Exception as e:
             return {
                 'status': 'error',
                 'error': str(e),
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now().isoformat(),
+                'data_source': 'unknown'
             }
     
     def _get_battery_selling_data(self) -> Dict[str, Any]:
@@ -2803,10 +2820,10 @@ class LogWebServer:
             # Get the most recent data file
             latest_file = max(data_files, key=lambda x: x.stat().st_mtime)
             
-            # Check if the file is recent (within last 24 hours for service data)
+            # Check if the file is recent (within last 7 days for service data)
             file_age = datetime.now().timestamp() - latest_file.stat().st_mtime
-            if file_age > 86400:  # 24 hours
-                logger.warning(f"Latest data file is {file_age/3600:.1f} hours old")
+            if file_age > 604800:  # 7 days
+                logger.warning(f"Latest data file is {file_age/86400:.1f} days old")
                 return None
             
             with open(latest_file, 'r') as f:
@@ -2970,7 +2987,7 @@ class LogWebServer:
                 return real_data
             
             # Fallback to mock data if no real data available
-            logger.info("No real data available, using mock data for demonstration")
+            logger.warning("No real data available, using mock data for demonstration")
             current_time = datetime.now()
             
             # Mock current system state
