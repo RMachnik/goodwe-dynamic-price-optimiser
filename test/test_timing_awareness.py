@@ -34,7 +34,7 @@ class TestTimingAwareness(unittest.TestCase):
             'charging_rate_kw': 3.0,
             'battery_capacity_kwh': 10.0,
             'target_battery_soc': 60.0,
-            'critical_battery_threshold': 20.0,
+            'critical_battery_threshold': 12.0,
             'low_battery_threshold': 40.0,
             'min_savings_threshold_pln': 50.0,
             'data_directory': 'out/energy_data'

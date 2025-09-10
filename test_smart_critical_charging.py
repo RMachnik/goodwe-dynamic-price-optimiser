@@ -146,7 +146,7 @@ def test_configuration_loading():
     # Check smart critical charging config
     smart_config = config.get('timing_awareness', {}).get('smart_critical_charging', {})
     assert smart_config.get('enabled') == True, f"Expected smart critical charging enabled, got {smart_config.get('enabled')}"
-    assert smart_config.get('max_critical_price_pln') == 0.6, f"Expected max critical price 0.6, got {smart_config.get('max_critical_price_pln')}"
+    assert smart_config.get('max_critical_price_pln') == 0.5, f"Expected max critical price 0.5, got {smart_config.get('max_critical_price_pln')}"
     
     logger.info("✓ Configuration loading test passed!")
 
@@ -158,10 +158,10 @@ if __name__ == "__main__":
         logger.info("\nSmart Critical Charging Implementation Summary:")
         logger.info("- Emergency threshold: 5% SOC (always charge)")
         logger.info("- Critical threshold: 10% SOC (price-aware)")
-        logger.info("- Max critical price: 0.6 PLN/kWh")
+        logger.info("- Max critical price: 0.35 PLN/kWh")
         logger.info("- Max wait time: 6 hours")
         logger.info("- Min savings: 30%")
         
     except Exception as e:
         logger.error(f"Test failed: {e}")
-        sys.exit(1)
+        sys.exit(1))

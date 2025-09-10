@@ -410,8 +410,14 @@ class PVTrendAnalyzer:
                                       price_data: Dict, battery_soc: float) -> bool:
         """Determine if we should wait for PV improvement"""
         
-        # Don't wait if battery is critical (but allow for test scenarios)
-        if battery_soc <= 10:  # Very low threshold to allow decision engine to handle critical battery override
+        # For critical battery levels, still consider PV forecast but with stricter conditions
+        if battery_soc <= 12:  # Critical battery threshold (updated from config)
+            # Only wait if PV improvement is very significant and very soon
+            if (trend_analysis.trend_direction == 'increasing' and 
+                trend_analysis.time_to_peak_hours <= 1.0 and  # Must be within 1 hour
+                trend_analysis.peak_pv_kw >= 2.0 and  # Must reach at least 2kW
+                trend_analysis.confidence >= 0.8):  # High confidence required
+                return True
             return False
         
         # Don't wait if we already have significant PV overproduction

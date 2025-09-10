@@ -101,7 +101,7 @@ battery_management:
     min: 320.0                 # Minimum operating voltage (GoodWe Lynx-D spec)
     max: 480.0                 # Maximum operating voltage (GoodWe Lynx-D spec)
   soc_thresholds:
-    critical: 20               # Critical level - charge with price awareness
+    critical: 12               # Critical level - charge with price awareness
     emergency: 5               # Emergency level - charge immediately regardless of price
     low: 40                    # Low level - charge during low/medium prices
     medium: 70                 # Medium level - charge during low prices only
@@ -233,7 +233,7 @@ timing_awareness:
   charging_rate_kw: 3.0       # Battery charging rate in kW
   battery_capacity_kwh: 10.0  # Battery capacity in kWh
   target_battery_soc: 60.0    # Target battery SOC percentage
-  critical_battery_threshold: 20.0  # Critical battery level (%) - price aware
+  critical_battery_threshold: 12.0  # Critical battery level (%) - price aware
   emergency_battery_threshold: 5.0 # Emergency battery level (%) - always charge
   low_battery_threshold: 40.0       # Low battery level (%)
   min_savings_threshold_pln: 50.0   # Minimum savings threshold (PLN/MWh)
@@ -243,7 +243,7 @@ timing_awareness:
   # Smart Critical Charging Configuration
   smart_critical_charging:
     enabled: true                    # Enable smart critical charging logic
-    max_critical_price_pln: 0.6     # Maximum price to charge at critical level (PLN/kWh)
+    max_critical_price_pln: 0.35    # Maximum price to charge at critical level (PLN/kWh)
     max_wait_hours: 6               # Maximum hours to wait for better price
     min_price_savings_percent: 30  # Minimum savings % to wait for better price
     emergency_override_price: true  # Always charge at emergency level regardless of price

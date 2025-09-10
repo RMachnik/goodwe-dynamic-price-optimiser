@@ -87,9 +87,16 @@ smart_critical_charging:
 #### **Recent Test Fixes Completed**
 - ✅ **Fixed**: Price window analyzer timing issues (price points now start from current time)
 - ✅ **Fixed**: Critical battery threshold logic (updated from 10% to 20% in config)
-- ✅ **Fixed**: Smart charging strategy critical battery test (15% SOC now triggers charging)
+- ✅ **Fixed**: Smart charging strategy critical battery test (12% SOC now triggers charging with weather awareness)
 - ✅ **Fixed**: Edge case test expectation (0% SOC correctly triggers emergency priority)
 - ✅ **Fixed**: Weather aware decisions test data format (updated to use current date)
+
+#### **Latest Critical Battery Charging Improvements (January 2025)**
+- ✅ **Enhanced**: Critical battery threshold lowered from 20% to 12% SOC for more conservative charging
+- ✅ **Enhanced**: Maximum critical charging price lowered from 0.6 to 0.35 PLN/kWh for better cost control
+- ✅ **Enhanced**: Weather-aware critical charging - system now considers PV forecast even at critical battery levels
+- ✅ **Enhanced**: Smart PV waiting logic - only waits for PV improvement if ≥2kW within 30 minutes AND price >0.4 PLN/kWh
+- ✅ **Enhanced**: More intelligent charging decisions that balance safety, cost, and renewable energy utilization
 
 #### **Remaining Test Failures (6 tests)**
 1. **Hybrid Charging Logic Tests (3 failures)**:

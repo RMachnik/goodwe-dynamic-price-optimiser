@@ -90,7 +90,7 @@ class HybridChargingLogic:
             'min_charging_duration_hours': 0.25,
             'max_charging_duration_hours': 4.0,
             'min_savings_threshold_pln': 50.0,
-            'critical_battery_threshold': 20.0,
+            'critical_battery_threshold': 12.0,
             'low_battery_threshold': 40.0,
             'pv_charging_efficiency': 0.95,
             'grid_charging_efficiency': 0.90,
@@ -185,7 +185,7 @@ class HybridChargingLogic:
         
         # Critical battery level - smart price-aware charging
         if battery_soc <= self.critical_battery_threshold:
-            return self._create_smart_critical_charging_decision(current_data, price_data, energy_needed_kwh, timing_analysis)
+            return self._create_smart_critical_charging_decision(current_data, price_data, energy_needed_kwh, timing_analysis, pv_forecasts)
         
         # Get optimal price window
         optimal_window_data = timing_analysis.get('optimal_window')
@@ -224,6 +224,33 @@ class HybridChargingLogic:
             reason = pv_timing.get('reason', 'No optimal charging conditions found')
             return self._create_wait_decision(reason)
     
+    def _check_pv_improvement_soon(self, pv_forecasts: List[Dict]) -> Dict[str, Any]:
+        """Check if PV improvement is expected soon for critical battery scenarios"""
+        if not pv_forecasts or len(pv_forecasts) < 4:  # Need at least 1 hour of forecasts
+            return {'available': False, 'reason': 'Insufficient PV forecast data'}
+        
+        # Look at next 1-2 hours for significant improvement
+        current_pv = pv_forecasts[0].get('forecasted_power_kw', 0)
+        max_pv_next_2h = max([f.get('forecasted_power_kw', 0) for f in pv_forecasts[:8]])  # Next 2 hours
+        
+        improvement = max_pv_next_2h - current_pv
+        
+        # For critical battery, require significant improvement (≥1.5kW) within 1 hour
+        if improvement >= 1.5 and max_pv_next_2h >= 2.0:
+            # Find when this improvement occurs
+            for i, forecast in enumerate(pv_forecasts[:8]):
+                if forecast.get('forecasted_power_kw', 0) >= max_pv_next_2h * 0.8:  # 80% of peak
+                    time_to_improvement_hours = i * 0.25  # 15-minute intervals
+                    return {
+                        'available': True,
+                        'improvement_kw': improvement,
+                        'time_to_improvement_hours': time_to_improvement_hours,
+                        'max_pv_kw': max_pv_next_2h,
+                        'reason': f'PV improvement of {improvement:.1f}kW expected in {time_to_improvement_hours:.1f}h'
+                    }
+        
+        return {'available': False, 'reason': f'Insufficient PV improvement ({improvement:.1f}kW < 1.5kW threshold)'}
+    
     def _create_emergency_charging_decision(self, current_data: Dict[str, Any], 
                                           price_data: Dict[str, Any], energy_needed_kwh: float) -> ChargingDecision:
         """Create emergency charging decision for emergency battery level"""
@@ -256,10 +283,24 @@ class HybridChargingLogic:
     def _create_smart_critical_charging_decision(self, current_data: Dict[str, Any], 
                                                 price_data: Dict[str, Any], 
                                                 energy_needed_kwh: float,
-                                                timing_analysis: Dict[str, Any]) -> ChargingDecision:
-        """Create smart critical charging decision that considers price and timing"""
+                                                timing_analysis: Dict[str, Any],
+                                                pv_forecasts: List[Dict] = None) -> ChargingDecision:
+        """Create smart critical charging decision that considers price, timing, and PV forecast"""
         battery_soc = current_data.get('battery', {}).get('soc_percent', 0)
-        logger.warning(f"Critical battery level ({battery_soc}%) - analyzing price and timing")
+        logger.warning(f"Critical battery level ({battery_soc}%) - analyzing price, timing, and PV forecast")
+        
+        # Check PV forecast for near-term improvement
+        pv_improvement_available = self._check_pv_improvement_soon(pv_forecasts)
+        if pv_improvement_available['available']:
+            logger.info(f"PV improvement expected soon: {pv_improvement_available['reason']}")
+            # For critical battery, only wait if PV improvement is very significant and very soon
+            if (pv_improvement_available['time_to_improvement_hours'] <= 0.5 and  # Within 30 minutes
+                pv_improvement_available['improvement_kw'] >= 2.0 and  # At least 2kW improvement
+                current_price and current_price > 0.4):  # Only wait if price is high
+                logger.info(f"Waiting for PV improvement due to high price ({current_price:.3f} PLN/kWh)")
+                return self._create_wait_decision(
+                    f"Critical battery ({battery_soc}%) but waiting for PV improvement: {pv_improvement_available['reason']}"
+                )
         
         # Get current price and optimal window
         current_price = self._get_current_price(price_data)
@@ -286,7 +327,7 @@ class HybridChargingLogic:
             )
         
         optimal_window = self._create_price_window_from_data(optimal_window_data)
-        max_critical_price = 0.6  # PLN/kWh - configurable threshold
+        max_critical_price = 0.35  # PLN/kWh - configurable threshold
         
         if current_price and current_price <= max_critical_price:
             # Price is acceptable for critical charging

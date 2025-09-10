@@ -1362,7 +1362,7 @@ class MultiFactorDecisionEngine:
         is_charging = battery_data.get('charging_status', False)
         
         # Critical battery level - charge immediately (highest priority)
-        critical_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('critical', 20)
+        critical_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('critical', 12)
         if battery_soc <= critical_threshold:
             return 'start_charging'
         

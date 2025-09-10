@@ -55,7 +55,7 @@ class AutomatedPriceCharger:
         self.decision_history = []
         
         # Smart charging thresholds
-        self.critical_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('critical', 20)  # % - Price-aware charging
+        self.critical_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('critical', 12)  # % - Price-aware charging
         self.emergency_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('emergency', 5)  # % - Always charge regardless of price
         self.low_battery_threshold = 30  # % - Consider charging if below this
         self.medium_battery_threshold = 50  # % - Only charge if conditions are favorable
@@ -66,7 +66,7 @@ class AutomatedPriceCharger:
         # Smart critical charging configuration
         smart_critical_config = self.config.get('timing_awareness', {}).get('smart_critical_charging', {})
         self.smart_critical_enabled = smart_critical_config.get('enabled', True)
-        self.max_critical_price = smart_critical_config.get('max_critical_price_pln', 0.6)  # PLN/kWh
+        self.max_critical_price = smart_critical_config.get('max_critical_price_pln', 0.35)  # PLN/kWh
         self.max_wait_hours = smart_critical_config.get('max_wait_hours', 6)  # hours
         self.min_price_savings_percent = smart_critical_config.get('min_price_savings_percent', 30)  # %
         self.emergency_override_price = smart_critical_config.get('emergency_override_price', True)
