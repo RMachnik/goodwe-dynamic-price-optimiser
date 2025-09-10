@@ -2653,7 +2653,7 @@ class LogWebServer:
                 'system_health': {
                     'status': 'healthy' if real_data.get('system_health', {}).get('status') == 'healthy' else 'warning',
                     'last_error': real_data.get('system_health', {}).get('last_error'),
-                    'uptime_hours': real_data.get('system_health', {}).get('uptime_hours', 0),
+                    'uptime_hours': real_data.get('uptime_seconds', 0) / 3600 if real_data.get('uptime_seconds') else 0,
                     'data_quality': real_data.get('system_health', {}).get('data_quality', 'good')
                 }
             }
@@ -2728,7 +2728,7 @@ class LogWebServer:
                 'system_health': {
                     'status': 'healthy',
                     'last_error': None,
-                    'uptime_hours': 0,
+                    'uptime_hours': (time.time() - self.start_time) / 3600 if hasattr(self, 'start_time') else 0,
                     'data_quality': 'good'
                 }
             }
