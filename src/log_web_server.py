@@ -174,9 +174,13 @@ class LogWebServer:
         
         @self.app.route('/decisions')
         def get_decisions():
-            """Get charging decision history"""
+            """Get charging decision history with filtering options"""
             try:
-                decisions = self._get_decision_history()
+                # Get query parameters
+                time_range = request.args.get('time_range', '24h')  # '24h' or '7d'
+                decision_type = request.args.get('type', 'all')  # 'all', 'charging', 'wait', 'battery_selling'
+                
+                decisions = self._get_decision_history(time_range=time_range, decision_type=decision_type)
                 return jsonify(decisions)
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
@@ -1077,7 +1081,58 @@ class LogWebServer:
         <!-- Decisions Tab -->
         <div id="decisions" class="tab-content">
             <div class="card">
-                <h3>Recent Charging Decisions</h3>
+                <h3>Decision History</h3>
+                
+                <!-- Filter Controls -->
+                <div class="filter-controls" style="margin-bottom: 20px; padding: 15px; background: var(--card-bg); border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                        <!-- Time Range Filter -->
+                        <div class="filter-group">
+                            <label for="time-range" style="font-weight: 600; margin-right: 8px;">Time Range:</label>
+                            <select id="time-range" style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
+                                <option value="24h">Last 24 Hours</option>
+                                <option value="7d">Last 7 Days</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Decision Type Filter -->
+                        <div class="filter-group">
+                            <label for="decision-type" style="font-weight: 600; margin-right: 8px;">Type:</label>
+                            <select id="decision-type" style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
+                                <option value="all">All Types</option>
+                                <option value="charging">Charging</option>
+                                <option value="wait">Wait</option>
+                                <option value="battery_selling">Battery Selling</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Refresh Button -->
+                        <button id="refresh-decisions" style="padding: 8px 16px; background: var(--primary-color); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">
+                            Refresh
+                        </button>
+                    </div>
+                    
+                    <!-- Statistics Summary -->
+                    <div id="decisions-summary" style="margin-top: 15px; display: flex; gap: 20px; flex-wrap: wrap;">
+                        <div class="stat-item" style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-weight: 600;">Total:</span>
+                            <span id="total-count" class="stat-value" style="background: var(--primary-color); color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">0</span>
+                        </div>
+                        <div class="stat-item" style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-weight: 600;">Charging:</span>
+                            <span id="charging-count" class="stat-value" style="background: #28a745; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">0</span>
+                        </div>
+                        <div class="stat-item" style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-weight: 600;">Wait:</span>
+                            <span id="wait-count" class="stat-value" style="background: #ffc107; color: black; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">0</span>
+                        </div>
+                        <div class="stat-item" style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-weight: 600;">Battery Selling:</span>
+                            <span id="battery-selling-count" class="stat-value" style="background: #17a2b8; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">0</span>
+                        </div>
+                    </div>
+                </div>
+                
                 <div id="decisions-list">Loading...</div>
             </div>
         </div>
@@ -1506,7 +1561,17 @@ class LogWebServer:
         }
         
         function loadDecisions() {
-            fetch('/decisions')
+            // Get current filter values
+            const timeRange = document.getElementById('time-range').value;
+            const decisionType = document.getElementById('decision-type').value;
+            
+            // Build query parameters
+            const params = new URLSearchParams({
+                time_range: timeRange,
+                type: decisionType
+            });
+            
+            fetch(`/decisions?${params}`)
                 .then(response => response.json())
                 .then(data => {
                     if (data.error) {
@@ -1514,45 +1579,126 @@ class LogWebServer:
                         return;
                     }
                     
-                    const decisionsHtml = data.decisions.map(decision => {
-                        const decisionClass = decision.action === 'wait' ? 'wait' : 'charging';
-                        const confidencePercent = (decision.confidence * 100).toFixed(1);
+                    // Update statistics
+                    document.getElementById('total-count').textContent = data.total_count || 0;
+                    document.getElementById('charging-count').textContent = data.charging_count || 0;
+                    document.getElementById('wait-count').textContent = data.wait_count || 0;
+                    document.getElementById('battery-selling-count').textContent = data.battery_selling_count || 0;
+                    
+                    // Group decisions by date
+                    const groupedDecisions = groupDecisionsByDate(data.decisions);
+                    
+                    // Generate HTML for grouped decisions
+                    const decisionsHtml = Object.keys(groupedDecisions).map(date => {
+                        const dayDecisions = groupedDecisions[date];
+                        const dayCount = dayDecisions.length;
                         
                         return `
-                            <div class="decision-item ${decisionClass}">
-                                <div class="decision-time">${new Date(decision.timestamp).toLocaleString()}</div>
-                                <div class="decision-action">${decision.action.replace('_', ' ').toUpperCase()}</div>
-                                <div class="decision-reason">${decision.reason}</div>
-                                ${decision.action !== 'wait' ? `
-                                    <div class="metric">
-                                        <span class="metric-label">Energy:</span>
-                                        <span class="metric-value">${decision.energy_kwh.toFixed(2)} kWh</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Cost:</span>
-                                        <span class="metric-value">${decision.estimated_cost_pln.toFixed(2)} PLN</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Savings:</span>
-                                        <span class="metric-value">${decision.estimated_savings_pln.toFixed(2)} PLN</span>
-                                    </div>
-                                ` : ''}
-                                <div class="metric">
-                                    <span class="metric-label">Confidence:</span>
-                                    <span class="metric-value">${confidencePercent}%</span>
+                            <div class="decision-day-group" style="margin-bottom: 20px;">
+                                <div class="day-header" style="background: var(--card-bg); padding: 10px 15px; border-radius: 8px 8px 0 0; border: 1px solid var(--border-color); border-bottom: none; font-weight: 600; color: var(--primary-color); display: flex; justify-content: space-between; align-items: center;">
+                                    <span>${date}</span>
+                                    <span style="background: var(--primary-color); color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px;">${dayCount} decisions</span>
                                 </div>
-                                <div class="confidence-bar">
-                                    <div class="confidence-fill" style="width: ${confidencePercent}%"></div>
+                                <div class="day-decisions" style="border: 1px solid var(--border-color); border-top: none; border-radius: 0 0 8px 8px; background: var(--card-bg);">
+                                    ${dayDecisions.map(decision => {
+                                        const decisionClass = getDecisionClass(decision.action);
+                                        const confidencePercent = (decision.confidence * 100).toFixed(1);
+                                        
+                                        return `
+                                            <div class="decision-item ${decisionClass}" style="padding: 15px; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 10px;">
+                                                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
+                                                    <div style="flex: 1; min-width: 200px;">
+                                                        <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 5px;">${new Date(decision.timestamp).toLocaleTimeString()}</div>
+                                                        <div style="font-weight: 600; font-size: 16px; margin-bottom: 5px; text-transform: capitalize;">${decision.action.replace('_', ' ')}</div>
+                                                        <div style="color: var(--text-muted); font-size: 14px;">${decision.reason}</div>
+                                                    </div>
+                                                    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
+                                                        <div style="background: ${getDecisionColor(decision.action)}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">
+                                                            ${decision.action.replace('_', ' ').toUpperCase()}
+                                                        </div>
+                                                        <div style="font-size: 12px; color: var(--text-muted);">
+                                                            Confidence: ${confidencePercent}%
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                ${decision.action !== 'wait' ? `
+                                                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 10px; padding: 10px; background: var(--bg-color); border-radius: 6px;">
+                                                        <div class="metric">
+                                                            <span class="metric-label" style="font-size: 12px; color: var(--text-muted);">Energy:</span>
+                                                            <span class="metric-value" style="font-weight: 600;">${(decision.energy_kwh || 0).toFixed(2)} kWh</span>
+                                                        </div>
+                                                        <div class="metric">
+                                                            <span class="metric-label" style="font-size: 12px; color: var(--text-muted);">Cost:</span>
+                                                            <span class="metric-value" style="font-weight: 600;">${(decision.estimated_cost_pln || 0).toFixed(2)} PLN</span>
+                                                        </div>
+                                                        <div class="metric">
+                                                            <span class="metric-label" style="font-size: 12px; color: var(--text-muted);">Savings:</span>
+                                                            <span class="metric-value" style="font-weight: 600; color: ${(decision.estimated_savings_pln || 0) >= 0 ? '#28a745' : '#dc3545'};">
+                                                                ${(decision.estimated_savings_pln || 0).toFixed(2)} PLN
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                ` : ''}
+                                                
+                                                <div class="confidence-bar" style="width: 100%; height: 4px; background: var(--bg-color); border-radius: 2px; overflow: hidden;">
+                                                    <div class="confidence-fill" style="height: 100%; background: ${getConfidenceColor(decision.confidence)}; width: ${confidencePercent}%; transition: width 0.3s ease;"></div>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
                                 </div>
                             </div>
                         `;
                     }).join('');
                     
-                    document.getElementById('decisions-list').innerHTML = decisionsHtml || '<p>No decisions found</p>';
+                    document.getElementById('decisions-list').innerHTML = decisionsHtml || '<p style="text-align: center; padding: 40px; color: var(--text-muted);">No decisions found for the selected filters</p>';
                 })
                 .catch(error => {
                     document.getElementById('decisions-list').innerHTML = `<p>Error loading decisions: ${error.message}</p>`;
                 });
+        }
+        
+        function groupDecisionsByDate(decisions) {
+            const grouped = {};
+            decisions.forEach(decision => {
+                const date = new Date(decision.timestamp).toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                });
+                if (!grouped[date]) {
+                    grouped[date] = [];
+                }
+                grouped[date].push(decision);
+            });
+            return grouped;
+        }
+        
+        function getDecisionClass(action) {
+            switch(action) {
+                case 'charging': return 'charging';
+                case 'wait': return 'wait';
+                case 'battery_selling': return 'battery-selling';
+                default: return 'unknown';
+            }
+        }
+        
+        function getDecisionColor(action) {
+            switch(action) {
+                case 'charging': return '#28a745';
+                case 'wait': return '#ffc107';
+                case 'battery_selling': return '#17a2b8';
+                default: return '#6c757d';
+            }
+        }
+        
+        function getConfidenceColor(confidence) {
+            if (confidence >= 0.8) return '#28a745';
+            if (confidence >= 0.6) return '#ffc107';
+            if (confidence >= 0.4) return '#fd7e14';
+            return '#dc3545';
         }
         
         function loadBatterySelling() {
@@ -2065,6 +2211,21 @@ class LogWebServer:
         document.addEventListener('DOMContentLoaded', function() {
             initializeTheme();
             setupOSThemeListener();
+            
+            // Add event listeners for decision filters
+            const timeRangeSelect = document.getElementById('time-range');
+            const decisionTypeSelect = document.getElementById('decision-type');
+            const refreshButton = document.getElementById('refresh-decisions');
+            
+            if (timeRangeSelect) {
+                timeRangeSelect.addEventListener('change', loadDecisions);
+            }
+            if (decisionTypeSelect) {
+                decisionTypeSelect.addEventListener('change', loadDecisions);
+            }
+            if (refreshButton) {
+                refreshButton.addEventListener('click', loadDecisions);
+            }
         });
     </script>
 </body>
@@ -2280,41 +2441,100 @@ class LogWebServer:
         """Check if the web server is running"""
         return getattr(self, '_running', False)
     
-    def _get_decision_history(self) -> Dict[str, Any]:
-        """Get charging decision history from master coordinator"""
+    def _get_decision_history(self, time_range: str = '24h', decision_type: str = 'all') -> Dict[str, Any]:
+        """Get charging decision history from master coordinator with filtering"""
         try:
-            # Try to get decision history from master coordinator process
-            # This is a simplified implementation - in practice, you'd want to
-            # communicate with the actual master coordinator process
+            # Calculate time threshold based on time_range parameter
+            now = datetime.now()
+            if time_range == '7d':
+                time_threshold = now - timedelta(days=7)
+                max_files = 200  # More files for 7 days
+            else:  # 24h
+                time_threshold = now - timedelta(hours=24)
+                max_files = 50
             
-            # For now, we'll create mock data based on what we know about the system
-            # In a real implementation, this would read from the master coordinator's decision_history
-            
-            # Check if there are any decision files in the output directory
+            # Get all decision files (charging and battery selling)
             project_root = Path(__file__).parent.parent
-            decision_files = list((project_root / "out" / "energy_data").glob("charging_decision_*.json"))
+            energy_data_dir = project_root / "out" / "energy_data"
             
             decisions = []
-            for file_path in sorted(decision_files, key=lambda x: x.stat().st_mtime, reverse=True)[:20]:  # Last 20 decisions
-                try:
-                    with open(file_path, 'r') as f:
-                        decision_data = json.load(f)
-                        decisions.append(decision_data)
-                except Exception as e:
-                    logger.warning(f"Failed to read decision file {file_path}: {e}")
             
-            # If no decision files found, create some mock data for demonstration
+            # Load charging decisions
+            if decision_type in ['all', 'charging', 'wait']:
+                charging_files = list(energy_data_dir.glob("charging_decision_*.json"))
+                for file_path in sorted(charging_files, key=lambda x: x.stat().st_mtime, reverse=True)[:max_files]:
+                    try:
+                        with open(file_path, 'r') as f:
+                            decision_data = json.load(f)
+                            
+                            # Filter by time
+                            decision_time = datetime.fromisoformat(decision_data.get('timestamp', '').replace('Z', '+00:00'))
+                            if decision_time.replace(tzinfo=None) < time_threshold:
+                                continue
+                                
+                            # Filter by decision type
+                            action = decision_data.get('action', 'wait')
+                            if decision_type == 'charging' and action == 'wait':
+                                continue
+                            elif decision_type == 'wait' and action != 'wait':
+                                continue
+                                
+                            decisions.append(decision_data)
+                    except Exception as e:
+                        logger.warning(f"Failed to read charging decision file {file_path}: {e}")
+            
+            # Load battery selling decisions
+            if decision_type in ['all', 'battery_selling']:
+                selling_files = list(energy_data_dir.glob("battery_selling_decision_*.json"))
+                for file_path in sorted(selling_files, key=lambda x: x.stat().st_mtime, reverse=True)[:max_files]:
+                    try:
+                        with open(file_path, 'r') as f:
+                            decision_data = json.load(f)
+                            
+                            # Filter by time
+                            decision_time = datetime.fromisoformat(decision_data.get('timestamp', '').replace('Z', '+00:00'))
+                            if decision_time.replace(tzinfo=None) < time_threshold:
+                                continue
+                                
+                            # Add decision type for battery selling
+                            decision_data['action'] = 'battery_selling'
+                            decisions.append(decision_data)
+                    except Exception as e:
+                        logger.warning(f"Failed to read battery selling decision file {file_path}: {e}")
+            
+            # Sort all decisions by timestamp (newest first)
+            decisions.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+            
+            # Calculate statistics
+            total_count = len(decisions)
+            charging_count = len([d for d in decisions if d.get('action') == 'charging'])
+            wait_count = len([d for d in decisions if d.get('action') == 'wait'])
+            battery_selling_count = len([d for d in decisions if d.get('action') == 'battery_selling'])
+            
+            # If no real decisions found, don't create mock data - return empty
             if not decisions:
-                try:
-                    decisions = self._create_mock_decisions()
-                except Exception as e:
-                    logger.error(f"Failed to create mock decisions: {e}")
-                    decisions = []
+                return {
+                    'decisions': [],
+                    'total_count': 0,
+                    'charging_count': 0,
+                    'wait_count': 0,
+                    'battery_selling_count': 0,
+                    'time_range': time_range,
+                    'decision_type': decision_type,
+                    'timestamp': datetime.now().isoformat(),
+                    'data_source': 'real' if total_count > 0 else 'none'
+                }
             
             return {
                 'decisions': decisions,
-                'total_count': len(decisions),
-                'timestamp': datetime.now().isoformat()
+                'total_count': total_count,
+                'charging_count': charging_count,
+                'wait_count': wait_count,
+                'battery_selling_count': battery_selling_count,
+                'time_range': time_range,
+                'decision_type': decision_type,
+                'timestamp': datetime.now().isoformat(),
+                'data_source': 'real'
             }
         except Exception as e:
             logger.error(f"Error getting decision history: {e}")
@@ -2583,10 +2803,10 @@ class LogWebServer:
             # Get the most recent data file
             latest_file = max(data_files, key=lambda x: x.stat().st_mtime)
             
-            # Check if the file is recent (within last 10 minutes for service data)
+            # Check if the file is recent (within last 24 hours for service data)
             file_age = datetime.now().timestamp() - latest_file.stat().st_mtime
-            if file_age > 600:  # 10 minutes
-                logger.warning(f"Latest data file is {file_age/60:.1f} minutes old")
+            if file_age > 86400:  # 24 hours
+                logger.warning(f"Latest data file is {file_age/3600:.1f} hours old")
                 return None
             
             with open(latest_file, 'r') as f:
@@ -2756,6 +2976,7 @@ class LogWebServer:
             # Mock current system state
             state = {
                 'timestamp': current_time.isoformat(),
+                'data_source': 'mock',
                 'battery': {
                     'soc_percent': 65.2,
                     'temperature_c': 23.5,
