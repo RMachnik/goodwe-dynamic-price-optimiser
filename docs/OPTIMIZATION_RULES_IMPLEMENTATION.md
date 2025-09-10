@@ -78,6 +78,8 @@ Battery Level Check:
 │   └── Otherwise → Charge
 ├── 13-40% SOC → Normal logic + Rule 2
 │   ├── Rule 2: PV poor + battery <80% + price ≤0.7 PLN/kWh → Proactive charge
+│   ├── High consumption + low battery + price ≤0.35 PLN/kWh → Charge
+│   ├── High consumption + low battery + price >0.35 PLN/kWh → Wait for better price
 │   └── Normal price analysis
 └── >40% SOC → Normal logic only
 ```

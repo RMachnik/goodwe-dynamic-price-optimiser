@@ -625,15 +625,31 @@ class AutomatedPriceCharger:
                 'confidence': 0.9
             }
         
-        # HIGH: Significant grid consumption with low battery
+        # HIGH: Significant grid consumption with low battery - but only if price is reasonable
         if (battery_soc < self.low_battery_threshold and 
             grid_direction == 'Import' and grid_power > self.high_consumption_threshold):
-            return {
-                'should_charge': True,
-                'reason': f'Low battery ({battery_soc}%) + high grid consumption ({grid_power}W)',
-                'priority': 'high',
-                'confidence': 0.8
-            }
+            
+            # Check if current price is reasonable for charging
+            if current_price and current_price <= self.max_critical_price:
+                return {
+                    'should_charge': True,
+                    'reason': f'Low battery ({battery_soc}%) + high grid consumption ({grid_power}W) + reasonable price ({current_price:.3f} PLN/kWh)',
+                    'priority': 'high',
+                    'confidence': 0.8
+                }
+            else:
+                # Price is too high or unavailable - wait for better conditions
+                if current_price:
+                    reason = f'Low battery ({battery_soc}%) + high consumption ({grid_power}W) but price too high ({current_price:.3f} PLN/kWh > {self.max_critical_price} PLN/kWh) - waiting for better price'
+                else:
+                    reason = f'Low battery ({battery_soc}%) + high consumption ({grid_power}W) but no price data available - waiting for better conditions'
+                
+                return {
+                    'should_charge': False,
+                    'reason': reason,
+                    'priority': 'medium',
+                    'confidence': 0.7
+                }
         
         # OPTIMIZATION RULE 3: Super low price grid charging - always charge fully from grid during super low prices
         if self.super_low_price_enabled:
