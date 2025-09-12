@@ -31,7 +31,12 @@ class TestPVOverproductionAnalysis(unittest.TestCase):
                 'pv_overproduction_threshold_w': 500
             }
         }
-        self.decision_engine = MultiFactorDecisionEngine(self.config)
+        # Mock charging controller
+        self.mock_charging_controller = MagicMock()
+        self.mock_charging_controller.get_current_price.return_value = 200.0  # PLN/MWh
+        self.mock_charging_controller.calculate_final_price.return_value = 200.0  # PLN/MWh
+        
+        self.decision_engine = MultiFactorDecisionEngine(self.config, self.mock_charging_controller)
         
         # Mock price data
         self.mock_price_data = {
@@ -203,7 +208,7 @@ class TestPVOverproductionAnalysis(unittest.TestCase):
         # Scenario: Critical battery but PV overproduction
         current_data = {
             'battery': {
-                'soc_percent': 15,  # Critical battery level
+                'soc_percent': 10,  # Critical battery level (below 12% threshold)
                 'charging_status': False,
                 'voltage': 400.0,
                 'temperature': 25.0

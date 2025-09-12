@@ -131,8 +131,8 @@ class PriceWindowAnalyzer:
         self.max_charging_duration_hours = price_analysis_config.get('max_charging_duration_hours', self.config.get('max_charging_duration_hours', 4.0))   # 4 hours
         self.min_savings_threshold_pln = price_analysis_config.get('min_savings_threshold_pln', self.config.get('min_savings_threshold_pln', 50.0))     # 50 PLN/MWh savings
         
-        # Reference price for savings calculation
-        self.reference_price_pln = price_analysis_config.get('reference_price_pln', self.config.get('reference_price_pln', 400.0))  # Average market price
+        # Reference price for savings calculation (PLN/MWh)
+        self.reference_price_pln = price_analysis_config.get('reference_price_pln', self.config.get('reference_price_pln', 400.0))  # Average market price in PLN/MWh
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration when config file is missing or invalid"""
@@ -197,8 +197,8 @@ class PriceWindowAnalyzer:
                     # Check if current time falls within this 15-minute period
                     if item_time <= current_time < item_time + timedelta(minutes=15):
                         market_price = float(item['csdac_pln'])
-                        # Add SC component (0.0892 PLN/kWh)
-                        final_price = market_price + 0.0892
+                        # Add SC component (89.2 PLN/kWh = 89.2 PLN/MWh)
+                        final_price = market_price + 89.2
                         return final_price
             elif 'prices' in price_data:
                 # Simple format with just prices array (for testing)
@@ -206,8 +206,8 @@ class PriceWindowAnalyzer:
                 if prices:
                     # For testing, return the first price or current_price if available
                     current_price = price_data.get('current_price', prices[0])
-                    # Add SC component for consistency
-                    return current_price + 0.0892
+                    # Add SC component for consistency (89.2 PLN/kWh = 89.2 PLN/MWh)
+                    return current_price + 89.2
             
             logger.warning("Current time not found in price data")
             return None
@@ -229,7 +229,7 @@ class PriceWindowAnalyzer:
                 for item in price_data['value']:
                     item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
                     market_price = float(item['csdac_pln'])
-                    final_price = market_price + 0.0892  # Add SC component
+                    final_price = market_price + 89.2  # Add SC component (0.0892 PLN/kWh = 89.2 PLN/MWh)
                     price_points.append((item_time, final_price))
             elif 'prices' in price_data:
                 # Simple format with just prices array - create time points
@@ -239,7 +239,7 @@ class PriceWindowAnalyzer:
                 for i, price in enumerate(prices):
                     item_time = base_time + timedelta(minutes=15 * i)
                     # Add SC component for consistency
-                    final_price = price + 0.0892
+                    final_price = price + 89.2  # Add SC component (0.0892 PLN/kWh = 89.2 PLN/MWh)
                     price_points.append((item_time, final_price))
             
             # Sort by time
@@ -301,7 +301,7 @@ class PriceWindowAnalyzer:
                 for item in price_data['value']:
                     item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
                     market_price = float(item['csdac_pln'])
-                    final_price = market_price + 0.0892  # Add SC component
+                    final_price = market_price + 89.2  # Add SC component (0.0892 PLN/kWh = 89.2 PLN/MWh)
                     price_points.append((item_time, final_price))
             elif 'prices' in price_data:
                 # Simple format with just prices array - create time points
@@ -311,7 +311,7 @@ class PriceWindowAnalyzer:
                 for i, price in enumerate(prices):
                     item_time = base_time + timedelta(minutes=15 * i)
                     # Add SC component for consistency
-                    final_price = price + 0.0892
+                    final_price = price + 89.2  # Add SC component (0.0892 PLN/kWh = 89.2 PLN/MWh)
                     price_points.append((item_time, final_price))
             
             # Sort by time
@@ -892,7 +892,7 @@ class PriceWindowAnalyzer:
             if 'prices' in price_data:
                 prices = price_data['prices']
             else:
-                prices = [float(item['csdac_pln']) + 0.0892 for item in price_data['value']]
+                prices = [float(item['csdac_pln']) + 89.2 for item in price_data['value']]  # Add SC component (0.0892 PLN/kWh = 89.2 PLN/MWh)
             
             if len(prices) < 2:
                 return {'trend': 'insufficient_data', 'trend_strength': 0.0, 'volatility': 0.0}
@@ -912,9 +912,9 @@ class PriceWindowAnalyzer:
             
             # Determine trend
             if slope > 0.1:
-                trend = 'increasing'
+                trend = 'rising'
             elif slope < -0.1:
-                trend = 'decreasing'
+                trend = 'falling'
             else:
                 trend = 'stable'
             
@@ -923,10 +923,14 @@ class PriceWindowAnalyzer:
             variance = sum((p - mean_price) ** 2 for p in prices) / len(prices)
             volatility = (variance ** 0.5) / mean_price * 100 if mean_price > 0 else 0.0
             
+            # Normalize trend strength to 0-1 range
+            # Use a sigmoid-like function to normalize the slope
+            normalized_strength = min(1.0, abs(slope) / 10.0)  # Normalize by dividing by 10
+            
             return {
                 'trend': trend,
                 'overall_trend': trend,  # Alias for backward compatibility
-                'trend_strength': abs(slope),
+                'trend_strength': normalized_strength,
                 'volatility': volatility,
                 'mean_price': mean_price,
                 'min_price': min(prices),

@@ -7,7 +7,7 @@ Tests IMGW + Open-Meteo API integration and weather-enhanced PV forecasting
 import unittest
 import asyncio
 import json
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from datetime import datetime, timedelta
 import sys
 from pathlib import Path
@@ -356,7 +356,12 @@ class TestWeatherEnhancedDecisionEngine(unittest.TestCase):
             },
             'timing_awareness_enabled': True
         }
-        self.decision_engine = MultiFactorDecisionEngine(self.config)
+        # Mock charging controller
+        self.mock_charging_controller = MagicMock()
+        self.mock_charging_controller.get_current_price.return_value = 200.0  # PLN/MWh
+        self.mock_charging_controller.calculate_final_price.return_value = 200.0  # PLN/MWh
+        
+        self.decision_engine = MultiFactorDecisionEngine(self.config, self.mock_charging_controller)
     
     def test_weather_pv_score_calculation(self):
         """Test weather-enhanced PV scoring"""

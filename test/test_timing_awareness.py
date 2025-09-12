@@ -40,7 +40,12 @@ class TestTimingAwareness(unittest.TestCase):
             'data_directory': 'out/energy_data'
         }
         
-        self.decision_engine = MultiFactorDecisionEngine(self.config)
+        # Mock charging controller
+        self.mock_charging_controller = MagicMock()
+        self.mock_charging_controller.get_current_price.return_value = 200.0  # PLN/MWh
+        self.mock_charging_controller.calculate_final_price.return_value = 200.0  # PLN/MWh
+        
+        self.decision_engine = MultiFactorDecisionEngine(self.config, self.mock_charging_controller)
         
         # Mock current data
         self.mock_current_data = {
@@ -318,7 +323,7 @@ class TestTimingAwareness(unittest.TestCase):
         legacy_config = self.config.copy()
         legacy_config['timing_awareness_enabled'] = False
         
-        legacy_engine = MultiFactorDecisionEngine(legacy_config)
+        legacy_engine = MultiFactorDecisionEngine(legacy_config, self.mock_charging_controller)
         
         with patch('master_coordinator.datetime') as mock_datetime:
             mock_datetime.now.return_value = datetime(2025, 9, 7, 11, 0)

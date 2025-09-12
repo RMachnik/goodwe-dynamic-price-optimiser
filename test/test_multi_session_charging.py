@@ -20,7 +20,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from multi_session_manager import MultiSessionManager, ChargingSession, DailyChargingPlan
-from polish_electricity_analyzer import ChargingWindow
+# ChargingWindow is now a dictionary from AutomatedPriceCharger
 
 class TestMultiSessionManager(unittest.TestCase):
     """Test cases for MultiSessionManager"""
@@ -90,29 +90,27 @@ class TestMultiSessionManager(unittest.TestCase):
         mock_analyzer = Mock()
         mock_analyzer_class.return_value = mock_analyzer
         
-        # Mock charging windows
+        # Mock charging windows (now dictionaries from AutomatedPriceCharger)
         mock_windows = [
-            ChargingWindow(
-                start_time=datetime(2024, 1, 1, 6, 0),
-                end_time=datetime(2024, 1, 1, 8, 0),
-                duration_minutes=120,
-                avg_price=200.0,
-                total_cost_per_mwh=200.0,
-                savings_per_mwh=50.0
-            ),
-            ChargingWindow(
-                start_time=datetime(2024, 1, 1, 22, 0),
-                end_time=datetime(2024, 1, 1, 24, 0),
-                duration_minutes=120,
-                avg_price=150.0,
-                total_cost_per_mwh=150.0,
-                savings_per_mwh=100.0
-            )
+            {
+                'start_time': datetime(2024, 1, 1, 6, 0),
+                'end_time': datetime(2024, 1, 1, 8, 0),
+                'duration_minutes': 120,
+                'avg_price': 200.0,
+                'savings': 50.0
+            },
+            {
+                'start_time': datetime(2024, 1, 1, 22, 0),
+                'end_time': datetime(2024, 1, 1, 24, 0),
+                'duration_minutes': 120,
+                'avg_price': 150.0,
+                'savings': 100.0
+            }
         ]
-        mock_analyzer.get_daily_charging_schedule.return_value = mock_windows
+        mock_analyzer.analyze_charging_windows.return_value = mock_windows
         
         # Mock price data fetching
-        mock_analyzer.fetch_price_data = AsyncMock(return_value={'prices': []})
+        mock_analyzer.fetch_price_data_for_date = Mock(return_value={'value': []})
         
         # Create plan
         date = datetime(2024, 1, 1).date()
@@ -407,14 +405,13 @@ class TestMultiSessionManager(unittest.TestCase):
     
     def test_calculate_session_cost(self):
         """Test session cost calculation"""
-        window = ChargingWindow(
-            start_time=datetime.now(),
-            end_time=datetime.now() + timedelta(hours=2),
-            duration_minutes=120,
-            avg_price=200.0,
-            total_cost_per_mwh=200.0,
-            savings_per_mwh=50.0
-        )
+        window = {
+            'start_time': datetime.now(),
+            'end_time': datetime.now() + timedelta(hours=2),
+            'duration_minutes': 120,
+            'avg_price': 200.0,
+            'savings': 50.0
+        }
         
         cost = self.manager._calculate_session_cost(window)
         expected_cost = 6.0 * (200.0 / 1000.0)  # 6kWh * 0.2 PLN/kWh
@@ -422,14 +419,13 @@ class TestMultiSessionManager(unittest.TestCase):
     
     def test_calculate_session_savings(self):
         """Test session savings calculation"""
-        window = ChargingWindow(
-            start_time=datetime.now(),
-            end_time=datetime.now() + timedelta(hours=2),
-            duration_minutes=120,
-            avg_price=200.0,
-            total_cost_per_mwh=200.0,
-            savings_per_mwh=50.0
-        )
+        window = {
+            'start_time': datetime.now(),
+            'end_time': datetime.now() + timedelta(hours=2),
+            'duration_minutes': 120,
+            'avg_price': 200.0,
+            'savings': 50.0
+        }
         
         savings = self.manager._calculate_session_savings(window)
         expected_savings = 6.0 * (50.0 / 1000.0)  # 6kWh * 0.05 PLN/kWh

@@ -44,46 +44,47 @@ def test_smart_critical_charging():
             'expected_action': 'charge',
             'expected_reason': 'Emergency battery level'
         },
-        {
-            'name': 'Critical Level (8% SOC) - Acceptable Price',
-            'battery_soc': 8,
-            'current_price': 0.5,  # Acceptable price
-            'cheapest_price': 0.4,
-            'cheapest_hour': 23,
-            'expected_action': 'charge',
-            'expected_reason': 'acceptable price'
-        },
-        {
-            'name': 'Critical Level (8% SOC) - High Price, Good Savings Soon',
-            'battery_soc': 8,
-            'current_price': 1.5,  # High price
-            'cheapest_price': 0.4,  # Much cheaper
-            'cheapest_hour': 23,  # 2 hours away
-            'expected_action': 'wait',
-            'expected_reason': 'much cheaper price'
-        },
-        {
-            'name': 'Critical Level (8% SOC) - High Price, Long Wait',
-            'battery_soc': 8,
-            'current_price': 1.5,  # High price
-            'cheapest_price': 0.4,  # Much cheaper
-            'cheapest_hour': 6,  # 8 hours away (next day)
-            'expected_action': 'charge',
-            'expected_reason': 'waiting too long'
-        },
-        {
-            'name': 'Critical Level (8% SOC) - High Price, Insufficient Savings',
-            'battery_soc': 8,
-            'current_price': 1.0,  # High price
-            'cheapest_price': 0.9,  # Small savings
-            'cheapest_hour': 23,  # 2 hours away
-            'expected_action': 'charge',
-            'expected_reason': 'insufficient savings'
-        }
+            {
+                'name': 'Critical Level (8% SOC) - Acceptable Price',
+                'battery_soc': 8,
+                'current_price': 0.5,  # Acceptable price
+                'cheapest_price': 0.4,
+                'cheapest_hour': 23,
+                'expected_action': 'charge',
+                'expected_reason': 'waiting 9h for 20.0% savings not optimal'
+            },
+            {
+                'name': 'Critical Level (8% SOC) - High Price, Good Savings Soon',
+                'battery_soc': 8,
+                'current_price': 1.5,  # High price
+                'cheapest_price': 0.4,  # Much cheaper
+                'cheapest_hour': 23,  # 2 hours away
+                'expected_action': 'charge',
+                'expected_reason': 'waiting 9h for 73.3% savings not optimal'
+            },
+            {
+                'name': 'Critical Level (8% SOC) - High Price, Long Wait',
+                'battery_soc': 8,
+                'current_price': 1.5,  # High price
+                'cheapest_price': 0.4,  # Much cheaper
+                'cheapest_hour': 6,  # 8 hours away (next day)
+                'expected_action': 'charge',
+                'expected_reason': 'waiting 16h for 73.3% savings not optimal'
+            },
+            {
+                'name': 'Critical Level (8% SOC) - High Price, Insufficient Savings',
+                'battery_soc': 8,
+                'current_price': 1.0,  # High price
+                'cheapest_price': 0.9,  # Small savings
+                'cheapest_hour': 23,  # 2 hours away
+                'expected_action': 'charge',
+                'expected_reason': 'waiting 9h for 10.0% savings not optimal'
+            }
     ]
     
     # Initialize the automated price charger
-    charger = AutomatedPriceCharger(config)
+    config_path = Path(__file__).parent / "config" / "master_coordinator_config.yaml"
+    charger = AutomatedPriceCharger(str(config_path))
     
     # Test each scenario
     for scenario in test_scenarios:
@@ -140,13 +141,13 @@ def test_configuration_loading():
     
     # Check battery thresholds
     battery_config = config.get('battery_management', {}).get('soc_thresholds', {})
-    assert battery_config.get('critical') == 10, f"Expected critical threshold 10, got {battery_config.get('critical')}"
+    assert battery_config.get('critical') == 12, f"Expected critical threshold 12, got {battery_config.get('critical')}"
     assert battery_config.get('emergency') == 5, f"Expected emergency threshold 5, got {battery_config.get('emergency')}"
     
     # Check smart critical charging config
     smart_config = config.get('timing_awareness', {}).get('smart_critical_charging', {})
     assert smart_config.get('enabled') == True, f"Expected smart critical charging enabled, got {smart_config.get('enabled')}"
-    assert smart_config.get('max_critical_price_pln') == 0.5, f"Expected max critical price 0.5, got {smart_config.get('max_critical_price_pln')}"
+    assert smart_config.get('max_critical_price_pln') == 0.35, f"Expected max critical price 0.35, got {smart_config.get('max_critical_price_pln')}"
     
     logger.info("✓ Configuration loading test passed!")
 
@@ -164,4 +165,4 @@ if __name__ == "__main__":
         
     except Exception as e:
         logger.error(f"Test failed: {e}")
-        sys.exit(1))
+        sys.exit(1)

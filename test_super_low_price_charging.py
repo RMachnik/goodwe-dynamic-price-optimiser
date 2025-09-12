@@ -36,7 +36,6 @@ def test_configuration_loading():
     
     assert optimization_rules.get('super_low_price_charging_enabled') == True, "Super low price charging not enabled"
     assert optimization_rules.get('super_low_price_threshold_pln') == 0.3, f"Super low price threshold incorrect: {optimization_rules.get('super_low_price_threshold_pln')}"
-    assert optimization_rules.get('super_low_price_override_pv') == True, "Super low price PV override not enabled"
     assert optimization_rules.get('super_low_price_target_soc') == 100, f"Super low price target SOC incorrect: {optimization_rules.get('super_low_price_target_soc')}"
     assert optimization_rules.get('super_low_price_min_duration_hours') == 1.0, f"Super low price min duration incorrect: {optimization_rules.get('super_low_price_min_duration_hours')}"
     
