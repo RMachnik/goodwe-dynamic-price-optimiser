@@ -2727,6 +2727,59 @@ class LogWebServer:
         except Exception:
             return 0.0
     
+    def _get_real_price_data(self) -> Optional[Dict[str, Any]]:
+        """Get real price data using AutomatedPriceCharger (correct SC calculation)"""
+        try:
+            from automated_price_charging import AutomatedPriceCharger
+            from datetime import datetime, timedelta
+            
+            # Use AutomatedPriceCharger for consistent price calculation
+            charger = AutomatedPriceCharger()
+            
+            # Fetch current day's price data
+            today = datetime.now().strftime('%Y-%m-%d')
+            price_data = charger.fetch_price_data_for_date(today)
+            
+            if not price_data or 'value' not in price_data:
+                return None
+            
+            # Get current price using the charger's method (returns PLN/MWh)
+            current_price = charger.get_current_price(price_data)
+            if current_price is None:
+                return None
+            
+            # Convert from PLN/MWh to PLN/kWh for display
+            current_price_kwh = current_price / 1000
+            
+            # Find cheapest price and calculate statistics
+            prices = []
+            for item in price_data['value']:
+                market_price = float(item['csdac_pln'])
+                final_price = charger.calculate_final_price(market_price)
+                final_price_kwh = final_price / 1000  # Convert to PLN/kWh
+                prices.append((final_price_kwh, datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M').hour))
+            
+            if not prices:
+                return None
+            
+            # Find cheapest price
+            cheapest_price, cheapest_hour = min(prices, key=lambda x: x[0])
+            
+            # Calculate average price
+            avg_price = sum(price for price, _ in prices) / len(prices)
+            
+            return {
+                'current_price_pln_kwh': round(current_price_kwh, 4) if current_price_kwh else 0.0,
+                'cheapest_price_pln_kwh': round(cheapest_price, 4),
+                'cheapest_hour': f"{cheapest_hour:02d}:00",
+                'average_price_pln_kwh': round(avg_price, 4),
+                'price_trend': 'stable'  # Could be enhanced with trend analysis
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch real price data using AutomatedPriceCharger: {e}")
+            return None
+
     def _get_real_inverter_data(self) -> Optional[Dict[str, Any]]:
         """Get real data from GoodWe inverter or master coordinator"""
         try:
@@ -2862,7 +2915,7 @@ class LogWebServer:
                     'daily_import_kwh': grid_data.get('daily_import_kwh', 0),
                     'daily_export_kwh': grid_data.get('daily_export_kwh', 0)
                 },
-                'pricing': {
+                'pricing': self._get_real_price_data() or {
                     'current_price_pln_kwh': real_data.get('pricing', {}).get('current_price_pln_kwh', 0.45),
                     'average_price_pln_kwh': real_data.get('pricing', {}).get('average_price_pln_kwh', 0.68),
                     'cheapest_price_pln_kwh': real_data.get('pricing', {}).get('cheapest_price_pln_kwh', 0.23),
@@ -2984,18 +3037,27 @@ class LogWebServer:
             # Try to get real data from the master coordinator or data collector
             logger.info("Attempting to get real inverter data...")
             real_data = self._get_real_inverter_data()
+            
+            # Always try to get real price data from PSE API
+            logger.info("Fetching real price data from PSE API...")
+            real_price_data = self._get_real_price_data()
+            
             if real_data:
                 logger.info("Real data retrieved successfully, returning real data")
+                # Update pricing data with real PSE data if available
+                if real_price_data:
+                    real_data['pricing'] = real_price_data
+                    logger.info(f"Updated pricing with real PSE data: current={real_price_data['current_price_pln_kwh']} PLN/kWh, cheapest={real_price_data['cheapest_price_pln_kwh']} PLN/kWh")
                 return real_data
             
-            # Fallback to mock data if no real data available
-            logger.warning("No real data available, using mock data for demonstration")
+            # Fallback to mock data if no real data available, but use real price data
+            logger.warning("No real inverter data available, using mock data for demonstration")
             current_time = datetime.now()
             
-            # Mock current system state
+            # Mock current system state with real price data
             state = {
                 'timestamp': current_time.isoformat(),
-                'data_source': 'mock',
+                'data_source': 'mock_with_real_prices' if real_price_data else 'mock',
                 'battery': {
                     'soc_percent': 65.2,
                     'temperature_c': 23.5,
@@ -3017,7 +3079,7 @@ class LogWebServer:
                     'daily_import_kwh': 3.2,
                     'daily_export_kwh': 2.1
                 },
-                'pricing': {
+                'pricing': real_price_data if real_price_data else {
                     'current_price_pln_kwh': 0.45,
                     'average_price_pln_kwh': 0.68,
                     'cheapest_price_pln_kwh': 0.23,

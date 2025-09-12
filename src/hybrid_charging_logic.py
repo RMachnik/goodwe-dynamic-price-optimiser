@@ -145,7 +145,8 @@ class HybridChargingLogic:
         
         # Analyze price windows and timing
         # Get current PV power
-        current_pv_power = current_data.get('pv', {}).get('power', 0.0)
+        pv_data = current_data.get('photovoltaic', current_data.get('pv', {}))
+        current_pv_power = pv_data.get('current_power_w', pv_data.get('power', 0.0))
         
         timing_analysis = self.price_analyzer.analyze_timing_vs_price(
             price_data, pv_forecasts, energy_needed_kwh, current_pv_power
@@ -545,7 +546,9 @@ class HybridChargingLogic:
             if optimal_window.start_time <= forecast_time < optimal_window.end_time:
                 pv_power_kw = forecast.get('forecasted_power_kw', forecast.get('power_kw', 0.0))
                 # Consider house consumption - only excess PV is available for charging
-                if current_data and 'consumption' in current_data:
+                if current_data and 'house_consumption' in current_data:
+                    house_consumption_kw = current_data['house_consumption']['current_power_w'] / 1000.0  # Convert W to kW
+                elif current_data and 'consumption' in current_data:
                     house_consumption_kw = current_data['consumption']['power'] / 1000.0  # Convert W to kW
                 else:
                     house_consumption_kw = 1.0  # Default 1 kW house consumption
@@ -702,7 +705,9 @@ class HybridChargingLogic:
         
         # Decision type confidence
         if decision_type == 'pv':
-            pv_power = current_data.get('pv', {}).get('power', 0.0)
+            # Handle different PV data formats
+            pv_data = current_data.get('photovoltaic', current_data.get('pv', {}))
+            pv_power = pv_data.get('current_power_w', pv_data.get('power', 0.0))
             if pv_power > 2000:  # > 2kW
                 confidence += 0.35  # High confidence for good PV
             else:

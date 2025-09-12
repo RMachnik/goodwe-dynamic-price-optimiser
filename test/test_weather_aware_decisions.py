@@ -50,7 +50,12 @@ class TestWeatherAwareDecisions(unittest.TestCase):
                 }
             }
         }
-        self.decision_engine = MultiFactorDecisionEngine(self.config)
+        # Mock charging controller
+        self.mock_charging_controller = MagicMock()
+        self.mock_charging_controller.get_current_price.return_value = 200.0  # PLN/MWh
+        self.mock_charging_controller.calculate_final_price.return_value = 200.0  # PLN/MWh
+        
+        self.decision_engine = MultiFactorDecisionEngine(self.config, self.mock_charging_controller)
         
         # Initialize PV consumption analyzer (normally done in MasterCoordinator)
         from pv_consumption_analyzer import PVConsumptionAnalyzer

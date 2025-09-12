@@ -29,14 +29,21 @@ class TestSmartChargingStrategy(unittest.TestCase):
                 {
                     'dtime': '2025-09-07 08:00',
                     'period': '08:00 - 08:15',
-                    'csdac_pln': 365.0,  # 0.365 PLN/kWh
+                    'csdac_pln': 500.0,  # 0.589 PLN/kWh market price (above super low threshold)
+                    'business_date': '2025-09-07',
+                    'publication_ts': '2025-09-06 13:45:15.929'
+                },
+                {
+                    'dtime': '2025-09-07 10:00',
+                    'period': '10:00 - 10:15',
+                    'csdac_pln': 100.0,  # 0.189 PLN/kWh market price (cheapest)
                     'business_date': '2025-09-07',
                     'publication_ts': '2025-09-06 13:45:15.929'
                 },
                 {
                     'dtime': '2025-09-07 13:00',
                     'period': '13:00 - 13:15',
-                    'csdac_pln': 118.0,  # 0.118 PLN/kWh (cheapest)
+                    'csdac_pln': 300.0,  # 0.389 PLN/kWh market price (not much cheaper)
                     'business_date': '2025-09-07',
                     'publication_ts': '2025-09-06 13:45:15.929'
                 },
@@ -51,20 +58,47 @@ class TestSmartChargingStrategy(unittest.TestCase):
         }
     
     def test_critical_battery_charging(self):
-        """Test that critical battery level always triggers charging"""
+        """Test that critical battery level triggers charging when price is acceptable"""
         current_data = {
-            'battery': {'soc_percent': 15},  # Critical level
+            'battery': {'soc_percent': 10},  # Critical level (below 12% threshold)
             'photovoltaic': {'current_power_w': 0},
             'house_consumption': {'current_power_w': 1000},
             'grid': {'power_w': 1000, 'flow_direction': 'Import'}
         }
         
-        decision = self.charger.make_smart_charging_decision(current_data, self.mock_price_data)
+        # Create price data with current price below max_critical_price (0.35 PLN/kWh)
+        # Current price: 200 PLN/MWh + 89.2 = 289.2 PLN/MWh = 0.289 PLN/kWh
+        price_data = {
+            'value': [
+                {
+                    'dtime': '2025-09-07 08:00',
+                    'period': '08:00 - 08:15',
+                    'csdac_pln': 200.0,  # 0.289 PLN/kWh (below 0.35 threshold)
+                    'business_date': '2025-09-07',
+                    'publication_ts': '2025-09-06 13:45:15.929'
+                },
+                {
+                    'dtime': '2025-09-07 10:00',
+                    'period': '10:00 - 10:15',
+                    'csdac_pln': 100.0,  # 0.189 PLN/kWh (cheapest)
+                    'business_date': '2025-09-07',
+                    'publication_ts': '2025-09-06 13:45:15.929'
+                }
+            ]
+        }
         
+        # Mock current time to 08:00 to match our test data
+        with patch('automated_price_charging.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2025, 9, 7, 8, 0)
+            
+            decision = self.charger.make_smart_charging_decision(current_data, price_data)
+        
+        # Smart logic charges at critical level when price is acceptable
         self.assertTrue(decision['should_charge'])
         self.assertEqual(decision['priority'], 'critical')
         self.assertGreaterEqual(decision['confidence'], 0.8)
         self.assertIn('Critical battery', decision['reason'])
+        self.assertIn('acceptable price', decision['reason'])
     
     def test_pv_overproduction_no_charging(self):
         """Test that PV overproduction prevents grid charging"""
@@ -103,7 +137,7 @@ class TestSmartChargingStrategy(unittest.TestCase):
             self.assertIn('Much cheaper price available', decision['reason'])
     
     def test_low_battery_high_consumption_charging(self):
-        """Test that low battery with high consumption triggers charging"""
+        """Test that low battery with high consumption triggers charging when price is acceptable"""
         current_data = {
             'battery': {'soc_percent': 25},  # Low level
             'photovoltaic': {'current_power_w': 200},
@@ -111,7 +145,32 @@ class TestSmartChargingStrategy(unittest.TestCase):
             'grid': {'power_w': 1300, 'flow_direction': 'Import'}  # High consumption
         }
         
-        decision = self.charger.make_smart_charging_decision(current_data, self.mock_price_data)
+        # Create price data with current price below max_critical_price (0.35 PLN/kWh)
+        # Current price: 200 PLN/MWh + 89.2 = 289.2 PLN/MWh = 0.289 PLN/kWh
+        price_data = {
+            'value': [
+                {
+                    'dtime': '2025-09-07 08:00',
+                    'period': '08:00 - 08:15',
+                    'csdac_pln': 200.0,  # 0.289 PLN/kWh (below 0.35 threshold)
+                    'business_date': '2025-09-07',
+                    'publication_ts': '2025-09-06 13:45:15.929'
+                },
+                {
+                    'dtime': '2025-09-07 10:00',
+                    'period': '10:00 - 10:15',
+                    'csdac_pln': 100.0,  # 0.189 PLN/kWh (cheapest)
+                    'business_date': '2025-09-07',
+                    'publication_ts': '2025-09-06 13:45:15.929'
+                }
+            ]
+        }
+        
+        # Mock current time to 08:00 to match our test data
+        with patch('automated_price_charging.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2025, 9, 7, 8, 0)
+            
+            decision = self.charger.make_smart_charging_decision(current_data, price_data)
         
         self.assertTrue(decision['should_charge'])
         self.assertEqual(decision['priority'], 'high')
@@ -127,14 +186,14 @@ class TestSmartChargingStrategy(unittest.TestCase):
             
             current_price, cheapest_price, cheapest_hour = self.charger._analyze_prices(self.mock_price_data)
             
-            # Should find current price (0.365 PLN/kWh at 08:00)
+            # Should find current price (0.589 PLN/kWh at 08:00: 500 + 89.2 = 589.2 PLN/MWh = 0.589 PLN/kWh)
             self.assertIsNotNone(current_price)
-            self.assertAlmostEqual(current_price, 0.365, places=3)
+            self.assertAlmostEqual(current_price, 0.589, places=3)
             
-            # Should find cheapest price (0.118 PLN/kWh at 13:00)
+            # Should find cheapest price (0.189 PLN/kWh at 10:00: 100 + 89.2 = 189.2 PLN/MWh = 0.189 PLN/kWh)
             self.assertIsNotNone(cheapest_price)
-            self.assertAlmostEqual(cheapest_price, 0.118, places=3)
-            self.assertEqual(cheapest_hour, 13)
+            self.assertAlmostEqual(cheapest_price, 0.189, places=3)
+            self.assertEqual(cheapest_hour, 10)
     
     def test_savings_calculation(self):
         """Test savings calculation method"""

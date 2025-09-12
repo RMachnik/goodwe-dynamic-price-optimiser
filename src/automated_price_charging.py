@@ -238,8 +238,12 @@ class AutomatedPriceCharger:
         for item in price_data['value']:
             item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
             if item_time <= current_time < item_time + timedelta(minutes=15):
-                market_price = float(item['csdac_pln'])
-                return self.calculate_final_price(market_price)
+                market_price_pln_mwh = float(item['csdac_pln'])
+                # Convert to PLN/kWh and add SC component
+                market_price_pln_kwh = market_price_pln_mwh / 1000
+                final_price_pln_kwh = self.calculate_final_price(market_price_pln_kwh)
+                # Return in PLN/MWh for consistency with other methods
+                return final_price_pln_kwh * 1000
         
         return None
     
@@ -334,7 +338,9 @@ class AutomatedPriceCharger:
             hourly_prices = {}
             for entry in prices_raw:
                 hour = int(entry['dtime'].split(' ')[1].split(':')[0])
-                price_pln_kwh = entry['csdac_pln'] / 1000  # Convert to PLN/kWh
+                market_price_pln_kwh = entry['csdac_pln'] / 1000  # Convert to PLN/kWh
+                # Add SC component to get final price
+                price_pln_kwh = market_price_pln_kwh + self.sc_component_net
                 
                 if hour not in hourly_prices:
                     hourly_prices[hour] = []

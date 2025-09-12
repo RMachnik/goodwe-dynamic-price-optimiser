@@ -36,7 +36,6 @@ sys.path.insert(0, str(current_dir))
 from fast_charge import GoodWeFastCharger
 from enhanced_data_collector import EnhancedDataCollector
 from automated_price_charging import AutomatedPriceCharger
-from polish_electricity_analyzer import PolishElectricityAnalyzer
 from log_web_server import LogWebServer
 from pv_forecasting import PVForecaster
 from price_window_analyzer import PriceWindowAnalyzer
@@ -93,7 +92,6 @@ class MasterCoordinator:
         
         # Component managers
         self.data_collector = None
-        self.price_analyzer = None
         self.charging_controller = None
         self.decision_engine = None
         self.log_web_server = None
@@ -172,9 +170,8 @@ class MasterCoordinator:
                 logger.error("Failed to initialize data collector")
                 return False
             
-            # Initialize price analyzer
-            logger.info("Initializing Price Analyzer...")
-            self.price_analyzer = PolishElectricityAnalyzer()
+            # Price analysis is now handled by AutomatedPriceCharger
+            logger.info("Price analysis handled by AutomatedPriceCharger...")
             
             # Initialize charging controller
             logger.info("Initializing Charging Controller...")
@@ -194,7 +191,7 @@ class MasterCoordinator:
             
             # Initialize decision engine
             logger.info("Initializing Decision Engine...")
-            self.decision_engine = MultiFactorDecisionEngine(self.config)
+            self.decision_engine = MultiFactorDecisionEngine(self.config, self.charging_controller)
             
             # Initialize PV vs consumption analyzer
             logger.info("Initializing PV vs Consumption Analyzer...")
@@ -501,7 +498,7 @@ class MasterCoordinator:
             if self.multi_session_manager and self.multi_session_manager.enabled:
                 await self._handle_multi_session_logic()
             
-            # Get current price data
+            # Get current price data using AutomatedPriceCharger (has correct SC calculation)
             price_data = self.charging_controller.fetch_price_data_for_date(
                 datetime.now().strftime('%Y-%m-%d')
             )
@@ -557,7 +554,7 @@ class MasterCoordinator:
             filename = f"charging_decision_{timestamp}.json"
             file_path = energy_data_dir / filename
             
-            # Get current price data for the decision
+            # Get current price data for the decision using AutomatedPriceCharger
             current_price_data = self.charging_controller.fetch_price_data_for_date(
                 decision_record['timestamp'].strftime('%Y-%m-%d')
             )
@@ -573,15 +570,18 @@ class MasterCoordinator:
                     now = decision_record['timestamp']
                     current_time = now.replace(second=0, microsecond=0)
                     
-                    for item in current_price_data['value']:
-                        item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
-                        if item_time <= current_time < item_time + timedelta(minutes=15):
-                            current_price = float(item['csdac_pln']) + 0.0892  # SC component
-                            break
+                    # Use AutomatedPriceCharger for consistent price calculation
+                    current_price = self.charging_controller.get_current_price(current_price_data)
+                    if current_price:
+                        current_price = current_price / 1000  # Convert PLN/MWh to PLN/kWh
                     
-                    # Find cheapest price
-                    prices = [(float(item['csdac_pln']) + 0.0892, datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M').hour) 
-                             for item in current_price_data['value']]
+                    # Find cheapest price using AutomatedPriceCharger
+                    prices = []
+                    for item in current_price_data['value']:
+                        market_price = float(item['csdac_pln'])
+                        final_price = self.charging_controller.calculate_final_price(market_price)
+                        final_price_kwh = final_price / 1000  # Convert PLN/MWh to PLN/kWh
+                        prices.append((final_price_kwh, datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M').hour))
                     if prices:
                         cheapest_price, cheapest_hour = min(prices, key=lambda x: x[0])
                         
@@ -715,11 +715,10 @@ class MasterCoordinator:
                     now = datetime.now()
                     current_time = now.replace(second=0, microsecond=0)
                     
-                    for item in price_data['value']:
-                        item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
-                        if item_time <= current_time < item_time + timedelta(minutes=15):
-                            current_price_pln = float(item['csdac_pln']) + 0.0892  # SC component
-                            break
+                    # Use AutomatedPriceCharger for consistent price calculation
+                    current_price_pln = self.charging_controller.get_current_price(price_data)
+                    if current_price_pln:
+                        current_price_pln = current_price_pln / 1000  # Convert PLN/MWh to PLN/kWh
                 except Exception as e:
                     logger.warning(f"Failed to extract current price for selling: {e}")
                     return
@@ -949,14 +948,16 @@ class MasterCoordinator:
             status['multi_session_status'] = self.multi_session_manager.get_current_plan_status()
         
         return status
+    
 
 
 class MultiFactorDecisionEngine:
     """Multi-factor decision engine for intelligent charging decisions with timing awareness"""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], charging_controller=None):
         """Initialize the decision engine"""
         self.config = config
+        self.charging_controller = charging_controller
         self.coordinator_config = config.get('coordinator', {})
         
         # Decision weights (from project plan)
@@ -1262,13 +1263,10 @@ class MultiFactorDecisionEngine:
         
         # Find the current 15-minute period price
         current_price = None
-        for item in price_data['value']:
-            item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
-            if item_time <= current_time < item_time + timedelta(minutes=15):
-                # Calculate final price (market price + SC component)
-                market_price = float(item['csdac_pln'])
-                current_price = market_price + 0.0892  # SC component
-                break
+        # Use AutomatedPriceCharger for consistent price calculation
+        current_price = self.charging_controller.get_current_price(price_data)
+        if current_price:
+            current_price = current_price / 1000  # Convert PLN/MWh to PLN/kWh
         
         if current_price is None:
             return 50  # Neutral score if no current price found
@@ -1389,9 +1387,12 @@ class MultiFactorDecisionEngine:
             if not is_charging:
                 return 'start_charging'  # Start charging due to PV deficit
         
-        # High score and not charging - start charging
-        if total_score >= 70 and not is_charging:
-            return 'start_charging'
+        # High score - start or continue charging
+        if total_score >= 70:
+            if not is_charging:
+                return 'start_charging'
+            else:
+                return 'continue_charging'
         
         # Low score and currently charging - stop charging
         if total_score <= 30 and is_charging:

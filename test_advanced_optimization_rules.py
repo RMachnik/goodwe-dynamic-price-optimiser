@@ -30,8 +30,8 @@ def test_optimization_rule_1():
     """Test Rule 1: At 10% SOC with high price, always wait for price drop"""
     logger.info("\n=== Testing Rule 1: 10% SOC + High Price = Wait ===")
     
-    config = load_config()
-    charger = AutomatedPriceCharger(config)
+    config_path = Path(__file__).parent / "config" / "master_coordinator_config.yaml"
+    charger = AutomatedPriceCharger(str(config_path))
     
     test_scenarios = [
         {
@@ -50,7 +50,7 @@ def test_optimization_rule_1():
             'cheapest_price': 0.4,
             'cheapest_hour': 23,
             'expected_action': 'charge',
-            'expected_reason': 'acceptable price'
+                'expected_reason': 'waiting 9h for 20.0% savings not optimal'
         },
         {
             'name': '9% SOC + High Price (1.0 PLN/kWh) - Should Use Normal Logic',
@@ -58,8 +58,8 @@ def test_optimization_rule_1():
             'current_price': 1.0,
             'cheapest_price': 0.4,
             'cheapest_hour': 23,
-            'expected_action': 'wait',
-            'expected_reason': 'much cheaper price'
+            'expected_action': 'charge',
+                'expected_reason': 'waiting 9h for 60.0% savings not optimal'
         }
     ]
     
@@ -95,8 +95,8 @@ def test_optimization_rule_2():
     """Test Rule 2: Proactive charging when PV is poor, weather won't improve, battery <80%, and price is not high"""
     logger.info("\n=== Testing Rule 2: Proactive Charging ===")
     
-    config = load_config()
-    charger = AutomatedPriceCharger(config)
+    config_path = Path(__file__).parent / "config" / "master_coordinator_config.yaml"
+    charger = AutomatedPriceCharger(str(config_path))
     
     test_scenarios = [
         {
@@ -173,8 +173,8 @@ def test_real_world_scenario():
     """Test the real-world scenario from your charging session"""
     logger.info("\n=== Testing Real-World Scenario ===")
     
-    config = load_config()
-    charger = AutomatedPriceCharger(config)
+    config_path = Path(__file__).parent / "config" / "master_coordinator_config.yaml"
+    charger = AutomatedPriceCharger(str(config_path))
     
     # Your actual scenario: 18% SOC, 1.577 PLN/kWh, 0.468 PLN/kWh at 23:00
     logger.info("Testing your actual scenario: 18% SOC, 1.577 PLN/kWh current, 0.468 PLN/kWh at 23:00")

@@ -38,21 +38,21 @@ class TestPriceWindowAnalyzer(unittest.TestCase):
         self.config_path = os.path.join(self.temp_dir, 'test_config.yaml')
         self.create_test_config()
         
-        # Sample price data for testing
+        # Sample price data for testing (in PLN/MWh format)
         self.sample_price_data = {
             'prices': [
-                0.45, 0.42, 0.38, 0.35, 0.32, 0.28, 0.25, 0.22,  # 00:00-01:45 (low prices)
-                0.20, 0.18, 0.15, 0.12, 0.10, 0.08, 0.06, 0.05,  # 02:00-03:45 (very low prices)
-                0.08, 0.12, 0.18, 0.25, 0.32, 0.38, 0.45, 0.52,  # 04:00-05:45 (rising prices)
-                0.58, 0.65, 0.72, 0.78, 0.85, 0.92, 0.98, 1.05,  # 06:00-07:45 (high prices)
-                1.12, 1.18, 1.25, 1.32, 1.38, 1.45, 1.52, 1.58,  # 08:00-09:45 (peak prices)
-                1.65, 1.72, 1.78, 1.85, 1.92, 1.98, 2.05, 2.12,  # 10:00-11:45 (very high prices)
-                2.18, 2.25, 2.32, 2.38, 2.45, 2.52, 2.58, 2.65,  # 12:00-13:45 (peak prices)
-                2.72, 2.78, 2.85, 2.92, 2.98, 3.05, 3.12, 3.18,  # 14:00-15:45 (very high prices)
-                3.25, 3.32, 3.38, 3.45, 3.52, 3.58, 3.65, 3.72,  # 16:00-17:45 (peak prices)
-                3.78, 3.85, 3.92, 3.98, 4.05, 4.12, 4.18, 4.25,  # 18:00-19:45 (very high prices)
-                4.32, 4.38, 4.45, 4.52, 4.58, 4.65, 4.72, 4.78,  # 20:00-21:45 (high prices)
-                4.85, 4.92, 4.98, 5.05, 5.12, 5.18, 5.25, 5.32,  # 22:00-23:45 (very high prices)
+                450, 420, 380, 350, 320, 280, 250, 220,  # 00:00-01:45 (low prices)
+                200, 180, 150, 120, 100, 80, 60, 50,      # 02:00-03:45 (very low prices)
+                80, 120, 180, 250, 320, 380, 450, 520,    # 04:00-05:45 (rising prices)
+                580, 650, 720, 780, 850, 920, 980, 1050,  # 06:00-07:45 (high prices)
+                1120, 1180, 1250, 1320, 1380, 1450, 1520, 1580,  # 08:00-09:45 (peak prices)
+                1650, 1720, 1780, 1850, 1920, 1980, 2050, 2120,  # 10:00-11:45 (very high prices)
+                2180, 2250, 2320, 2380, 2450, 2520, 2580, 2650,  # 12:00-13:45 (peak prices)
+                2720, 2780, 2850, 2920, 2980, 3050, 3120, 3180,  # 14:00-15:45 (very high prices)
+                3250, 3320, 3380, 3450, 3520, 3580, 3650, 3720,  # 16:00-17:45 (peak prices)
+                3780, 3850, 3920, 3980, 4050, 4120, 4180, 4250,  # 18:00-19:45 (very high prices)
+                4320, 4380, 4450, 4520, 4580, 4650, 4720, 4780,  # 20:00-21:45 (high prices)
+                4850, 4920, 4980, 5050, 5120, 5180, 5250, 5320,  # 22:00-23:45 (very high prices)
             ],
             'date': '2025-09-07',
             'currency': 'PLN',
@@ -62,10 +62,10 @@ class TestPriceWindowAnalyzer(unittest.TestCase):
             'end_time': '23:45'
         }
         
-        # Expected low price windows
+        # Expected low price windows (in PLN/MWh format)
         self.expected_low_windows = [
-            {'start': 0, 'end': 7, 'duration': 2.0, 'avg_price': 0.31},   # 00:00-01:45
-            {'start': 8, 'end': 15, 'duration': 2.0, 'avg_price': 0.10},  # 02:00-03:45
+            {'start': 0, 'end': 7, 'duration': 2.0, 'avg_price': 310},   # 00:00-01:45
+            {'start': 8, 'end': 15, 'duration': 2.0, 'avg_price': 100},  # 02:00-03:45
         ]
     
     def tearDown(self):
@@ -76,11 +76,11 @@ class TestPriceWindowAnalyzer(unittest.TestCase):
         """Create test configuration file"""
         config = {
             'price_analysis': {
-                'very_low_price_threshold': 0.15,  # 0.15 PLN/kWh
-                'low_price_threshold': 0.35,       # 0.35 PLN/kWh
-                'medium_price_threshold': 0.60,    # 0.60 PLN/kWh
-                'high_price_threshold': 1.40,      # 1.40 PLN/kWh (to match test expectations)
-                'very_high_price_threshold': 1.50, # 1.50 PLN/kWh
+                'very_low_price_threshold': 150,   # 150 PLN/MWh (0.15 PLN/kWh)
+                'low_price_threshold': 350,        # 350 PLN/MWh (0.35 PLN/kWh)
+                'medium_price_threshold': 600,     # 600 PLN/MWh (0.60 PLN/kWh)
+                'high_price_threshold': 1400,      # 1400 PLN/MWh (1.40 PLN/kWh)
+                'very_high_price_threshold': 1500, # 1500 PLN/MWh (1.50 PLN/kWh)
                 'min_window_duration_minutes': 30,
                 'max_window_duration_hours': 4
             },
@@ -147,7 +147,7 @@ class TestPriceWindowAnalyzer(unittest.TestCase):
         
         # Verify low price window characteristics
         for window in low_windows:
-            self.assertLessEqual(window.avg_price, 0.35, "Low price window should have low average price")
+            self.assertLessEqual(window.avg_price, 350, "Low price window should have low average price")
             self.assertGreaterEqual(window.duration_hours, 0.5, "Low price window should be at least 30 minutes")
     
     def test_very_low_price_window_detection(self):
@@ -165,7 +165,7 @@ class TestPriceWindowAnalyzer(unittest.TestCase):
         
         # Verify very low price window characteristics
         for window in very_low_windows:
-            self.assertLessEqual(window.avg_price, 0.15, "Very low price window should have very low average price")
+            self.assertLessEqual(window.avg_price, 150, "Very low price window should have very low average price")
     
     def test_high_price_window_detection(self):
         """Test detection of high price windows"""

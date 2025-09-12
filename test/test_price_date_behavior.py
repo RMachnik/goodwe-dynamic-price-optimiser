@@ -164,8 +164,8 @@ class TestPriceDateBehavior(unittest.TestCase):
             
             # Should find the price for 12:00
             self.assertIsNotNone(current_price)
-            # Price should be market price + SC component (450.00 + 0.0892)
-            self.assertAlmostEqual(current_price, 450.0892, places=4)
+            # Price should be market price + SC component (450.00 + 89.2 = 539.2 PLN/MWh)
+            self.assertAlmostEqual(current_price, 539.2, places=1)
     
     def test_get_current_price_outside_day(self):
         """Test that get_current_price returns None when outside the day's data"""
