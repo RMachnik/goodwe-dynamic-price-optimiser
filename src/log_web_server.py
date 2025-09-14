@@ -1614,12 +1614,87 @@ class LogWebServer:
                             <div class="decision-day-group" style="margin-bottom: 20px;">
                                 <div class="day-header" style="background: var(--card-bg); padding: 10px 15px; border-radius: 8px 8px 0 0; border: 1px solid var(--border-color); border-bottom: none; font-weight: 600; color: var(--primary-color); display: flex; justify-content: space-between; align-items: center;">
                                     <span>${date}</span>
-                                    <span style="background: var(--primary-color); color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px;">${dayCount} decisions</span>
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        <div style="display: flex; gap: 5px; font-size: 10px;">
+                                            <span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 8px;">✅ EXECUTED</span>
+                                            <span style="background: #dc3545; color: white; padding: 2px 6px; border-radius: 8px;">🚫 BLOCKED</span>
+                                            <span style="background: #6c757d; color: white; padding: 2px 6px; border-radius: 8px;">⏸️ N/A</span>
+                                        </div>
+                                        <span style="background: var(--primary-color); color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px;">${dayCount} decisions</span>
+                                    </div>
                                 </div>
                                 <div class="day-decisions" style="border: 1px solid var(--border-color); border-top: none; border-radius: 0 0 8px 8px; background: var(--card-bg);">
                                     ${dayDecisions.map(decision => {
                                         const decisionClass = getDecisionClass(decision.action);
                                         const confidencePercent = (decision.confidence * 100).toFixed(1);
+                                        
+                                        // Determine execution status with detailed reasons
+                                        const getExecutionStatus = (decision) => {
+                                            if (decision.action === 'wait') {
+                                                return { 
+                                                    status: 'N/A', 
+                                                    color: '#6c757d', 
+                                                    icon: '⏸️',
+                                                    reason: 'Wait decision - no execution needed'
+                                                };
+                                            }
+                                            
+                                            // Check if decision was actually executed
+                                            const energy = decision.energy_kwh || 0;
+                                            const cost = decision.estimated_cost_pln || 0;
+                                            const savings = decision.estimated_savings_pln || 0;
+                                            
+                                            // If all values are 0, likely not executed - determine why
+                                            if (energy === 0 && cost === 0 && savings === 0) {
+                                                // Analyze the reason to determine blocking cause
+                                                const reason = decision.reason || '';
+                                                let blockReason = 'Unknown reason';
+                                                
+                                                // Check for specific blocking patterns
+                                                if (reason.includes('emergency') || reason.includes('safety')) {
+                                                    blockReason = 'Emergency safety stop';
+                                                } else if (reason.includes('price') && reason.includes('not optimal')) {
+                                                    blockReason = 'Price threshold not met';
+                                                } else if (reason.includes('Could not determine current price')) {
+                                                    blockReason = 'Price data unavailable';
+                                                } else if (reason.includes('battery') && reason.includes('safety margin')) {
+                                                    blockReason = 'Battery safety margin exceeded';
+                                                } else if (reason.includes('grid voltage') && reason.includes('outside safe range')) {
+                                                    blockReason = 'Grid voltage out of range';
+                                                } else if (reason.includes('communication') || reason.includes('connection')) {
+                                                    blockReason = 'Communication error';
+                                                } else if (reason.includes('inverter') && reason.includes('error')) {
+                                                    blockReason = 'Inverter error';
+                                                } else if (reason.includes('timeout') || reason.includes('retry')) {
+                                                    blockReason = 'Communication timeout';
+                                                } else if (reason.includes('charging') && reason.includes('already')) {
+                                                    blockReason = 'Already charging';
+                                                } else if (reason.includes('PV') && reason.includes('overproduction')) {
+                                                    blockReason = 'PV overproduction detected';
+                                                } else if (reason.includes('consumption') && reason.includes('high')) {
+                                                    blockReason = 'High consumption detected';
+                                                } else {
+                                                    blockReason = 'Execution blocked by safety system';
+                                                }
+                                                
+                                                return { 
+                                                    status: 'BLOCKED', 
+                                                    color: '#dc3545', 
+                                                    icon: '🚫',
+                                                    reason: blockReason
+                                                };
+                                            }
+                                            
+                                            // If values are present, likely executed
+                                            return { 
+                                                status: 'EXECUTED', 
+                                                color: '#28a745', 
+                                                icon: '✅',
+                                                reason: `Charged ${energy.toFixed(2)} kWh for ${cost.toFixed(2)} PLN`
+                                            };
+                                        };
+                                        
+                                        const execution = getExecutionStatus(decision);
                                         
                                         return `
                                             <div class="decision-item ${decisionClass}" style="padding: 15px; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 10px;">
@@ -1632,6 +1707,12 @@ class LogWebServer:
                                                     <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
                                                         <div style="background: ${getDecisionColor(decision.action)}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">
                                                             ${decision.action.replace('_', ' ').toUpperCase()}
+                                                        </div>
+                                                        <div style="background: ${execution.color}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">
+                                                            ${execution.icon} ${execution.status}
+                                                        </div>
+                                                        <div style="font-size: 11px; color: var(--text-muted); text-align: right; max-width: 150px;">
+                                                            ${execution.reason}
                                                         </div>
                                                         <div style="font-size: 12px; color: var(--text-muted);">
                                                             Confidence: ${confidencePercent}%
@@ -1769,11 +1850,79 @@ class LogWebServer:
                         const energy = decision.energy_sold_kwh || 0;
                         const price = decision.current_price_pln || 0;
                         
+                        // Determine execution status for battery selling with detailed reasons
+                        const getSellingExecutionStatus = (decision) => {
+                            if (decision.decision === 'wait') {
+                                return { 
+                                    status: 'N/A', 
+                                    color: '#6c757d', 
+                                    icon: '⏸️',
+                                    reason: 'Wait decision - no execution needed'
+                                };
+                            }
+                            
+                            // Check if selling was actually executed
+                            const revenue = decision.expected_revenue_pln || 0;
+                            const energy = decision.energy_sold_kwh || 0;
+                            
+                            // If values are 0, likely not executed - determine why
+                            if (revenue === 0 && energy === 0) {
+                                const reasoning = decision.reasoning || '';
+                                let blockReason = 'Unknown reason';
+                                
+                                // Check for specific blocking patterns in battery selling
+                                if (reasoning.includes('emergency') || reasoning.includes('safety')) {
+                                    blockReason = 'Emergency safety stop';
+                                } else if (reasoning.includes('battery') && reasoning.includes('SOC') && reasoning.includes('below')) {
+                                    blockReason = 'Battery SOC too low';
+                                } else if (reasoning.includes('price') && reasoning.includes('below')) {
+                                    blockReason = 'Price below selling threshold';
+                                } else if (reasoning.includes('grid voltage') && reasoning.includes('outside')) {
+                                    blockReason = 'Grid voltage out of range';
+                                } else if (reasoning.includes('communication') || reasoning.includes('connection')) {
+                                    blockReason = 'Communication error';
+                                } else if (reasoning.includes('inverter') && reasoning.includes('error')) {
+                                    blockReason = 'Inverter error';
+                                } else if (reasoning.includes('night') || reasoning.includes('preserve')) {
+                                    blockReason = 'Night hours - preserve charge';
+                                } else if (reasoning.includes('temperature') && reasoning.includes('exceed')) {
+                                    blockReason = 'Battery temperature too high';
+                                } else if (reasoning.includes('cycles') && reasoning.includes('limit')) {
+                                    blockReason = 'Daily cycle limit reached';
+                                } else {
+                                    blockReason = 'Selling blocked by safety system';
+                                }
+                                
+                                return { 
+                                    status: 'BLOCKED', 
+                                    color: '#dc3545', 
+                                    icon: '🚫',
+                                    reason: blockReason
+                                };
+                            }
+                            
+                            // If values are present, likely executed
+                            return { 
+                                status: 'EXECUTED', 
+                                color: '#28a745', 
+                                icon: '✅',
+                                reason: `Sold ${energy.toFixed(2)} kWh for ${revenue.toFixed(2)} PLN`
+                            };
+                        };
+                        
+                        const execution = getSellingExecutionStatus(decision);
+                        
                         return `
                             <div class="decision-item ${decisionClass}">
                                 <div class="decision-time">${new Date(decision.timestamp).toLocaleString()}</div>
                                 <div class="decision-action">${decision.decision.replace('_', ' ').toUpperCase()}</div>
                                 <div class="decision-reason">${decision.reasoning}</div>
+                                <div style="background: ${execution.color}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; display: inline-block; margin-top: 5px;">
+                                    ${execution.icon} ${execution.status}
+                                </div>
+                                <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+                                    ${execution.reason}
+                                </div>
                                 ${decision.decision === 'start_selling' ? `
                                     <div class="metric">
                                         <span class="metric-label">Revenue:</span>
