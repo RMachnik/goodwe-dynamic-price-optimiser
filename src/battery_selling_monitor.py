@@ -98,6 +98,19 @@ class BatterySellingMonitor:
         self.logger.info(f"  - Grid voltage limits: {self.grid_voltage_min}V to {self.grid_voltage_max}V")
         self.logger.info(f"  - SOC limits: {self.min_selling_soc}% min, {self.safety_margin_soc}% safety margin")
     
+    def _safe_float(self, value) -> float:
+        """Safely convert value to float, handling strings and None"""
+        if value is None:
+            return 0.0
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        return 0.0
+    
     def _is_night_time(self) -> bool:
         """Check if current time is during night hours"""
         current_hour = datetime.now().hour
@@ -264,7 +277,7 @@ class BatterySellingMonitor:
         health_warnings = []
         
         # Check voltage range
-        voltage = battery_data.get('voltage', 0)
+        voltage = self._safe_float(battery_data.get('voltage', 0))
         if voltage < 320 or voltage > 480:  # GoodWe Lynx-D voltage range
             health_warnings.append(f"Voltage {voltage}V outside normal range")
         
@@ -298,10 +311,10 @@ class BatterySellingMonitor:
             grid_data = current_data.get('grid', {})
             inverter_data = current_data.get('inverter', {})
             
-            # Validate data extraction
-            battery_soc = battery_data.get('soc_percent', 0)
-            battery_temp = battery_data.get('temperature', 0)
-            grid_voltage = grid_data.get('voltage', 0)
+            # Validate data extraction with type conversion
+            battery_soc = self._safe_float(battery_data.get('soc_percent', 0))
+            battery_temp = self._safe_float(battery_data.get('temperature', 0))
+            grid_voltage = self._safe_float(grid_data.get('voltage', 0))
             
             # Log data validation issues
             if not battery_data:
