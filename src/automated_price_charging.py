@@ -276,11 +276,11 @@ class AutomatedPriceCharger:
         try:
             logger.info("Making smart charging decision...")
             
-            # Extract current system state
-            battery_soc = current_data.get('battery', {}).get('soc_percent', 0)
-            pv_power = current_data.get('photovoltaic', {}).get('current_power_w', 0)
-            house_consumption = current_data.get('house_consumption', {}).get('current_power_w', 0)
-            grid_power = current_data.get('grid', {}).get('power_w', 0)
+            # Extract current system state with type conversion
+            battery_soc = self._safe_float(current_data.get('battery', {}).get('soc_percent', 0))
+            pv_power = self._safe_float(current_data.get('photovoltaic', {}).get('current_power_w', 0))
+            house_consumption = self._safe_float(current_data.get('house_consumption', {}).get('current_power_w', 0))
+            grid_power = self._safe_float(current_data.get('grid', {}).get('power_w', 0))
             grid_direction = current_data.get('grid', {}).get('flow_direction', 'Unknown')
             
             # Calculate overproduction
@@ -703,6 +703,19 @@ class AutomatedPriceCharger:
             'priority': 'low',
             'confidence': 0.4
         }
+    
+    def _safe_float(self, value) -> float:
+        """Safely convert value to float, handling strings and None"""
+        if value is None:
+            return 0.0
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        return 0.0
     
     def _calculate_savings(self, current_price: float, cheapest_price: float) -> float:
         """Calculate potential savings percentage"""

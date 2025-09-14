@@ -427,7 +427,7 @@ class MasterCoordinator:
             # Check for undervoltage condition and enable auto-reboot if configured
             emergency_config = self.config.get('coordinator', {}).get('emergency_stop_conditions', {})
             if emergency_config.get('undervoltage_reboot', False):
-                battery_voltage = self.current_data.get('battery', {}).get('voltage', 0)
+                battery_voltage = self._safe_float(self.current_data.get('battery', {}).get('voltage', 0))
                 voltage_min = emergency_config.get('battery_voltage_min', 320.0)
                 
                 if battery_voltage < voltage_min:
@@ -436,6 +436,19 @@ class MasterCoordinator:
                     
         except Exception as e:
             logger.error(f"Failed to stop charging during emergency: {e}")
+    
+    def _safe_float(self, value) -> float:
+        """Safely convert value to float, handling strings and None"""
+        if value is None:
+            return 0.0
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        return 0.0
     
     def _check_goodwe_lynx_d_compliance(self) -> Dict[str, Any]:
         """Check GoodWe Lynx-D specific compliance and safety features"""
@@ -457,7 +470,7 @@ class MasterCoordinator:
         }
         
         # Check voltage range compliance (320V - 480V)
-        voltage = battery_data.get('voltage', 0)
+        voltage = self._safe_float(battery_data.get('voltage', 0))
         voltage_min = battery_config.get('voltage_range', {}).get('min', 320.0)
         voltage_max = battery_config.get('voltage_range', {}).get('max', 480.0)
         
@@ -466,7 +479,7 @@ class MasterCoordinator:
             compliance_status["issues"].append(f"Battery voltage {voltage}V outside GoodWe Lynx-D range ({voltage_min}V - {voltage_max}V)")
         
         # Check temperature compliance (0°C - 53°C for charging)
-        temperature = battery_data.get('temperature', 0)
+        temperature = self._safe_float(battery_data.get('temperature', 0))
         temp_min = battery_config.get('temperature_thresholds', {}).get('charging_min', 0.0)
         temp_max = battery_config.get('temperature_thresholds', {}).get('charging_max', 53.0)
         
