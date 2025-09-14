@@ -89,6 +89,10 @@ class BatterySellingMonitor:
         self.emergency_stop_count = 0
         self.warning_count = 0
         
+        # Rate limiting for emergency alerts (prevent log spam)
+        self.last_emergency_alert = None
+        self.emergency_alert_cooldown = timedelta(minutes=5)  # 5-minute cooldown
+        
         self.logger.info("Battery Selling Safety Monitor initialized")
         self.logger.info(f"  - Battery temp limits: {self.battery_temp_min}°C to {self.battery_temp_max}°C")
         self.logger.info(f"  - Grid voltage limits: {self.grid_voltage_min}V to {self.grid_voltage_max}V")
@@ -139,7 +143,18 @@ class BatterySellingMonitor:
             )
     
     def _check_battery_soc(self, battery_soc: float) -> SafetyCheck:
-        """Check battery SOC safety"""
+        """Check battery SOC safety with data validation"""
+        # Data validation - check for invalid readings
+        if battery_soc < 0 or battery_soc > 100:
+            return SafetyCheck(
+                check_name="battery_soc",
+                status=SafetyStatus.EMERGENCY,
+                value=battery_soc,
+                threshold="0-100",
+                message=f"Invalid battery SOC reading {battery_soc}% - data validation failed - EMERGENCY STOP",
+                timestamp=datetime.now()
+            )
+        
         if battery_soc <= self.safety_margin_soc:
             return SafetyCheck(
                 check_name="battery_soc",
@@ -169,7 +184,18 @@ class BatterySellingMonitor:
             )
     
     def _check_grid_voltage(self, grid_voltage: float) -> SafetyCheck:
-        """Check grid voltage safety"""
+        """Check grid voltage safety with data validation"""
+        # Data validation - check for invalid readings
+        if grid_voltage < 0:
+            return SafetyCheck(
+                check_name="grid_voltage",
+                status=SafetyStatus.EMERGENCY,
+                value=grid_voltage,
+                threshold=">0V",
+                message=f"Invalid grid voltage reading {grid_voltage}V - communication error or inverter offline - EMERGENCY STOP",
+                timestamp=datetime.now()
+            )
+        
         if grid_voltage < self.grid_voltage_min or grid_voltage > self.grid_voltage_max:
             return SafetyCheck(
                 check_name="grid_voltage",
@@ -265,16 +291,25 @@ class BatterySellingMonitor:
             )
     
     async def check_safety_conditions(self, inverter: Inverter, current_data: Dict[str, Any]) -> SafetyReport:
-        """Perform comprehensive safety check"""
+        """Perform comprehensive safety check with data validation"""
         try:
-            # Extract system data
+            # Extract system data with validation
             battery_data = current_data.get('battery', {})
             grid_data = current_data.get('grid', {})
             inverter_data = current_data.get('inverter', {})
             
+            # Validate data extraction
             battery_soc = battery_data.get('soc_percent', 0)
             battery_temp = battery_data.get('temperature', 0)
             grid_voltage = grid_data.get('voltage', 0)
+            
+            # Log data validation issues
+            if not battery_data:
+                self.logger.warning("No battery data available in current_data")
+            if not grid_data:
+                self.logger.warning("No grid data available in current_data")
+            if not inverter_data:
+                self.logger.warning("No inverter data available in current_data")
             
             # Perform all safety checks
             checks = [
@@ -318,11 +353,21 @@ class BatterySellingMonitor:
             self.safety_history.append(report)
             self.last_safety_check = report
             
-            # Log safety status
+            # Log safety status with rate limiting
             if overall_status == SafetyStatus.EMERGENCY:
-                self.logger.error(f"EMERGENCY SAFETY ALERT: {len(emergency_checks)} critical issues detected")
-                for check in emergency_checks:
-                    self.logger.error(f"  - {check.check_name}: {check.message}")
+                # Rate limiting for emergency alerts
+                now = datetime.now()
+                should_log = (self.last_emergency_alert is None or 
+                             now - self.last_emergency_alert > self.emergency_alert_cooldown)
+                
+                if should_log:
+                    self.logger.error(f"EMERGENCY SAFETY ALERT: {len(emergency_checks)} critical issues detected")
+                    for check in emergency_checks:
+                        self.logger.error(f"  - {check.check_name}: {check.message}")
+                    self.last_emergency_alert = now
+                else:
+                    # Log at debug level during cooldown
+                    self.logger.debug(f"Emergency alert suppressed (cooldown active): {len(emergency_checks)} critical issues")
             elif overall_status == SafetyStatus.WARNING:
                 self.logger.warning(f"Safety warning: {len(warning_checks)} issues detected")
                 for check in warning_checks:
@@ -446,3 +491,42 @@ class BatterySellingMonitor:
             for report in self.safety_history
             if report.timestamp >= cutoff_time
         ]
+    
+    def diagnose_communication_issues(self, current_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Diagnose potential communication issues with the inverter"""
+        diagnosis = {
+            "timestamp": datetime.now().isoformat(),
+            "issues": [],
+            "recommendations": []
+        }
+        
+        # Check for missing data
+        battery_data = current_data.get('battery', {})
+        grid_data = current_data.get('grid', {})
+        inverter_data = current_data.get('inverter', {})
+        
+        if not battery_data:
+            diagnosis["issues"].append("No battery data received")
+            diagnosis["recommendations"].append("Check inverter communication and battery connection")
+        
+        if not grid_data:
+            diagnosis["issues"].append("No grid data received")
+            diagnosis["recommendations"].append("Check inverter communication and grid connection")
+        
+        if not inverter_data:
+            diagnosis["issues"].append("No inverter data received")
+            diagnosis["recommendations"].append("Check inverter communication and network connection")
+        
+        # Check for zero values that might indicate communication issues
+        battery_soc = battery_data.get('soc_percent', 0)
+        grid_voltage = grid_data.get('voltage', 0)
+        
+        if battery_soc == 0:
+            diagnosis["issues"].append("Battery SOC reading is 0% - possible communication issue")
+            diagnosis["recommendations"].append("Verify battery connection and inverter communication")
+        
+        if grid_voltage == 0:
+            diagnosis["issues"].append("Grid voltage reading is 0V - possible communication issue")
+            diagnosis["recommendations"].append("Verify grid connection and inverter communication")
+        
+        return diagnosis
