@@ -546,5 +546,396 @@ class TestLogWebServerPerformance(unittest.TestCase):
                        f"Initialization should be less than 2 seconds, got {initialization_time:.2f} seconds")
 
 
+class TestDecisionHistoryBadgeCounts(unittest.TestCase):
+    """Test decision history badge count functionality"""
+    
+    def setUp(self):
+        """Set up test environment for badge count tests"""
+        self.temp_dir = tempfile.mkdtemp()
+        self.energy_data_dir = os.path.join(self.temp_dir, 'out', 'energy_data')
+        os.makedirs(self.energy_data_dir, exist_ok=True)
+        
+        # Test server configuration
+        self.test_host = '127.0.0.1'
+        self.test_port = 8083  # Different port to avoid conflicts
+        
+        self.config_path = os.path.join(self.temp_dir, 'test_config.yaml')
+        self.create_test_config()
+        
+        # Create sample decision files
+        self.create_sample_decision_files()
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def create_test_config(self):
+        """Create test configuration file"""
+        config = {
+            'web_server': {
+                'enabled': True,
+                'host': self.test_host,
+                'port': self.test_port,
+                'log_directory': os.path.join(self.temp_dir, 'logs'),
+                'max_log_size_mb': 10,
+                'log_retention_days': 7
+            }
+        }
+        
+        import yaml
+        with open(self.config_path, 'w') as f:
+            yaml.dump(config, f)
+    
+    def create_sample_decision_files(self):
+        """Create sample decision files for testing badge counts"""
+        from datetime import datetime, timedelta
+        import json
+        
+        base_time = datetime.now() - timedelta(hours=2)  # More recent for 1h test
+        
+        # Create charging decision files (with action='wait' but charging intent)
+        charging_decisions = [
+            {
+                "timestamp": (base_time + timedelta(minutes=10)).isoformat(),
+                "action": "wait",
+                "source": "grid",
+                "duration": 0,
+                "energy_kwh": 0,
+                "estimated_cost_pln": 0,
+                "estimated_savings_pln": 0,
+                "confidence": 0.8,
+                "reason": "Start charging from grid - low price window detected",
+                "priority": "high",
+                "battery_soc": 45,
+                "pv_power": 0,
+                "house_consumption": 200,
+                "current_price": 0.25,
+                "cheapest_price": 0.20,
+                "cheapest_hour": 2
+            },
+            {
+                "timestamp": (base_time + timedelta(minutes=20)).isoformat(),
+                "action": "wait",
+                "source": "pv",
+                "duration": 0,
+                "energy_kwh": 0,
+                "estimated_cost_pln": 0,
+                "estimated_savings_pln": 0,
+                "confidence": 0.9,
+                "reason": "Start PV charging - overproduction available",
+                "priority": "medium",
+                "battery_soc": 50,
+                "pv_power": 3000,
+                "house_consumption": 1000,
+                "current_price": 0.30,
+                "cheapest_price": 0.25,
+                "cheapest_hour": 3
+            },
+            {
+                "timestamp": (base_time + timedelta(minutes=30)).isoformat(),
+                "action": "start_pv_charging",
+                "source": "pv",
+                "duration": 120,
+                "energy_kwh": 2.5,
+                "estimated_cost_pln": 0.75,
+                "estimated_savings_pln": 1.25,
+                "confidence": 0.95,
+                "reason": "PV charging started - optimal conditions",
+                "priority": "high",
+                "battery_soc": 55,
+                "pv_power": 3500,
+                "house_consumption": 800,
+                "current_price": 0.30,
+                "cheapest_price": 0.25,
+                "cheapest_hour": 3
+            }
+        ]
+        
+        # Create wait decision files (genuine wait decisions)
+        wait_decisions = [
+            {
+                "timestamp": (base_time + timedelta(minutes=5)).isoformat(),
+                "action": "wait",
+                "source": "unknown",
+                "duration": 0,
+                "energy_kwh": 0,
+                "estimated_cost_pln": 0,
+                "estimated_savings_pln": 0,
+                "confidence": 0.4,
+                "reason": "Wait for better conditions (PV overproduction, lower prices, or higher consumption)",
+                "priority": "low",
+                "battery_soc": 69,
+                "pv_power": 0,
+                "house_consumption": 287,
+                "current_price": 0.45,
+                "cheapest_price": 0.20,
+                "cheapest_hour": 2
+            },
+            {
+                "timestamp": (base_time + timedelta(minutes=15)).isoformat(),
+                "action": "wait",
+                "source": "unknown",
+                "duration": 0,
+                "energy_kwh": 0,
+                "estimated_cost_pln": 0,
+                "estimated_savings_pln": 0,
+                "confidence": 0.3,
+                "reason": "Wait for better conditions - current price too high",
+                "priority": "low",
+                "battery_soc": 68,
+                "pv_power": 0,
+                "house_consumption": 273,
+                "current_price": 0.50,
+                "cheapest_price": 0.20,
+                "cheapest_hour": 2
+            }
+        ]
+        
+        # Create battery selling decision files
+        battery_selling_decisions = [
+            {
+                "timestamp": (base_time + timedelta(minutes=25)).isoformat(),
+                "action": "battery_selling",
+                "decision": "start_selling",
+                "confidence": 0.85,
+                "expected_revenue_pln": 2.50,
+                "selling_power_w": 2000,
+                "estimated_duration_hours": 2.0,
+                "reasoning": "High price window detected - optimal for battery selling",
+                "safety_checks_passed": True,
+                "risk_level": "low",
+                "current_price_pln": 0.75,
+                "battery_soc": 85,
+                "pv_power": 0,
+                "house_consumption": 500,
+                "energy_sold_kwh": 4.0,
+                "revenue_per_kwh_pln": 0.75,
+                "safety_status": "safe"
+            },
+            {
+                "timestamp": (base_time + timedelta(minutes=35)).isoformat(),
+                "action": "battery_selling",
+                "decision": "wait",
+                "confidence": 0.0,
+                "expected_revenue_pln": 0.0,
+                "selling_power_w": 0,
+                "estimated_duration_hours": 0.0,
+                "reasoning": "Battery SOC (45%) below minimum selling threshold (80%)",
+                "safety_checks_passed": True,
+                "risk_level": "low",
+                "current_price_pln": 0.75,
+                "battery_soc": 45,
+                "pv_power": 200,
+                "house_consumption": 1200,
+                "energy_sold_kwh": 0.0,
+                "revenue_per_kwh_pln": 0.75,
+                "safety_status": "safe"
+            }
+        ]
+        
+        # Write charging decision files
+        for i, decision in enumerate(charging_decisions):
+            filename = f"charging_decision_20250909_{base_time.strftime('%H%M%S')}_{i:02d}.json"
+            filepath = os.path.join(self.energy_data_dir, filename)
+            with open(filepath, 'w') as f:
+                json.dump(decision, f, indent=2)
+        
+        # Write wait decision files
+        for i, decision in enumerate(wait_decisions):
+            filename = f"charging_decision_20250909_{base_time.strftime('%H%M%S')}_wait_{i:02d}.json"
+            filepath = os.path.join(self.energy_data_dir, filename)
+            with open(filepath, 'w') as f:
+                json.dump(decision, f, indent=2)
+        
+        # Write battery selling decision files
+        for i, decision in enumerate(battery_selling_decisions):
+            filename = f"battery_selling_decision_20250909_{base_time.strftime('%H%M%S')}_{i:02d}.json"
+            filepath = os.path.join(self.energy_data_dir, filename)
+            with open(filepath, 'w') as f:
+                json.dump(decision, f, indent=2)
+    
+    def test_badge_count_categorization(self):
+        """Test that decisions are correctly categorized for badge counts"""
+        # Mock the energy data directory path
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
+            
+            # Get decision history
+            history = server._get_decision_history(time_range='24h', decision_type='all')
+            
+            # Verify counts
+            self.assertEqual(history['total_count'], 7, "Should have 7 total decisions")
+            self.assertEqual(history['charging_count'], 3, "Should have 3 charging decisions")
+            self.assertEqual(history['wait_count'], 2, "Should have 2 wait decisions")
+            self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions")
+    
+    def test_charging_decision_identification(self):
+        """Test that charging decisions are correctly identified"""
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
+            
+            # Get only charging decisions
+            history = server._get_decision_history(time_range='24h', decision_type='charging')
+            
+            # Verify only charging decisions are returned
+            self.assertEqual(history['charging_count'], 3, "Should have 3 charging decisions")
+            self.assertEqual(history['wait_count'], 0, "Should have 0 wait decisions in charging filter")
+            self.assertEqual(history['battery_selling_count'], 0, "Should have 0 battery selling decisions in charging filter")
+            
+            # Verify all returned decisions are charging-related
+            for decision in history['decisions']:
+                reason = decision.get('reason', '') or decision.get('reasoning', '')
+                action = decision.get('action', '')
+                self.assertTrue(
+                    'charging' in reason.lower() or 
+                    action in ['start_pv_charging', 'start_grid_charging', 'charging'],
+                    f"Decision should be charging-related: {decision}"
+                )
+    
+    def test_wait_decision_identification(self):
+        """Test that wait decisions are correctly identified"""
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
+            
+            # Get only wait decisions
+            history = server._get_decision_history(time_range='24h', decision_type='wait')
+            
+            # Verify only wait decisions are returned
+            self.assertEqual(history['charging_count'], 0, "Should have 0 charging decisions in wait filter")
+            self.assertEqual(history['wait_count'], 2, "Should have 2 wait decisions")
+            self.assertEqual(history['battery_selling_count'], 0, "Should have 0 battery selling decisions in wait filter")
+            
+            # Verify all returned decisions are wait-related
+            for decision in history['decisions']:
+                reason = decision.get('reason', '') or decision.get('reasoning', '')
+                self.assertTrue(
+                    'wait' in reason.lower() or 'better conditions' in reason.lower(),
+                    f"Decision should be wait-related: {decision}"
+                )
+    
+    def test_battery_selling_decision_identification(self):
+        """Test that battery selling decisions are correctly identified"""
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
+            
+            # Get only battery selling decisions
+            history = server._get_decision_history(time_range='24h', decision_type='battery_selling')
+            
+            # Verify only battery selling decisions are returned
+            self.assertEqual(history['charging_count'], 0, "Should have 0 charging decisions in battery selling filter")
+            self.assertEqual(history['wait_count'], 0, "Should have 0 wait decisions in battery selling filter")
+            self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions")
+            
+            # Verify all returned decisions are battery selling-related
+            for decision in history['decisions']:
+                action = decision.get('action', '')
+                decision_type = decision.get('decision', '')
+                self.assertTrue(
+                    action == 'battery_selling' or decision_type == 'battery_selling',
+                    f"Decision should be battery selling-related: {decision}"
+                )
+    
+    def test_decision_categorization_edge_cases(self):
+        """Test edge cases in decision categorization"""
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
+            
+            # Test with empty decisions (use a very short time range)
+            empty_history = server._get_decision_history(time_range='1s', decision_type='all')
+            self.assertEqual(empty_history['total_count'], 0, "Should have 0 decisions for 1s range")
+            self.assertEqual(empty_history['charging_count'], 0, "Should have 0 charging decisions")
+            self.assertEqual(empty_history['wait_count'], 0, "Should have 0 wait decisions")
+            self.assertEqual(empty_history['battery_selling_count'], 0, "Should have 0 battery selling decisions")
+    
+    def test_decision_categorization_with_missing_fields(self):
+        """Test decision categorization with missing or malformed fields"""
+        # Create a decision file with missing fields
+        malformed_decision = {
+            "timestamp": datetime.now().isoformat(),
+            "action": "",  # Empty action
+            "reason": "",  # Empty reason
+        }
+        
+        malformed_file = os.path.join(self.energy_data_dir, "malformed_decision.json")
+        with open(malformed_file, 'w') as f:
+            json.dump(malformed_decision, f, indent=2)
+        
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
+            
+            # Get decision history including malformed decision
+            history = server._get_decision_history(time_range='24h', decision_type='all')
+            
+            # Malformed decision should default to wait category
+            self.assertGreaterEqual(history['wait_count'], 2, "Should include malformed decision in wait count")
+    
+    def test_time_range_filtering(self):
+        """Test that time range filtering works correctly"""
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
+            
+            # Test 7-day range (should include all decisions)
+            history_7d = server._get_decision_history(time_range='7d', decision_type='all')
+            self.assertEqual(history_7d['total_count'], 7, "Should have 7 decisions for 7-day range")
+            
+            # Test 1-hour range (should have fewer decisions)
+            history_1h = server._get_decision_history(time_range='1h', decision_type='all')
+            self.assertLessEqual(history_1h['total_count'], 7, "Should have fewer or equal decisions for 1-hour range")
+    
+    def test_decision_categorization_performance(self):
+        """Test performance of decision categorization with many decisions"""
+        # Create many decision files
+        from datetime import datetime, timedelta
+        import json
+        
+        base_time = datetime.now() - timedelta(hours=2)  # More recent for 1h test
+        
+        for i in range(100):  # Create 100 decision files
+            decision = {
+                "timestamp": (base_time + timedelta(minutes=i)).isoformat(),
+                "action": "wait",
+                "reason": f"Test decision {i} - wait for better conditions",
+                "battery_soc": 50 + (i % 30),
+                "confidence": 0.5
+            }
+            
+            filename = f"charging_decision_20250909_{base_time.strftime('%H%M%S')}_test_{i:03d}.json"
+            filepath = os.path.join(self.energy_data_dir, filename)
+            with open(filepath, 'w') as f:
+                json.dump(decision, f, indent=2)
+        
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
+            
+            # Test performance
+            start_time = time.time()
+            history = server._get_decision_history(time_range='7d', decision_type='all')
+            end_time = time.time()
+            
+            duration = end_time - start_time
+            
+            # Should complete within reasonable time (less than 2 seconds)
+            self.assertLess(duration, 2.0, f"Decision categorization should complete within 2 seconds, got {duration:.2f}s")
+            
+            # Should have correct total count
+            self.assertGreaterEqual(history['total_count'], 100, "Should process all 100 test decisions")
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
