@@ -601,15 +601,38 @@ class MasterCoordinator:
                 except Exception as e:
                     logger.warning(f"Failed to extract price data: {e}")
             
+            # Calculate energy and cost for charging decisions
+            should_charge = decision_record['decision'].get('should_charge', False)
+            energy_kwh = 0
+            estimated_cost_pln = 0
+            estimated_savings_pln = 0
+            
+            if should_charge:
+                # Calculate energy needed based on battery capacity and current SOC
+                battery_capacity = self.config.get('battery', {}).get('capacity_kwh', 10.0)
+                current_soc = self.current_data.get('battery', {}).get('soc_percent', 0)
+                target_soc = 80.0  # Target 80% SOC
+                energy_needed = battery_capacity * (target_soc - current_soc) / 100.0
+                energy_kwh = max(0, min(energy_needed, 5.0))  # Cap at 5kWh per decision
+                
+                # Calculate cost based on current price
+                if current_price > 0:
+                    estimated_cost_pln = energy_kwh * (current_price / 1000.0)  # Convert from PLN/MWh to PLN/kWh
+                    
+                    # Calculate savings compared to reference price (400 PLN/MWh)
+                    reference_price = 400.0 / 1000.0  # 0.4 PLN/kWh
+                    reference_cost = energy_kwh * reference_price
+                    estimated_savings_pln = max(0, reference_cost - estimated_cost_pln)
+            
             # Prepare decision data for dashboard
             decision_data = {
                 'timestamp': decision_record['timestamp'].isoformat(),
-                'action': 'charge' if decision_record['decision'].get('should_charge', False) else 'wait',
+                'action': 'charge' if should_charge else 'wait',
                 'source': decision_record['decision'].get('charging_source', 'grid'),  # Default to grid
                 'duration': decision_record['decision'].get('charging_time_hours', 0),
-                'energy_kwh': decision_record['decision'].get('energy_needed', 0),
-                'estimated_cost_pln': decision_record['decision'].get('estimated_cost', 0),
-                'estimated_savings_pln': 0,  # Not calculated in basic decision
+                'energy_kwh': energy_kwh,
+                'estimated_cost_pln': estimated_cost_pln,
+                'estimated_savings_pln': estimated_savings_pln,
                 'confidence': decision_record['confidence'],
                 'reason': decision_record['reasoning'],
                 'priority': decision_record['priority'],
