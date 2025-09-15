@@ -2615,6 +2615,15 @@ class LogWebServer:
             if time_range == '7d':
                 time_threshold = now - timedelta(days=7)
                 max_files = 200  # More files for 7 days
+            elif time_range == '1s':
+                time_threshold = now - timedelta(seconds=1)
+                max_files = 10
+            elif time_range == '1m':
+                time_threshold = now - timedelta(minutes=1)
+                max_files = 10
+            elif time_range == '1h':
+                time_threshold = now - timedelta(hours=1)
+                max_files = 20
             else:  # 24h
                 time_threshold = now - timedelta(hours=24)
                 max_files = 50
@@ -2638,11 +2647,25 @@ class LogWebServer:
                             if decision_time.replace(tzinfo=None) < time_threshold:
                                 continue
                                 
-                            # Filter by decision type
-                            action = decision_data.get('action', 'wait')
-                            if decision_type == 'charging' and action == 'wait':
+                            # Filter by decision type using categorization logic
+                            action = decision_data.get('action', '')
+                            decision_type_field = decision_data.get('decision', '')
+                            reason = decision_data.get('reason', '') or decision_data.get('reasoning', '')
+                            
+                            # Categorize the decision
+                            is_charging = (action in ['start_pv_charging', 'start_grid_charging', 'charging'] or
+                                         ('charging' in reason.lower() and ('start' in reason.lower() or 'pv' in reason.lower() or 'grid' in reason.lower())))
+                            is_battery_selling = (action == 'battery_selling' or decision_type_field == 'battery_selling')
+                            is_wait = (action == 'wait' and 
+                                     ('wait' in reason.lower() or 'better conditions' in reason.lower()) and
+                                     'charging' not in reason.lower())
+                            
+                            # Apply filter
+                            if decision_type == 'charging' and not is_charging:
                                 continue
-                            elif decision_type == 'wait' and action != 'wait':
+                            elif decision_type == 'wait' and not is_wait:
+                                continue
+                            elif decision_type == 'battery_selling' and not is_battery_selling:
                                 continue
                                 
                             decisions.append(decision_data)
@@ -2671,11 +2694,34 @@ class LogWebServer:
             # Sort all decisions by timestamp (newest first)
             decisions.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
             
-            # Calculate statistics
+            # Calculate statistics with improved categorization
             total_count = len(decisions)
-            charging_count = len([d for d in decisions if d.get('action') == 'charging'])
-            wait_count = len([d for d in decisions if d.get('action') == 'wait'])
-            battery_selling_count = len([d for d in decisions if d.get('action') == 'battery_selling'])
+            
+            # Categorize decisions based on actual decision intent, not just action field
+            charging_count = 0
+            wait_count = 0
+            battery_selling_count = 0
+            
+            for decision in decisions:
+                action = decision.get('action', '')
+                decision_type = decision.get('decision', '')  # For battery selling decisions
+                reason = decision.get('reason', '') or decision.get('reasoning', '')
+                
+                # Battery selling decisions
+                if action == 'battery_selling' or decision_type == 'battery_selling':
+                    battery_selling_count += 1
+                # Charging decisions - look for actual charging intent
+                elif (action in ['start_pv_charging', 'start_grid_charging', 'charging'] or
+                      ('charging' in reason.lower() and ('start' in reason.lower() or 'pv' in reason.lower() or 'grid' in reason.lower()))):
+                    charging_count += 1
+                # Wait decisions - genuine wait decisions (not charging-related)
+                elif (action == 'wait' and 
+                      ('wait' in reason.lower() or 'better conditions' in reason.lower()) and
+                      'charging' not in reason.lower()):
+                    wait_count += 1
+                # Default to wait for any unclassified decisions
+                else:
+                    wait_count += 1
             
             # If no real decisions found, don't create mock data - return empty
             if not decisions:
