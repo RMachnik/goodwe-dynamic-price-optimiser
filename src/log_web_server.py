@@ -2692,13 +2692,10 @@ class LogWebServer:
                 if action == 'battery_selling' or decision_type == 'battery_selling':
                     battery_selling_count += 1
                 # Charging decisions - look for actual charging intent
-                elif (action in ['start_pv_charging', 'start_grid_charging', 'charging', 'charge'] or
-                      ('charging' in reason.lower() and ('start' in reason.lower() or 'pv' in reason.lower() or 'grid' in reason.lower()))):
+                elif action in ['charge', 'charging', 'start_pv_charging', 'start_grid_charging']:
                     charging_count += 1
-                # Wait decisions - genuine wait decisions (not charging-related)
-                elif (action == 'wait' and 
-                      ('wait' in reason.lower() or 'better conditions' in reason.lower()) and
-                      'charging' not in reason.lower()):
+                # Wait decisions - any decision that's not charging or battery selling
+                elif action == 'wait':
                     wait_count += 1
                 # Default to wait for any unclassified decisions
                 else:
@@ -2776,22 +2773,38 @@ class LogWebServer:
     def _get_system_metrics(self) -> Dict[str, Any]:
         """Get system performance metrics including historical data"""
         try:
-            # Get current decision history
-            current_decisions = self._get_decision_history().get('decisions', [])
-            
-            # Get historical decisions from previous days
-            historical_decisions = self._get_historical_decisions()
-            
-            # Combine current and historical decisions
-            all_decisions = current_decisions + historical_decisions
+            # Get decision history for the same time range as the decisions endpoint (7 days by default for metrics)
+            # This ensures consistency between /decisions and /metrics endpoints
+            decision_data = self._get_decision_history(time_range='7d')
+            all_decisions = decision_data.get('decisions', [])
             
             if not all_decisions:
                 return {'error': 'No decision data available'}
             
-            # Calculate metrics
+            # Calculate metrics using the same categorization logic as the decisions endpoint
             total_decisions = len(all_decisions)
-            charging_decisions = [d for d in all_decisions if d.get('action') != 'wait']
-            wait_decisions = [d for d in all_decisions if d.get('action') == 'wait']
+            
+            # Categorize decisions using the same logic as _get_decision_history
+            charging_decisions = []
+            wait_decisions = []
+            battery_selling_decisions = []
+            
+            for decision in all_decisions:
+                action = decision.get('action', '')
+                decision_type = decision.get('decision', '')  # For battery selling decisions
+                
+                # Battery selling decisions
+                if action == 'battery_selling' or decision_type == 'battery_selling':
+                    battery_selling_decisions.append(decision)
+                # Charging decisions - look for actual charging intent
+                elif action in ['charge', 'charging', 'start_pv_charging', 'start_grid_charging']:
+                    charging_decisions.append(decision)
+                # Wait decisions - any decision that's not charging or battery selling
+                elif action == 'wait':
+                    wait_decisions.append(decision)
+                # Default to wait for any unclassified decisions
+                else:
+                    wait_decisions.append(decision)
             
             total_energy_charged = sum(d.get('energy_kwh', 0) for d in charging_decisions)
             total_cost = sum(d.get('estimated_cost_pln', 0) for d in charging_decisions)
@@ -2817,8 +2830,14 @@ class LogWebServer:
             return {
                 'timestamp': datetime.now().isoformat(),
                 'total_decisions': total_decisions,
+                'total_count': total_decisions,
                 'charging_decisions': len(charging_decisions),
                 'wait_decisions': len(wait_decisions),
+                'battery_selling_decisions': len(battery_selling_decisions),
+                # Also provide the field names expected by the frontend
+                'charging_count': len(charging_decisions),
+                'wait_count': len(wait_decisions),
+                'battery_selling_count': len(battery_selling_decisions),
                 'total_energy_charged_kwh': round(total_energy_charged, 2),
                 'total_cost_pln': round(total_cost, 2),
                 'total_savings_pln': round(total_savings, 2),
