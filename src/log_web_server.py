@@ -1335,8 +1335,8 @@ class LogWebServer:
                         return;
                     }
                     
-                    const hasChargingDecisions = data.charging_decisions > 0;
-                    const hasAnyDecisions = data.total_decisions > 0;
+                    const hasChargingDecisions = data.charging_count > 0;
+                    const hasAnyDecisions = data.total_count > 0;
                     
                     if (!hasAnyDecisions) {
                         // No decisions at all
@@ -1354,12 +1354,12 @@ class LogWebServer:
                     
                     if (!hasChargingDecisions) {
                         // Only wait decisions - show monitoring state
-                        const waitPercentage = data.total_decisions > 0 ? ((data.wait_decisions / data.total_decisions) * 100).toFixed(1) : 0;
+                        const waitPercentage = data.total_count > 0 ? ((data.wait_count / data.total_count) * 100).toFixed(1) : 0;
                         document.getElementById('performance-metrics').innerHTML = `
                             <div class="monitoring-state">
                                 <div class="metric" title="Total number of decisions made by the system (charging + waiting)">
                                     <span class="metric-label">Total Decisions</span>
-                                    <span class="metric-value">${data.total_decisions}</span>
+                                    <span class="metric-value">${data.total_count}</span>
                                 </div>
                                 <div class="metric" title="Number of decisions that resulted in actual charging">
                                     <span class="metric-label">Charging Decisions</span>
@@ -1367,7 +1367,7 @@ class LogWebServer:
                                 </div>
                                 <div class="metric" title="Number of decisions to wait for better conditions">
                                     <span class="metric-label">Wait Decisions</span>
-                                    <span class="metric-value">${data.wait_decisions} (${waitPercentage}%)</span>
+                                    <span class="metric-value">${data.wait_count} (${waitPercentage}%)</span>
                                 </div>
                                 <div class="metric" title="Current system operational status">
                                     <span class="metric-label">System Status</span>
@@ -1389,15 +1389,15 @@ class LogWebServer:
                     const metricsHtml = `
                         <div class="metric" title="Total number of decisions made by the system (charging + waiting)">
                             <span class="metric-label">Total Decisions</span>
-                            <span class="metric-value">${data.total_decisions}</span>
+                            <span class="metric-value">${data.total_count}</span>
                         </div>
                         <div class="metric" title="Number of decisions that resulted in actual charging">
                             <span class="metric-label">Charging Decisions</span>
-                            <span class="metric-value">${data.charging_decisions}</span>
+                            <span class="metric-value">${data.charging_count}</span>
                         </div>
                         <div class="metric" title="Number of decisions to wait for better conditions">
                             <span class="metric-label">Wait Decisions</span>
-                            <span class="metric-value">${data.wait_decisions}</span>
+                            <span class="metric-value">${data.wait_count}</span>
                         </div>
                         <div class="metric" title="Overall system efficiency score based on confidence, savings, and charging ratio (0-100)">
                             <span class="metric-label">Efficiency Score</span>
@@ -1425,8 +1425,8 @@ class LogWebServer:
                     }
                     
                     // Check if there are any charging decisions
-                    const hasChargingDecisions = data.charging_decisions > 0;
-                    const hasAnyDecisions = data.total_decisions > 0;
+                    const hasChargingDecisions = data.charging_count > 0;
+                    const hasAnyDecisions = data.total_count > 0;
                     
                     if (!hasAnyDecisions) {
                         // No decisions at all
@@ -1473,7 +1473,7 @@ class LogWebServer:
                                             <h4>Monitoring Mode</h4>
                                             <p>System is waiting for optimal charging conditions</p>
                                             <div class="waiting-details">
-                                                <span class="waiting-count">${data.wait_decisions} wait decisions</span>
+                                                <span class="waiting-count">${data.wait_count} wait decisions</span>
                                                 <span class="waiting-reason">${waitingReason}</span>
                                                 <div class="current-conditions">
                                                     <small>Battery: ${batteryLevel}% | PV: ${pvPower}W | Price: ${currentPrice.toFixed(2)} PLN/kWh</small>
@@ -1514,7 +1514,7 @@ class LogWebServer:
                                             <h4>Monitoring Mode</h4>
                                             <p>System is waiting for optimal charging conditions</p>
                                             <div class="waiting-details">
-                                                <span class="waiting-count">${data.wait_decisions} wait decisions</span>
+                                                <span class="waiting-count">${data.wait_count} wait decisions</span>
                                                 <span class="waiting-reason">Looking for better prices or PV conditions</span>
                                             </div>
                                         </div>
@@ -2647,26 +2647,7 @@ class LogWebServer:
                             if decision_time.replace(tzinfo=None) < time_threshold:
                                 continue
                                 
-                            # Filter by decision type using categorization logic
-                            action = decision_data.get('action', '')
-                            decision_type_field = decision_data.get('decision', '')
-                            reason = decision_data.get('reason', '') or decision_data.get('reasoning', '')
-                            
-                            # Categorize the decision
-                            is_charging = (action in ['start_pv_charging', 'start_grid_charging', 'charging'] or
-                                         ('charging' in reason.lower() and ('start' in reason.lower() or 'pv' in reason.lower() or 'grid' in reason.lower())))
-                            is_battery_selling = (action == 'battery_selling' or decision_type_field == 'battery_selling')
-                            is_wait = (action == 'wait' and 
-                                     ('wait' in reason.lower() or 'better conditions' in reason.lower()) and
-                                     'charging' not in reason.lower())
-                            
-                            # Apply filter
-                            if decision_type == 'charging' and not is_charging:
-                                continue
-                            elif decision_type == 'wait' and not is_wait:
-                                continue
-                            elif decision_type == 'battery_selling' and not is_battery_selling:
-                                continue
+                            # No filtering here - we'll do categorization after loading all decisions
                                 
                             decisions.append(decision_data)
                     except Exception as e:
@@ -2711,7 +2692,7 @@ class LogWebServer:
                 if action == 'battery_selling' or decision_type == 'battery_selling':
                     battery_selling_count += 1
                 # Charging decisions - look for actual charging intent
-                elif (action in ['start_pv_charging', 'start_grid_charging', 'charging'] or
+                elif (action in ['start_pv_charging', 'start_grid_charging', 'charging', 'charge'] or
                       ('charging' in reason.lower() and ('start' in reason.lower() or 'pv' in reason.lower() or 'grid' in reason.lower()))):
                     charging_count += 1
                 # Wait decisions - genuine wait decisions (not charging-related)
