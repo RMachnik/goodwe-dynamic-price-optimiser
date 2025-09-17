@@ -937,5 +937,283 @@ class TestDecisionHistoryBadgeCounts(unittest.TestCase):
             self.assertGreaterEqual(history['total_count'], 100, "Should process all 100 test decisions")
 
 
+class TestTimeSeriesFunctionality(unittest.TestCase):
+    """Test Time Series visualization functionality"""
+    
+    def setUp(self):
+        """Set up test environment for Time Series tests"""
+        self.temp_dir = tempfile.mkdtemp()
+        self.logs_dir = os.path.join(self.temp_dir, 'logs')
+        os.makedirs(self.logs_dir, exist_ok=True)
+        
+        # Test server configuration
+        self.test_host = '127.0.0.1'
+        self.test_port = 8084  # Different port to avoid conflicts
+        
+        self.config_path = os.path.join(self.temp_dir, 'test_config.yaml')
+        self.create_test_config()
+        
+        # Create sample coordinator state files
+        self.create_sample_coordinator_state_files()
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def create_test_config(self):
+        """Create test configuration file"""
+        config = {
+            'web_server': {
+                'enabled': True,
+                'host': self.test_host,
+                'port': self.test_port,
+                'log_directory': self.logs_dir,
+                'max_log_size_mb': 10,
+                'log_retention_days': 7
+            }
+        }
+        
+        import yaml
+        with open(self.config_path, 'w') as f:
+            yaml.dump(config, f)
+    
+    def create_sample_coordinator_state_files(self):
+        """Create sample coordinator state files for testing"""
+        from datetime import datetime, timedelta
+        import json
+        
+        # Create out directory structure
+        out_dir = os.path.join(self.temp_dir, 'out')
+        os.makedirs(out_dir, exist_ok=True)
+        
+        # Create recent coordinator state file with real data
+        recent_time = datetime.now() - timedelta(minutes=5)
+        state_data = {
+            "timestamp": recent_time.isoformat(),
+            "current_data": {
+                "battery": {
+                    "soc_percent": 64.5,
+                    "power_w": 1200,
+                    "voltage_v": 48.2,
+                    "current_a": 25.0
+                },
+                "photovoltaic": {
+                    "current_power_w": 0,
+                    "daily_energy_kwh": 12.5,
+                    "efficiency_percent": 95.2
+                },
+                "grid": {
+                    "power_w": -500,
+                    "voltage_v": 230.1,
+                    "frequency_hz": 50.0
+                },
+                "house": {
+                    "consumption_w": 800,
+                    "daily_consumption_kwh": 15.2
+                }
+            },
+            "system_status": "operational",
+            "last_update": recent_time.isoformat()
+        }
+        
+        # Write coordinator state file
+        state_filename = f"coordinator_state_{recent_time.strftime('%Y%m%d_%H%M%S')}.json"
+        state_filepath = os.path.join(out_dir, state_filename)
+        with open(state_filepath, 'w') as f:
+            json.dump(state_data, f, indent=2)
+    
+    def test_historical_data_api_endpoint(self):
+        """Test the /historical-data API endpoint"""
+        server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=self.logs_dir)
+        
+        # Mock the project root to point to our test directory
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            # Test the historical data method
+            data = server._get_historical_time_series_data()
+            
+            # Verify response structure
+            self.assertIsNotNone(data, "Historical data should be returned")
+            self.assertIn('data_source', data, "Should include data source")
+            self.assertIn('data_points', data, "Should include data points count")
+            self.assertIn('soc_data', data, "Should include SOC data")
+            self.assertIn('pv_power_data', data, "Should include PV power data")
+            self.assertIn('timestamps', data, "Should include timestamps")
+            self.assertIn('current_soc', data, "Should include current SOC")
+            self.assertIn('current_pv_power', data, "Should include current PV power")
+            self.assertIn('soc_range', data, "Should include SOC range")
+            self.assertIn('pv_peak', data, "Should include PV peak")
+    
+    def test_real_data_integration(self):
+        """Test real data integration from coordinator state files"""
+        server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=self.logs_dir)
+        
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            # Test real data retrieval
+            data = server._get_real_historical_data()
+            
+            if data:  # If real data is available
+                self.assertEqual(data['data_source'], 'real_data_based', "Should use real data")
+                self.assertEqual(data['current_soc'], 64.5, "Should have correct current SOC")
+                self.assertEqual(data['current_pv_power'], 0, "Should have correct current PV power")
+                self.assertEqual(data['data_points'], 1440, "Should have 1440 data points (24 hours)")
+                
+                # Verify data arrays
+                self.assertEqual(len(data['soc_data']), 1440, "SOC data should have 1440 points")
+                self.assertEqual(len(data['pv_power_data']), 1440, "PV power data should have 1440 points")
+                self.assertEqual(len(data['timestamps']), 1440, "Timestamps should have 1440 points")
+    
+    def test_mock_data_fallback(self):
+        """Test mock data fallback when real data is not available"""
+        server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=self.logs_dir)
+        
+        # Mock empty coordinator state directory
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path('/non/existent/path')
+            
+            # Test mock data generation
+            data = server._get_historical_time_series_data()
+            
+            self.assertIsNotNone(data, "Mock data should be generated")
+            self.assertEqual(data['data_source'], 'mock_data', "Should use mock data")
+            self.assertEqual(data['data_points'], 1440, "Should have 1440 data points")
+            
+            # Verify data structure
+            self.assertIn('soc_data', data, "Should include SOC data")
+            self.assertIn('pv_power_data', data, "Should include PV power data")
+            self.assertIn('timestamps', data, "Should include timestamps")
+    
+    def test_historical_data_structure(self):
+        """Test historical data structure and validation"""
+        server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=self.logs_dir)
+        
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            data = server._get_historical_time_series_data()
+            
+            # Test data types
+            self.assertIsInstance(data['soc_data'], list, "SOC data should be a list")
+            self.assertIsInstance(data['pv_power_data'], list, "PV power data should be a list")
+            self.assertIsInstance(data['timestamps'], list, "Timestamps should be a list")
+            
+            # Test data ranges
+            if data['soc_data']:
+                self.assertTrue(all(0 <= soc <= 100 for soc in data['soc_data']), 
+                              "SOC values should be between 0 and 100")
+            
+            if data['pv_power_data']:
+                self.assertTrue(all(pv >= 0 for pv in data['pv_power_data']), 
+                              "PV power values should be non-negative")
+            
+            # Test timestamp format
+            if data['timestamps']:
+                for timestamp in data['timestamps'][:5]:  # Check first 5 timestamps
+                    self.assertRegex(timestamp, r'^\d{2}:\d{2}$', 
+                                   f"Timestamp should be in HH:MM format, got: {timestamp}")
+    
+    def test_time_series_data_processing(self):
+        """Test time series data processing and pattern generation"""
+        server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=self.logs_dir)
+        
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            data = server._get_historical_time_series_data()
+            
+            # Test data consistency
+            self.assertEqual(len(data['soc_data']), len(data['pv_power_data']), 
+                           "SOC and PV power data should have same length")
+            self.assertEqual(len(data['soc_data']), len(data['timestamps']), 
+                           "SOC data and timestamps should have same length")
+            
+            # Test realistic patterns
+            if data['data_source'] == 'real_data_based':
+                # SOC should be around the current value (64.5) with some variation
+                soc_values = data['soc_data']
+                current_soc = data['current_soc']
+                self.assertTrue(any(abs(soc - current_soc) < 20 for soc in soc_values), 
+                              "SOC data should include values close to current SOC")
+                
+                # PV power should show daily pattern (0 at night, higher during day)
+                pv_values = data['pv_power_data']
+                self.assertTrue(any(pv == 0 for pv in pv_values), 
+                              "PV power should have some zero values (night time)")
+    
+    def test_time_series_error_handling(self):
+        """Test error handling in time series data generation"""
+        server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=self.logs_dir)
+        
+        # Test with invalid coordinator state file
+        invalid_state_file = os.path.join(self.temp_dir, 'out', 'invalid_state.json')
+        with open(invalid_state_file, 'w') as f:
+            f.write("invalid json content")
+        
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            # Should handle invalid JSON gracefully
+            data = server._get_historical_time_series_data()
+            self.assertIsNotNone(data, "Should return data even with invalid state file")
+            self.assertIn('data_source', data, "Should include data source")
+    
+    def test_time_series_performance(self):
+        """Test performance of time series data generation"""
+        server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=self.logs_dir)
+        
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            # Test performance
+            start_time = time.time()
+            data = server._get_historical_time_series_data()
+            end_time = time.time()
+            
+            duration = end_time - start_time
+            
+            # Should complete within reasonable time (less than 1 second)
+            self.assertLess(duration, 1.0, 
+                          f"Time series data generation should complete within 1 second, got {duration:.2f}s")
+            
+            # Should generate correct amount of data
+            self.assertEqual(data['data_points'], 1440, "Should generate 1440 data points")
+    
+    def test_time_series_data_validation(self):
+        """Test data validation for time series"""
+        server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=self.logs_dir)
+        
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+            
+            data = server._get_historical_time_series_data()
+            
+            # Test required fields
+            required_fields = [
+                'data_source', 'data_points', 'soc_data', 'pv_power_data', 
+                'timestamps', 'current_soc', 'current_pv_power', 'soc_range', 'pv_peak'
+            ]
+            
+            for field in required_fields:
+                self.assertIn(field, data, f"Should include required field: {field}")
+                self.assertIsNotNone(data[field], f"Field {field} should not be None")
+            
+            # Test data point count
+            self.assertEqual(data['data_points'], 1440, "Should have 1440 data points")
+            
+            # Test SOC range calculation
+            if data['soc_range']:
+                self.assertIn('min', data['soc_range'], "SOC range should include min")
+                self.assertIn('max', data['soc_range'], "SOC range should include max")
+                self.assertLessEqual(data['soc_range']['min'], data['soc_range']['max'], 
+                                   "SOC min should be <= max")
+            
+            # Test PV peak calculation
+            if data['pv_peak']:
+                self.assertGreaterEqual(data['pv_peak'], 0, "PV peak should be non-negative")
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
