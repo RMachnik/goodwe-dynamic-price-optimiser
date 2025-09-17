@@ -3741,6 +3741,11 @@ class LogWebServer:
                 
                 pv_power_data.append(round(pv_power, 2))
             
+            # Calculate summary statistics
+            soc_min = min(soc_data)
+            soc_max = max(soc_data)
+            pv_peak = max(pv_power_data)
+            
             return {
                 'timestamps': timestamps,
                 'soc_data': soc_data,
@@ -3749,7 +3754,9 @@ class LogWebServer:
                 'data_source': 'real_data_based',
                 'last_update': datetime.now().isoformat(),
                 'current_soc': current_battery_soc,
-                'current_pv_power': current_pv_power
+                'current_pv_power': current_pv_power,
+                'soc_range': f"{soc_min:.1f}% - {soc_max:.1f}%",
+                'pv_peak': f"{pv_peak:.2f} kW"
             }
             
         except Exception as e:
