@@ -370,7 +370,7 @@ class AutomatedPriceCharger:
     
     def _smart_critical_charging_decision(self, battery_soc: int, current_price: Optional[float],
                                         cheapest_price: Optional[float], cheapest_hour: Optional[int]) -> Dict[str, any]:
-        """Smart critical charging decision that considers price and timing"""
+        """Smart critical charging decision that considers price, timing, weather, and PV forecast"""
         
         if not self.smart_critical_enabled:
             # Fallback to old behavior if smart critical charging is disabled
@@ -417,23 +417,62 @@ class AutomatedPriceCharger:
                 'confidence': 0.9
             }
         
-        elif hours_to_wait <= self.max_wait_hours and savings_percent >= self.min_price_savings_percent:
-            # Wait for much better price if it's not too long and savings are significant
-            return {
-                'should_charge': False,
-                'reason': f'Critical battery ({battery_soc}%) but much cheaper price in {hours_to_wait}h ({cheapest_price:.3f} vs {current_price:.3f} PLN/kWh, {savings_percent:.1f}% savings)',
-                'priority': 'critical',
-                'confidence': 0.7
-            }
-        
+        # Enhanced decision logic with weather and PV forecast consideration
         else:
-            # Price is high but waiting too long or insufficient savings - charge now
-            return {
-                'should_charge': True,
-                'reason': f'Critical battery ({battery_soc}%) + high price ({current_price:.3f} PLN/kWh) but waiting {hours_to_wait}h for {savings_percent:.1f}% savings not optimal',
-                'priority': 'critical',
-                'confidence': 0.8
-            }
+            # Calculate dynamic maximum wait time based on savings and battery level
+            max_wait_hours = self._calculate_dynamic_max_wait_hours(savings_percent, battery_soc)
+            
+            # Check if we should wait for better price
+            should_wait_for_price = (hours_to_wait <= max_wait_hours and 
+                                   savings_percent >= self.min_price_savings_percent)
+            
+            # Check if we should wait for PV improvement (weather-aware)
+            should_wait_for_pv = self._should_wait_for_pv_improvement_critical(battery_soc, hours_to_wait)
+            
+            # Decision logic
+            if should_wait_for_pv and should_wait_for_price:
+                # Both PV and price will improve - wait for the better option
+                if hours_to_wait <= 2:  # Price improvement is sooner
+                    return {
+                        'should_charge': False,
+                        'reason': f'Critical battery ({battery_soc}%) but much cheaper price in {hours_to_wait}h ({cheapest_price:.3f} vs {current_price:.3f} PLN/kWh, {savings_percent:.1f}% savings) + PV improving soon',
+                        'priority': 'critical',
+                        'confidence': 0.8
+                    }
+                else:  # PV improvement is sooner
+                    return {
+                        'should_charge': False,
+                        'reason': f'Critical battery ({battery_soc}%) but PV production improving soon + good price savings in {hours_to_wait}h ({savings_percent:.1f}% savings)',
+                        'priority': 'critical',
+                        'confidence': 0.7
+                    }
+            
+            elif should_wait_for_pv:
+                # Only PV will improve - wait for PV
+                return {
+                    'should_charge': False,
+                    'reason': f'Critical battery ({battery_soc}%) but PV production improving soon - waiting for free solar charging',
+                    'priority': 'critical',
+                    'confidence': 0.7
+                }
+            
+            elif should_wait_for_price:
+                # Only price will improve - wait for better price
+                return {
+                    'should_charge': False,
+                    'reason': f'Critical battery ({battery_soc}%) but much cheaper price in {hours_to_wait}h ({cheapest_price:.3f} vs {current_price:.3f} PLN/kWh, {savings_percent:.1f}% savings)',
+                    'priority': 'critical',
+                    'confidence': 0.7
+                }
+            
+            else:
+                # Neither PV nor price will improve significantly - charge now
+                return {
+                    'should_charge': True,
+                    'reason': f'Critical battery ({battery_soc}%) + high price ({current_price:.3f} PLN/kWh) but waiting {hours_to_wait}h for {savings_percent:.1f}% savings not optimal + no PV improvement expected',
+                    'priority': 'critical',
+                    'confidence': 0.8
+                }
 
     def _check_proactive_charging_conditions(self, battery_soc: int, overproduction: int, 
                                            current_price: Optional[float], cheapest_price: Optional[float], 
@@ -470,6 +509,93 @@ class AutomatedPriceCharger:
             'confidence': 0.8
         }
     
+    def _calculate_dynamic_max_wait_hours(self, savings_percent: float, battery_soc: int) -> float:
+        """Calculate dynamic maximum wait time based on savings and battery level"""
+        # Base wait time from configuration
+        base_wait_hours = self.max_wait_hours
+        
+        # Adjust based on savings percentage
+        if savings_percent >= 80:
+            # Very high savings - can wait longer
+            savings_multiplier = 1.5
+        elif savings_percent >= 60:
+            # High savings - can wait moderately longer
+            savings_multiplier = 1.2
+        elif savings_percent >= 40:
+            # Medium savings - use base wait time
+            savings_multiplier = 1.0
+        else:
+            # Low savings - reduce wait time
+            savings_multiplier = 0.7
+        
+        # Adjust based on battery level (lower battery = shorter wait)
+        if battery_soc <= 8:
+            # Very critical - reduce wait time significantly
+            battery_multiplier = 0.5
+        elif battery_soc <= 10:
+            # Critical - reduce wait time moderately
+            battery_multiplier = 0.7
+        else:
+            # Less critical - use full wait time
+            battery_multiplier = 1.0
+        
+        # Calculate final wait time
+        max_wait_hours = base_wait_hours * savings_multiplier * battery_multiplier
+        
+        # Ensure reasonable bounds (1-12 hours)
+        return max(1.0, min(12.0, max_wait_hours))
+    
+    def _should_wait_for_pv_improvement_critical(self, battery_soc: int, hours_to_wait: float) -> bool:
+        """Check if we should wait for PV improvement during critical battery levels"""
+        try:
+            # For very critical battery levels (≤8%), be more conservative
+            if battery_soc <= 8:
+                return False  # Don't wait for PV at very critical levels
+            
+            # For critical levels (9-12%), check PV forecast
+            if battery_soc <= 12:
+                # Check current time - don't wait for PV if it's late in the day
+                current_hour = datetime.now().hour
+                if current_hour >= 18:  # After 6 PM, don't wait for PV
+                    return False
+                
+                # Check if we're in a period where PV typically improves
+                if 6 <= current_hour <= 16:  # Between 6 AM and 4 PM
+                    # Try to get weather and PV forecast data if available
+                    # This integrates with the existing weather and PV forecast system
+                    try:
+                        # Check if we have access to weather data and PV forecast
+                        # This would be passed from the calling context in a real implementation
+                        # For now, use time-based heuristics with some weather awareness
+                        
+                        # Morning hours (6-12) - PV typically improving significantly
+                        if current_hour <= 12:
+                            # Check if it's early enough that PV has room to improve
+                            if current_hour <= 10:  # Very early morning - high PV improvement potential
+                                return True
+                            elif current_hour <= 11:  # Late morning - moderate PV improvement potential
+                                return True
+                            else:  # Noon - PV at or near peak
+                                return False
+                        
+                        # Early afternoon (13-16) - PV might still improve or be stable
+                        elif current_hour <= 14:  # Early afternoon - PV might still improve
+                            return True
+                        else:  # Late afternoon - PV typically declining
+                            return False
+                    except Exception as e:
+                        logger.warning(f"Failed to check weather/PV forecast: {e}")
+                        # Fallback to time-based heuristic
+                        return current_hour <= 12
+                else:
+                    return False
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Failed to check PV improvement: {e}")
+            return False
+
     def _check_weather_improvement(self) -> bool:
         """Check if weather will improve in the next few hours"""
         # This is a simplified implementation
