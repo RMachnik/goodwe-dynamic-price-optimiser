@@ -30,6 +30,32 @@ from flask_cors import CORS
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def format_uptime_human_readable(seconds: float) -> str:
+    """Convert seconds to human-readable uptime format"""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    elif seconds < 3600:  # Less than 1 hour
+        minutes = int(seconds // 60)
+        remaining_seconds = int(seconds % 60)
+        if remaining_seconds == 0:
+            return f"{minutes}m"
+        else:
+            return f"{minutes}m {remaining_seconds}s"
+    elif seconds < 86400:  # Less than 1 day
+        hours = int(seconds // 3600)
+        remaining_minutes = int((seconds % 3600) // 60)
+        if remaining_minutes == 0:
+            return f"{hours}h"
+        else:
+            return f"{hours}h {remaining_minutes}m"
+    else:  # 1 day or more
+        days = int(seconds // 86400)
+        remaining_hours = int((seconds % 86400) // 3600)
+        if remaining_hours == 0:
+            return f"{days}d"
+        else:
+            return f"{days}d {remaining_hours}h"
+
 class LogWebServer:
     """Simple HTTP server for log access and system monitoring"""
     
@@ -593,6 +619,7 @@ class LogWebServer:
                 'coordinator_pid': coordinator_pid,
                 'log_files': log_files,
                 'server_uptime': time.time() - self.start_time if hasattr(self, 'start_time') else 0,
+                'server_uptime_human': format_uptime_human_readable(time.time() - self.start_time if hasattr(self, 'start_time') else 0),
                 'data_source': data_source
             }
         except ImportError:
@@ -1265,7 +1292,7 @@ class LogWebServer:
                     detailsEl.innerHTML = `
                         <p><strong>Timestamp:</strong> ${data.timestamp}</p>
                         ${data.coordinator_pid ? `<p><strong>PID:</strong> ${data.coordinator_pid}</p>` : ''}
-                        <p><strong>Server Uptime:</strong> ${Math.round(data.server_uptime)}s</p>
+                        <p><strong>Server Uptime:</strong> ${data.server_uptime_human || Math.round(data.server_uptime) + 's'}</p>
                     `;
                 })
                 .catch(error => {
@@ -1316,7 +1343,7 @@ class LogWebServer:
                         </div>
                         <div class="system-health">
                             <span class="health-indicator health-${data.system_health.status}">${data.system_health.status.toUpperCase()}</span>
-                            <span>Uptime: ${data.system_health.uptime_hours}h</span>
+                            <span>Uptime: ${data.system_health.uptime_human || data.system_health.uptime_hours + 'h'}</span>
                         </div>
                     `;
                     document.getElementById('current-state').innerHTML = stateHtml;
@@ -3141,6 +3168,7 @@ class LogWebServer:
                     'status': 'healthy' if real_data.get('system_health', {}).get('status') == 'healthy' else 'warning',
                     'last_error': real_data.get('system_health', {}).get('last_error'),
                     'uptime_hours': real_data.get('uptime_seconds', 0) / 3600 if real_data.get('uptime_seconds') else 0,
+                    'uptime_human': format_uptime_human_readable(real_data.get('uptime_seconds', 0)) if real_data.get('uptime_seconds') else '0s',
                     'data_quality': real_data.get('system_health', {}).get('data_quality', 'good')
                 }
             }
@@ -3216,6 +3244,7 @@ class LogWebServer:
                     'status': 'healthy',
                     'last_error': None,
                     'uptime_hours': (time.time() - self.start_time) / 3600 if hasattr(self, 'start_time') else 0,
+                    'uptime_human': format_uptime_human_readable(time.time() - self.start_time if hasattr(self, 'start_time') else 0),
                     'data_quality': 'good'
                 }
             }
@@ -3308,6 +3337,7 @@ class LogWebServer:
                     'status': 'healthy',
                     'last_error': None,
                     'uptime_hours': 72.5,
+                    'uptime_human': '3d 0h',
                     'data_quality': 'excellent'
                 }
             }
