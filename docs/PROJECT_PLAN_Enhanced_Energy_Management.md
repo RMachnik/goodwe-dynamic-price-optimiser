@@ -1026,16 +1026,33 @@ The enhanced dashboard provides comprehensive monitoring and decision intelligen
 - **System Health Status**: Uptime, data quality, and error tracking
 - **Performance Metrics**: Decision counts, confidence averages, efficiency scores
 
+**📈 Time Series Visualization**
+- **Dual-Axis Chart**: Battery SOC and PV production over time (last 24 hours)
+- **Real Data Integration**: Uses actual inverter data with realistic historical patterns
+- **Interactive Features**: Hover tooltips, zoom, pan capabilities
+- **Data Summary**: SOC range, PV peak, data source indicators
+- **Auto-refresh**: Updates every 30 seconds with fresh inverter data
+- **API Endpoint**: `/historical-data` for time series data access
+
 **🌐 Modern Web Interface**
-- **Tabbed Interface**: Overview, Decisions, Metrics, and Logs tabs
+- **Tabbed Interface**: Overview, Decisions, Battery Selling, Time Series, Metrics, and Logs tabs
 - **Real-time Updates**: Auto-refreshing data every 30 seconds
 - **Responsive Design**: Works on desktop and mobile devices
 - **Dark Mode Support**: Toggle between light and dark themes with persistent preference
-- **API Endpoints**: `/decisions`, `/metrics`, `/current-state` for data access
+- **API Endpoints**: `/decisions`, `/metrics`, `/current-state`, `/historical-data` for data access
 
 > **📖 For detailed dashboard documentation, see [Enhanced Dashboard Documentation](ENHANCED_DASHBOARD.md)**
 
-- [ ] **5.1.2**: Implement alerting system
+- ✅ **5.1.2**: Implement Time Series Visualization
+  - Dual-axis chart for SOC and PV production over time
+  - Real data integration with historical pattern generation
+  - Interactive Chart.js visualization with tooltips and zoom
+  - API endpoint for historical data access
+  - Auto-refresh functionality and data summary
+  - **Estimated Time**: 6-8 hours
+  - **Status**: COMPLETED
+
+- [ ] **5.1.3**: Implement alerting system
   - Price alerts for optimal charging
   - Battery health warnings
   - System status notifications

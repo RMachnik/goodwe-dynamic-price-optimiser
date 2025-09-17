@@ -59,6 +59,7 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **Historical Data Integration**: Includes older charging decisions for comprehensive metrics
 - **Contextual Information**: Shows current system state and why system is waiting
 - **Helpful Tooltips**: Explains what each metric means for better understanding
+- **Time Series Visualization**: NEW - Dual-axis chart showing Battery SOC and PV production over time
 
 ### **New Documentation**
 - [Smart Critical Charging Guide](docs/SMART_CRITICAL_CHARGING.md)
@@ -394,6 +395,13 @@ open http://localhost:8080
 ```
 
 **Key Features:**
+- **Time Series Tab**: NEW - Interactive dual-axis chart showing:
+  - Battery SOC percentage over time (left Y-axis, 0-100%)
+  - PV production in kW over time (right Y-axis, 0-max)
+  - 24-hour historical data with 1-minute resolution
+  - Real-time data updates every 30 seconds
+  - Interactive tooltips and zoom capabilities
+  - Data summary with SOC range and PV peak statistics
 - **Decision Intelligence**: Real-time charging decision monitoring and analysis
 - **Performance Metrics**: Cost savings, efficiency scoring, and system health
 - **Interactive Analytics**: Charts and visualizations for data analysis
