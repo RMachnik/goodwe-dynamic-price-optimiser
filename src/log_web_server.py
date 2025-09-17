@@ -3336,21 +3336,22 @@ class LogWebServer:
                     # Look for the latest status line
                     latest_status = None
                     for line in reversed(lines[-50:]):  # Check last 50 lines
-                        if "Status - State:" in line:
+                        if "Current conditions:" in line:
                             latest_status = line.strip()
                             break
                     
                     if latest_status:
-                        # Parse the status line: "Status - State: monitoring, Battery: 70%, PV: 0W, Charging: False"
+                        # Parse the status line: "Current conditions: Battery 40%, PV 0.0kW, Consumption 0.0kW"
                         import re
-                        battery_match = re.search(r'Battery: (\d+)%', latest_status)
-                        pv_match = re.search(r'PV: (\d+)W', latest_status)
-                        charging_match = re.search(r'Charging: (True|False)', latest_status)
+                        battery_match = re.search(r'Battery (\d+)%', latest_status)
+                        pv_match = re.search(r'PV ([\d.]+)kW', latest_status)
+                        consumption_match = re.search(r'Consumption ([\d.]+)kW', latest_status)
                         
-                        if battery_match and pv_match and charging_match:
+                        if battery_match and pv_match and consumption_match:
                             battery_soc = int(battery_match.group(1))
-                            pv_power = int(pv_match.group(1))
-                            is_charging = charging_match.group(1) == 'True'
+                            pv_power = float(pv_match.group(1)) * 1000  # Convert kW to W
+                            consumption_power = float(consumption_match.group(1)) * 1000  # Convert kW to W
+                            is_charging = pv_power > consumption_power  # Estimate charging based on PV vs consumption
                             
                             logger.info(f"Successfully parsed real data: Battery {battery_soc}%, PV {pv_power}W, Charging {is_charging}")
                             
