@@ -59,19 +59,33 @@ timing_awareness:
 - **Reason**: Battery safety override
 - **Price**: Ignored (safety first)
 
-### Critical Level (6-10% SOC)
-The system analyzes three factors:
+### Critical Level (6-12% SOC)
+The system analyzes multiple factors with enhanced intelligence:
 
 1. **Current Price**
    - If ≤ 0.35 PLN/kWh → Charge immediately
    - If > 0.35 PLN/kWh → Continue analysis
 
-2. **Better Price Available**
-   - If better price within 6 hours AND savings ≥ 30% → Wait
-   - Otherwise → Charge now
+2. **Dynamic Wait Time Calculation**
+   - **High Savings (80%+)**: Wait up to 9 hours (1.5x base wait time)
+   - **Medium Savings (40-80%)**: Wait up to 6 hours (base wait time)
+   - **Low Savings (<40%)**: Wait up to 4.2 hours (0.7x base wait time)
+   - **Battery Level Adjustment**: Lower battery = shorter wait time
 
-3. **Safety Fallback**
+3. **Weather & PV Forecast Integration**
+   - **Morning Hours (6-12)**: Consider PV improvement potential
+   - **Afternoon Hours (13-16)**: Moderate PV improvement consideration
+   - **Evening Hours (17+)**: No PV waiting (sun setting)
+
+4. **Intelligent Decision Matrix**
+   - **Both PV & Price Improving**: Wait for better option
+   - **Only PV Improving**: Wait for free solar charging
+   - **Only Price Improving**: Wait for better price
+   - **Neither Improving**: Charge immediately
+
+5. **Safety Fallback**
    - If no price data available → Charge immediately
+   - Very critical battery (≤8%) → More conservative waiting
 
 ## Example Scenarios
 
@@ -89,7 +103,18 @@ The system analyzes three factors:
 - **Decision**: Charge immediately
 - **Reason**: "Critical battery (8%) + acceptable price (0.300 PLN/kWh ≤ 0.35 PLN/kWh)"
 
-### Scenario 3: High Price, Good Savings Soon
+### Scenario 3: Enhanced Logic - High Price, Great Savings, Morning PV
+- **Battery**: 11% SOC
+- **Current Price**: 0.667 PLN/kWh
+- **Better Price**: 0.130 PLN/kWh at 13:47 (7 hours away)
+- **Savings**: 80.5% (0.667 → 0.130)
+- **Time**: 6:47 AM (morning)
+- **Decision**: Wait
+- **Reason**: "Critical battery (11%) but PV production improving soon + good price savings in 7h (80.5% savings)"
+- **Dynamic Wait Time**: 9.0 hours (high savings + morning PV potential)
+- **Enhanced Logic**: Considers both price savings AND PV improvement potential
+
+### Scenario 4: High Price, Good Savings Soon (Old Logic)
 - **Battery**: 8% SOC
 - **Current Price**: 1.5 PLN/kWh
 - **Better Price**: 0.4 PLN/kWh at 23:00 (2 hours away)
@@ -97,7 +122,7 @@ The system analyzes three factors:
 - **Decision**: Wait
 - **Reason**: "Critical battery (8%) but much cheaper price in 2h (0.400 vs 1.500 PLN/kWh, 73.3% savings)"
 
-### Scenario 4: High Price, Long Wait
+### Scenario 5: High Price, Long Wait
 - **Battery**: 8% SOC
 - **Current Price**: 1.5 PLN/kWh
 - **Better Price**: 0.4 PLN/kWh at 06:00 (8 hours away)

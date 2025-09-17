@@ -29,6 +29,8 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **Weather-Aware Decisions**: System now considers PV forecast even at critical battery levels
 - **Smart PV Waiting**: Only waits for PV improvement if ≥2kW within 30 minutes AND price >0.4 PLN/kWh
 - **Better Cost Control**: Prevents unnecessary expensive charging while maintaining safety
+- **Dynamic Wait Times**: High savings (80%+) can wait up to 9 hours, considering both price and PV improvement
+- **Intelligent Decision Matrix**: Considers both price savings AND weather/PV forecast for optimal decisions
 
 ## 🆕 **Recent Updates (December 2024)**
 
