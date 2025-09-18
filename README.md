@@ -21,6 +21,20 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 
 **For detailed implementation strategy, technical specifications, and current progress, see the [Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md).**
 
+## 📊 **Historic Data Storage**
+
+The system currently uses file-based JSON storage with in-memory data limited to 24 hours. For advanced analytics and long-term data retention, comprehensive plans are available:
+
+- **[Historic Data Storage Plan](docs/HISTORIC_DATA_STORAGE_PLAN.md)**: Complete strategy for time-series databases, relational databases, and cloud storage
+- **[Implementation Roadmap](docs/HISTORIC_DATA_IMPLEMENTATION_ROADMAP.md)**: Step-by-step implementation guide with practical examples
+
+**Future Enhancements Ready for Implementation:**
+- **Time-Series Database**: InfluxDB/TimescaleDB for high-frequency energy data
+- **Relational Database**: PostgreSQL/SQLite for structured data and analytics
+- **Data Compression**: Gzip compression for efficient storage
+- **Cloud Archival**: Automated archival to AWS S3, Google Cloud, or Azure
+- **Advanced Analytics**: Complex data analysis and trend reporting
+
 ## 🆕 **Latest Updates (January 2025)**
 
 ### **Enhanced Critical Battery Charging**

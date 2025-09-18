@@ -157,10 +157,49 @@ logging:
 
 # Data Storage Configuration
 data_storage:
-  energy_data_dir: "/opt/goodwe-dynamic-price-optimiser/out/energy_data"
-  charging_schedules_dir: "/opt/goodwe-dynamic-price-optimiser/out/charging_schedules"
-  system_state_dir: "/opt/goodwe-dynamic-price-optimiser/out/system_state"
-  backup_interval_hours: 24    # How often to backup data
+  # Current file-based storage (enhanced with compression)
+  file_storage:
+    enabled: true
+    energy_data_dir: "/opt/goodwe-dynamic-price-optimiser/out/energy_data"
+    charging_schedules_dir: "/opt/goodwe-dynamic-price-optimiser/out/charging_schedules"
+    system_state_dir: "/opt/goodwe-dynamic-price-optimiser/out/system_state"
+    compression: true           # Enable gzip compression for JSON files
+    retention_days: 7          # Keep only 7 days in files (reduced from 24h in-memory)
+    backup_interval_hours: 24  # How often to backup data
+  
+  # Future database storage (ready for implementation)
+  database_storage:
+    enabled: false             # Set to true when databases are configured
+    timeseries_db:
+      type: "influxdb"         # or "timescaledb"
+      enabled: false
+      url: "http://localhost:8086"
+      token: "${INFLUXDB_TOKEN}"
+      org: "goodwe-energy"
+      bucket: "energy_data"
+      retention_policy: "30d"  # 30 days retention
+    
+    relational_db:
+      type: "postgresql"       # or "sqlite"
+      enabled: false
+      host: "localhost"
+      port: 5432
+      database: "goodwe_energy"
+      username: "${DB_USERNAME}"
+      password: "${DB_PASSWORD}"
+      ssl_mode: "prefer"
+    
+    # Data archival configuration
+    archival:
+      enabled: false
+      strategy: "tiered"        # hot, warm, cold storage
+      hot_retention_days: 7     # Hot data in database
+      warm_retention_days: 90   # Warm data in compressed files
+      cold_retention_days: 365  # Cold data in cloud storage
+      cloud_storage:
+        provider: "aws_s3"      # or "gcp", "azure"
+        bucket: "goodwe-energy-archive"
+        region: "eu-central-1"
 
 # Performance Monitoring Configuration
 performance_monitoring:
