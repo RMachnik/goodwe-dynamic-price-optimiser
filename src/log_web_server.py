@@ -3385,22 +3385,22 @@ class LogWebServer:
                     # Look for the latest status line
                     latest_status = None
                     for line in reversed(lines[-50:]):  # Check last 50 lines
-                        if "Current conditions:" in line:
+                        if "Status - State:" in line and "Battery:" in line:
                             latest_status = line.strip()
                             break
                     
                     if latest_status:
-                        # Parse the status line: "Current conditions: Battery 40%, PV 0.0kW, Consumption 0.0kW"
+                        # Parse the status line: "2025-09-18 22:41:40,252 - INFO - Status - State: monitoring, Battery: 72%, PV: 0W, Charging: False"
                         import re
-                        battery_match = re.search(r'Battery (\d+)%', latest_status)
-                        pv_match = re.search(r'PV ([\d.]+)kW', latest_status)
-                        consumption_match = re.search(r'Consumption ([\d.]+)kW', latest_status)
+                        battery_match = re.search(r'Battery: (\d+)%', latest_status)
+                        pv_match = re.search(r'PV: (\d+)W', latest_status)
+                        charging_match = re.search(r'Charging: (True|False)', latest_status)
                         
-                        if battery_match and pv_match and consumption_match:
+                        if battery_match and pv_match and charging_match:
                             battery_soc = int(battery_match.group(1))
-                            pv_power = float(pv_match.group(1)) * 1000  # Convert kW to W
-                            consumption_power = float(consumption_match.group(1)) * 1000  # Convert kW to W
-                            is_charging = pv_power > consumption_power  # Estimate charging based on PV vs consumption
+                            pv_power = float(pv_match.group(1))  # Already in watts
+                            is_charging = charging_match.group(1) == "True"
+                            consumption_power = 0  # Not available in this format
                             
                             # Reduce logging frequency - only log once per minute
                             current_time = time.time()
@@ -3434,8 +3434,17 @@ class LogWebServer:
                 logger.warning(f"Failed to parse log data: {e}")
                 return None
             
-            # Fallback: Try to get data directly from the enhanced data collector
+            # Fallback: Try to get data directly from the enhanced data collector (with timeout)
             try:
+                import signal
+                
+                def timeout_handler(signum, frame):
+                    raise TimeoutError("Data collection timeout")
+                
+                # Set a 5-second timeout
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(5)
+                
                 from enhanced_data_collector import EnhancedDataCollector
                 import asyncio
                 
@@ -3448,14 +3457,20 @@ class LogWebServer:
                     
                     if current_data and current_data.get('battery', {}).get('soc_percent') != 'Unknown':
                         logger.info("Successfully retrieved real-time data from inverter")
+                        signal.alarm(0)  # Cancel timeout
                         return self._convert_real_data_to_dashboard_format(current_data)
                     else:
                         logger.warning("Data collector returned unknown values")
+                        signal.alarm(0)  # Cancel timeout
                         return None
                 else:
                     logger.warning("Failed to initialize data collector")
+                    signal.alarm(0)  # Cancel timeout
                     return None
                     
+            except TimeoutError:
+                logger.warning("Data collection timed out")
+                return None
             except Exception as e:
                 logger.warning(f"Failed to get real-time data: {e}")
                 return None
