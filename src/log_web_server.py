@@ -2979,7 +2979,7 @@ class LogWebServer:
             decisions = []
             
             # Load charging decisions
-            if decision_type in ['all', 'charging', 'wait']:
+            if decision_type in ['all', 'charging', 'wait'] or decision_type not in ['battery_selling']:
                 charging_files = list(energy_data_dir.glob("charging_decision_*.json"))
                 for file_path in sorted(charging_files, key=lambda x: x.stat().st_mtime, reverse=True)[:max_files]:
                     try:
@@ -2991,6 +2991,9 @@ class LogWebServer:
                             if decision_time.replace(tzinfo=None) < time_threshold:
                                 continue
                                 
+                            # Add filename for categorization
+                            decision_data['filename'] = file_path.name
+                            
                             # No filtering here - we'll do categorization after loading all decisions
                                 
                             decisions.append(decision_data)
@@ -2998,7 +3001,7 @@ class LogWebServer:
                         logger.warning(f"Failed to read charging decision file {file_path}: {e}")
             
             # Load battery selling decisions
-            if decision_type in ['all', 'battery_selling']:
+            if decision_type in ['all', 'battery_selling'] or decision_type not in ['charging', 'wait']:
                 selling_files = list(energy_data_dir.glob("battery_selling_decision_*.json"))
                 for file_path in sorted(selling_files, key=lambda x: x.stat().st_mtime, reverse=True)[:max_files]:
                     try:
@@ -3010,7 +3013,8 @@ class LogWebServer:
                             if decision_time.replace(tzinfo=None) < time_threshold:
                                 continue
                                 
-                            # Add decision type for battery selling
+                            # Add filename and decision type for battery selling
+                            decision_data['filename'] = file_path.name
                             decision_data['action'] = 'battery_selling'
                             decisions.append(decision_data)
                     except Exception as e:
@@ -3019,7 +3023,7 @@ class LogWebServer:
             # Sort all decisions by timestamp (newest first)
             decisions.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
             
-            # Categorize decisions based on actual decision intent, not just action field
+            # Categorize decisions based on actual decision intent and content
             charging_decisions = []
             wait_decisions = []
             battery_selling_decisions = []
@@ -3030,16 +3034,24 @@ class LogWebServer:
                 reason = decision.get('reason', '') or decision.get('reasoning', '')
                 reason_lower = reason.lower()
                 
+                # Check if this is a battery selling decision file
+                filename = decision.get('filename', '')
+                is_battery_selling_file = 'battery_selling_decision' in filename
+                
                 # Battery selling decisions
-                if action == 'battery_selling' or decision_data_type == 'battery_selling':
+                if (action == 'battery_selling' or 
+                    decision_data_type == 'battery_selling' or 
+                    is_battery_selling_file):
                     battery_selling_decisions.append(decision)
                 # Charging decisions - look for actual charging intent in both action and reason
+                # Only categorize as charging if it's from a charging_decision file AND has charging intent
                 elif (action in ['charge', 'charging', 'start_pv_charging', 'start_grid_charging'] or
                       'start charging' in reason_lower or
                       'charging from' in reason_lower or
                       'pv charging' in reason_lower or
                       'grid charging' in reason_lower or
-                      'charging started' in reason_lower):
+                      'charging started' in reason_lower or
+                      ('charging_decision' in filename and 'wait' not in filename)):
                     charging_decisions.append(decision)
                 # Wait decisions - any decision that's not charging or battery selling
                 elif action == 'wait':
