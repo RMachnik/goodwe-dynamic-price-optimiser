@@ -3302,8 +3302,13 @@ class LogWebServer:
             return 0.0
     
     def _get_real_price_data(self) -> Optional[Dict[str, Any]]:
-        """Get real price data using AutomatedPriceCharger (correct SC calculation)"""
+        """Get real price data using AutomatedPriceCharger (correct SC calculation) with caching"""
         try:
+            # Check cache first (cache for 1 hour since prices don't change during the day)
+            cached_data = self._get_cached_data('real_price_data', ttl=3600)  # Cache for 1 hour
+            if cached_data:
+                return cached_data
+            
             from automated_price_charging import AutomatedPriceCharger
             from datetime import datetime, timedelta
             
@@ -3342,13 +3347,19 @@ class LogWebServer:
             # Calculate average price
             avg_price = sum(price for price, _ in prices) / len(prices)
             
-            return {
+            result = {
                 'current_price_pln_kwh': round(current_price_kwh, 4) if current_price_kwh else 0.0,
                 'cheapest_price_pln_kwh': round(cheapest_price, 4),
                 'cheapest_hour': f"{cheapest_hour:02d}:00",
                 'average_price_pln_kwh': round(avg_price, 4),
-                'price_trend': 'stable'  # Could be enhanced with trend analysis
+                'price_trend': 'stable',  # Could be enhanced with trend analysis
+                'data_source': 'PSE API (CSDAC-PLN)',
+                'last_updated': datetime.now().isoformat()
             }
+            
+            # Cache the result
+            self._set_cached_data('real_price_data', result)
+            return result
             
         except Exception as e:
             logger.error(f"Failed to fetch real price data using AutomatedPriceCharger: {e}")
