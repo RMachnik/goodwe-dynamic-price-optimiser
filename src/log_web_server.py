@@ -3434,46 +3434,8 @@ class LogWebServer:
                 logger.warning(f"Failed to parse log data: {e}")
                 return None
             
-            # Fallback: Try to get data directly from the enhanced data collector (with timeout)
-            try:
-                import signal
-                
-                def timeout_handler(signum, frame):
-                    raise TimeoutError("Data collection timeout")
-                
-                # Set a 5-second timeout
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(5)
-                
-                from enhanced_data_collector import EnhancedDataCollector
-                import asyncio
-                
-                # Create a temporary data collector to get current data
-                config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
-                data_collector = EnhancedDataCollector(str(config_path))
-                if asyncio.run(data_collector.initialize()):
-                    asyncio.run(data_collector.collect_comprehensive_data())
-                    current_data = data_collector.get_current_data()
-                    
-                    if current_data and current_data.get('battery', {}).get('soc_percent') != 'Unknown':
-                        logger.info("Successfully retrieved real-time data from inverter")
-                        signal.alarm(0)  # Cancel timeout
-                        return self._convert_real_data_to_dashboard_format(current_data)
-                    else:
-                        logger.warning("Data collector returned unknown values")
-                        signal.alarm(0)  # Cancel timeout
-                        return None
-                else:
-                    logger.warning("Failed to initialize data collector")
-                    signal.alarm(0)  # Cancel timeout
-                    return None
-                    
-            except TimeoutError:
-                logger.warning("Data collection timed out")
-                return None
-            except Exception as e:
-                logger.warning(f"Failed to get real-time data: {e}")
-                return None
+            # Skip the fallback data collection to avoid timeouts
+            # The log parsing above should be sufficient for real data
             
             # Fallback: Check for recent state files
             project_root = Path(__file__).parent.parent
