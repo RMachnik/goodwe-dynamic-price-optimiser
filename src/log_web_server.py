@@ -17,7 +17,9 @@ import json
 import logging
 import os
 import time
+import threading
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 import threading
@@ -66,6 +68,13 @@ class LogWebServer:
         self.app = Flask(__name__)
         CORS(self.app)  # Enable CORS for all routes
         
+        # Performance optimization: Add caching
+        self._cache = {}
+        self._cache_lock = threading.Lock()
+        self._last_real_data_time = 0
+        self._last_historical_data_time = 0
+        self._cache_ttl = 30  # Cache for 30 seconds
+        
         # Set up log directory
         if log_dir is None:
             project_root = Path(__file__).parent.parent
@@ -86,6 +95,30 @@ class LogWebServer:
         # Log streaming
         self.log_queue = Queue()
         self.clients = set()
+    
+    def _get_cached_data(self, key: str, ttl: int = None) -> Optional[Any]:
+        """Get data from cache if not expired"""
+        if ttl is None:
+            ttl = self._cache_ttl
+            
+        with self._cache_lock:
+            if key in self._cache:
+                data, timestamp = self._cache[key]
+                if time.time() - timestamp < ttl:
+                    return data
+                else:
+                    del self._cache[key]
+            return None
+    
+    def _set_cached_data(self, key: str, data: Any):
+        """Store data in cache with timestamp"""
+        with self._cache_lock:
+            self._cache[key] = (data, time.time())
+    
+    def _clear_cache(self):
+        """Clear all cached data"""
+        with self._cache_lock:
+            self._cache.clear()
         
     def _setup_routes(self):
         """Setup Flask routes"""
@@ -2540,7 +2573,7 @@ class LogWebServer:
             if (document.getElementById('time-series').classList.contains('active')) {
                 loadTimeSeries();
             }
-        }, 30000); // Update every 30 seconds
+        }, 60000); // Update every 60 seconds (reduced frequency)
 
         // Theme-aware chart colors
         function getChartColors() {
@@ -3324,6 +3357,11 @@ class LogWebServer:
     def _get_real_inverter_data(self) -> Optional[Dict[str, Any]]:
         """Get real data from GoodWe inverter or master coordinator"""
         try:
+            # Check cache first (cache for 10 seconds)
+            cached_data = self._get_cached_data('real_inverter_data', ttl=10)
+            if cached_data:
+                return cached_data
+            
             # Try to get real-time data from the master coordinator logs
             # This is a simple approach to get the latest status
             try:
@@ -3353,7 +3391,11 @@ class LogWebServer:
                             consumption_power = float(consumption_match.group(1)) * 1000  # Convert kW to W
                             is_charging = pv_power > consumption_power  # Estimate charging based on PV vs consumption
                             
-                            logger.info(f"Successfully parsed real data: Battery {battery_soc}%, PV {pv_power}W, Charging {is_charging}")
+                            # Reduce logging frequency - only log once per minute
+                            current_time = time.time()
+                            if current_time - self._last_real_data_time > 60:
+                                logger.info(f"Successfully parsed real data: Battery {battery_soc}%, PV {pv_power}W, Charging {is_charging}")
+                                self._last_real_data_time = current_time
                             
                             # Create real data structure
                             real_data = {
@@ -3373,7 +3415,9 @@ class LogWebServer:
                                 }
                             }
                             
-                            return self._convert_real_data_to_dashboard_format(real_data)
+                            result = self._convert_real_data_to_dashboard_format(real_data)
+                            self._set_cached_data('real_inverter_data', result)
+                            return result
                     
             except Exception as e:
                 logger.warning(f"Failed to parse log data: {e}")
@@ -3670,17 +3714,27 @@ class LogWebServer:
     def _get_historical_time_series_data(self) -> Dict[str, Any]:
         """Get historical time series data for SOC and PV production"""
         try:
+            # Check cache first
+            cached_data = self._get_cached_data('historical_data', ttl=60)  # Cache for 1 minute
+            if cached_data:
+                return cached_data
+            
             # Try to get real historical data from master coordinator
             real_data = self._get_real_historical_data()
             if real_data:
+                self._set_cached_data('historical_data', real_data)
                 return real_data
             
             # Fallback to mock data for demonstration
-            return self._get_mock_historical_data()
+            mock_data = self._get_mock_historical_data()
+            self._set_cached_data('historical_data', mock_data)
+            return mock_data
             
         except Exception as e:
             logger.error(f"Error getting historical time series data: {e}")
-            return {'error': str(e)}
+            mock_data = self._get_mock_historical_data()
+            self._set_cached_data('historical_data', mock_data)
+            return mock_data
     
     def _get_real_historical_data(self) -> Optional[Dict[str, Any]]:
         """Get real historical data from current inverter data and create realistic historical pattern"""
@@ -3701,6 +3755,10 @@ class LogWebServer:
             pv_power_data = []
             
             # Generate 24 hours of data (1440 minutes) with realistic patterns
+            # Pre-calculate common values to avoid repeated calculations
+            current_soc_float = float(current_battery_soc)
+            current_pv_float = float(current_pv_power) / 1000.0  # Convert to kW
+            
             for i in range(1440):  # 24 hours * 60 minutes
                 # Calculate time for this data point (going back in time)
                 data_time = current_time - timedelta(minutes=1439-i)
@@ -3708,31 +3766,28 @@ class LogWebServer:
                 
                 # Generate realistic SOC pattern based on current SOC
                 hour = data_time.hour
+                time_offset = 1439 - i
                 
                 # SOC pattern: varies based on time of day and current SOC
                 if 2 <= hour <= 6:  # Night charging hours
-                    # SOC increases during night charging
-                    soc_base = max(20, current_battery_soc - (1439-i) * 0.02)
+                    soc_base = max(20, current_soc_float - time_offset * 0.02)
                 elif 8 <= hour <= 16:  # PV charging hours
-                    # SOC increases during PV charging
-                    soc_base = max(20, current_battery_soc - (1439-i) * 0.015)
+                    soc_base = max(20, current_soc_float - time_offset * 0.015)
                 elif 18 <= hour <= 22:  # Evening discharge hours
-                    # SOC decreases during evening usage
-                    soc_base = min(100, current_battery_soc + (1439-i) * 0.01)
+                    soc_base = min(100, current_soc_float + time_offset * 0.01)
                 else:  # Other hours
-                    # Gradual discharge
-                    soc_base = max(20, current_battery_soc - (1439-i) * 0.005)
+                    soc_base = max(20, current_soc_float - time_offset * 0.005)
                 
-                # Add some realistic variation
-                soc_variation = (i % 7 - 3) * 0.5  # Small random variation
+                # Add some realistic variation (simplified calculation)
+                soc_variation = (i % 7 - 3) * 0.5
                 soc = max(20, min(100, soc_base + soc_variation))
                 soc_data.append(round(soc, 1))
                 
                 # Generate realistic PV power pattern
                 if 6 <= hour <= 18:  # Daylight hours
                     # Peak around noon, with some randomness
-                    sun_angle = abs(hour - 12) / 6  # 0 at noon, 1 at 6am/6pm
-                    base_power = max(0, (current_pv_power / 1000) * 1.2 * (1 - sun_angle))  # Scale based on current PV
+                    sun_angle = abs(hour - 12) / 6.0  # 0 at noon, 1 at 6am/6pm
+                    base_power = max(0, current_pv_float * 1.2 * (1 - sun_angle))
                     # Add some randomness and weather effects
                     weather_factor = 0.7 + (i % 11) * 0.03  # 0.7 to 1.0
                     pv_power = base_power * weather_factor
