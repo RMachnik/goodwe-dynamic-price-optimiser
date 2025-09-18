@@ -43,11 +43,11 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
         """Create comprehensive test decision data"""
         base_time = datetime.now() - timedelta(hours=2)
         
-        # Test Case 1: Charging decisions with proper action values
+        # Test Case 1: Charging decisions with action="wait" but charging intent
         charging_decisions_with_wait_action = [
             {
                 "timestamp": (base_time + timedelta(minutes=10)).isoformat(),
-                "action": "start_grid_charging",
+                "action": "wait",
                 "source": "grid",
                 "duration": 0,
                 "energy_kwh": 0,
@@ -65,7 +65,7 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
             },
             {
                 "timestamp": (base_time + timedelta(minutes=20)).isoformat(),
-                "action": "start_pv_charging",
+                "action": "wait",
                 "source": "pv",
                 "duration": 0,
                 "energy_kwh": 0,
@@ -212,16 +212,21 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Get only charging decisions
-            history = server._get_decision_history(time_range='24h')
+            history = server._get_decision_history(time_range='24h', decision_type='charging')
             
-            # Verify counts (no filtering - all decisions returned)
+            # Verify counts
             self.assertEqual(history['charging_count'], 3, "Should have 3 charging decisions")
-            self.assertEqual(history['wait_count'], 2, "Should have 2 wait decisions")
-            self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions")
-            self.assertEqual(history['total_count'], 7, "Should have 7 total decisions (all types)")
+            self.assertEqual(history['wait_count'], 0, "Should have 0 wait decisions in charging filter")
+            self.assertEqual(history['battery_selling_count'], 0, "Should have 0 battery selling decisions in charging filter")
+            self.assertEqual(history['total_count'], 3, "Should have 3 total decisions in charging filter")
             
-            # Verify that categorization counts are correct (no filtering, all decisions returned)
-            self.assertEqual(len(history['decisions']), 7, "Should return all 7 decisions")
+            # Verify all returned decisions are from charging_decision files
+            for decision in history['decisions']:
+                filename = decision.get('filename', '')
+                self.assertTrue(
+                    'charging_decision' in filename and 'wait' not in filename,
+                    f"All charging filter decisions should be from charging_decision files: {filename}"
+                )
     
     def test_wait_filter_returns_only_wait_decisions(self):
         """Test that wait filter returns only wait decisions"""
@@ -231,16 +236,21 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Get only wait decisions
-            history = server._get_decision_history(time_range='24h')
+            history = server._get_decision_history(time_range='24h', decision_type='wait')
             
-            # Verify counts (no filtering - all decisions returned)
-            self.assertEqual(history['charging_count'], 3, "Should have 3 charging decisions")
-            self.assertEqual(history['wait_count'], 2, "Should have 2 wait decisions")
-            self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions")
-            self.assertEqual(history['total_count'], 7, "Should have 7 total decisions (all types)")
+            # Verify counts
+            self.assertEqual(history['charging_count'], 0, "Should have 0 charging decisions in wait filter")
+            self.assertEqual(history['wait_count'], 2, "Should have 2 wait decisions in wait filter")
+            self.assertEqual(history['battery_selling_count'], 0, "Should have 0 battery selling decisions in wait filter")
+            self.assertEqual(history['total_count'], 2, "Should have 2 total decisions in wait filter")
             
-            # Verify that categorization counts are correct (no filtering, all decisions returned)
-            self.assertEqual(len(history['decisions']), 7, "Should return all 7 decisions")
+            # Verify all returned decisions are genuine wait decisions
+            for decision in history['decisions']:
+                filename = decision.get('filename', '')
+                self.assertTrue(
+                    'wait' in filename,
+                    f"All wait filter decisions should be from wait files: {filename}"
+                )
     
     def test_battery_selling_filter_returns_only_battery_selling_decisions(self):
         """Test that battery selling filter returns only battery selling decisions"""
@@ -250,16 +260,21 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Get only battery selling decisions
-            history = server._get_decision_history(time_range='24h')
+            history = server._get_decision_history(time_range='24h', decision_type='battery_selling')
             
-            # Verify counts (no filtering - all decisions returned)
-            self.assertEqual(history['charging_count'], 3, "Should have 3 charging decisions")
-            self.assertEqual(history['wait_count'], 2, "Should have 2 wait decisions")
-            self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions")
-            self.assertEqual(history['total_count'], 7, "Should have 7 total decisions (all types)")
+            # Verify counts
+            self.assertEqual(history['charging_count'], 0, "Should have 0 charging decisions in battery selling filter")
+            self.assertEqual(history['wait_count'], 0, "Should have 0 wait decisions in battery selling filter")
+            self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions in battery selling filter")
+            self.assertEqual(history['total_count'], 2, "Should have 2 total decisions in battery selling filter")
             
-            # Verify that categorization counts are correct (no filtering, all decisions returned)
-            self.assertEqual(len(history['decisions']), 7, "Should return all 7 decisions")
+            # Verify all returned decisions are from battery_selling_decision files
+            for decision in history['decisions']:
+                filename = decision.get('filename', '')
+                self.assertTrue(
+                    'battery_selling_decision' in filename,
+                    f"All battery selling filter decisions should be from battery_selling_decision files: {filename}"
+                )
     
     def test_all_filter_returns_all_decisions_with_correct_categorization(self):
         """Test that all filter returns all decisions with correct categorization"""
@@ -269,7 +284,7 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Get all decisions
-            history = server._get_decision_history(time_range='24h')
+            history = server._get_decision_history(time_range='24h', decision_type='all')
             
             # Verify counts
             self.assertEqual(history['charging_count'], 3, "Should have 3 charging decisions")
@@ -288,16 +303,20 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
             time_ranges = ['1h', '24h', '7d']
             
             for time_range in time_ranges:
-                # Test that decisions are returned (time range may filter based on age)
-                history = server._get_decision_history(time_range=time_range)
-                # For 1h range, some decisions might be filtered out due to age
-                if time_range == '1h':
-                    self.assertGreaterEqual(history['total_count'], 0, f"Should have some decisions with {time_range}")
-                else:
-                    self.assertEqual(history['charging_count'], 3, f"Should have 3 charging decisions with {time_range}")
-                    self.assertEqual(history['wait_count'], 2, f"Should have 2 wait decisions with {time_range}")
-                    self.assertEqual(history['battery_selling_count'], 2, f"Should have 2 battery selling decisions with {time_range}")
-                    self.assertEqual(history['total_count'], 7, f"Should have 7 total decisions with {time_range}")
+                # Test charging filter
+                charging_history = server._get_decision_history(time_range=time_range, decision_type='charging')
+                self.assertEqual(charging_history['wait_count'], 0, f"Wait count should be 0 for charging filter with {time_range}")
+                self.assertEqual(charging_history['battery_selling_count'], 0, f"Battery selling count should be 0 for charging filter with {time_range}")
+                
+                # Test wait filter
+                wait_history = server._get_decision_history(time_range=time_range, decision_type='wait')
+                self.assertEqual(wait_history['charging_count'], 0, f"Charging count should be 0 for wait filter with {time_range}")
+                self.assertEqual(wait_history['battery_selling_count'], 0, f"Battery selling count should be 0 for wait filter with {time_range}")
+                
+                # Test battery selling filter
+                battery_history = server._get_decision_history(time_range=time_range, decision_type='battery_selling')
+                self.assertEqual(battery_history['charging_count'], 0, f"Charging count should be 0 for battery selling filter with {time_range}")
+                self.assertEqual(battery_history['wait_count'], 0, f"Wait count should be 0 for battery selling filter with {time_range}")
     
     def test_decision_categorization_based_on_filename_pattern(self):
         """Test that decision categorization is based on filename pattern, not just action field"""
@@ -307,7 +326,7 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Get all decisions
-            history = server._get_decision_history(time_range='24h')
+            history = server._get_decision_history(time_range='24h', decision_type='all')
             
             # Verify that decisions are categorized based on filename, not action
             charging_decisions = [d for d in history['decisions'] if 'charging_decision' in d.get('filename', '') and 'wait' not in d.get('filename', '')]
@@ -355,13 +374,10 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Get all decisions including malformed one
-            history = server._get_decision_history(time_range='24h')
+            history = server._get_decision_history(time_range='24h', decision_type='all')
             
-            # Malformed decision with empty action/reason defaults to wait (not counted as charging)
-            # This is correct behavior - filename alone shouldn't make a malformed decision valid
-            self.assertEqual(history['charging_count'], 3, "Malformed decision should not be counted as charging")
-            self.assertEqual(history['wait_count'], 3, "Malformed decision should default to wait (2 original + 1 malformed)")
-            self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions")
+            # Malformed decision should be categorized based on filename (charging_decision)
+            self.assertEqual(history['charging_count'], 4, "Should include malformed charging decision in charging count")
             self.assertEqual(history['total_count'], 8, "Should have 8 total decisions including malformed")
     
     def test_filtering_edge_cases(self):
@@ -372,14 +388,14 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Test with invalid decision type - should default to 'all'
-            history = server._get_decision_history(time_range='24h')
+            history = server._get_decision_history(time_range='24h', decision_type='invalid_type')
             self.assertEqual(history['total_count'], 7, "Should return all decisions for invalid type")
             self.assertEqual(history['charging_count'], 3, "Should have 3 charging decisions for invalid type")
             self.assertEqual(history['wait_count'], 2, "Should have 2 wait decisions for invalid type")
             self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions for invalid type")
             
             # Test with empty time range
-            history = server._get_decision_history(time_range='1s')
+            history = server._get_decision_history(time_range='1s', decision_type='charging')
             # Should return empty or limited results based on time threshold
             self.assertIsInstance(history['total_count'], int, "Should return integer count")
     
@@ -410,7 +426,7 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
             import time
             start_time = time.time()
             
-            history = server._get_decision_history(time_range='7d')
+            history = server._get_decision_history(time_range='7d', decision_type='charging')
             
             end_time = time.time()
             execution_time = end_time - start_time
@@ -418,9 +434,9 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
             # Should complete within reasonable time (less than 1 second)
             self.assertLess(execution_time, 1.0, f"Filtering should complete within 1 second, took {execution_time:.2f}s")
             
-            # Should return correct count (100 new + 7 existing from setup)
+            # Should return correct count (100 new + 3 existing from setup)
             self.assertEqual(history['charging_count'], 103, "Should have 103 charging decisions (100 new + 3 existing)")
-            self.assertEqual(history['total_count'], 107, "Should have 107 total decisions (100 new + 7 existing)")
+            self.assertEqual(history['total_count'], 103, "Should have 103 total decisions (100 new + 3 existing)")
 
 
 if __name__ == '__main__':
