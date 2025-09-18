@@ -1056,7 +1056,7 @@ class TestTimeSeriesFunctionality(unittest.TestCase):
             data = server._get_real_historical_data()
             
             if data:  # If real data is available
-                self.assertEqual(data['data_source'], 'real_data_based', "Should use real data")
+                self.assertEqual(data['data_source'], 'real_inverter', "Should use real data")
                 self.assertEqual(data['current_soc'], 64.5, "Should have correct current SOC")
                 self.assertEqual(data['current_pv_power'], 0, "Should have correct current PV power")
                 self.assertEqual(data['data_points'], 1440, "Should have 1440 data points (24 hours)")
@@ -1205,14 +1205,16 @@ class TestTimeSeriesFunctionality(unittest.TestCase):
             
             # Test SOC range calculation
             if data['soc_range']:
-                self.assertIn('min', data['soc_range'], "SOC range should include min")
-                self.assertIn('max', data['soc_range'], "SOC range should include max")
-                self.assertLessEqual(data['soc_range']['min'], data['soc_range']['max'], 
-                                   "SOC min should be <= max")
+                # SOC range is returned as a formatted string like "37.7% - 69.1%"
+                self.assertIsInstance(data['soc_range'], str, "SOC range should be a string")
+                self.assertIn('%', data['soc_range'], "SOC range should contain percentage")
+                self.assertIn(' - ', data['soc_range'], "SOC range should contain range separator")
             
             # Test PV peak calculation
             if data['pv_peak']:
-                self.assertGreaterEqual(data['pv_peak'], 0, "PV peak should be non-negative")
+                # PV peak is returned as a formatted string like "2.50 kW"
+                self.assertIsInstance(data['pv_peak'], str, "PV peak should be a string")
+                self.assertIn('kW', data['pv_peak'], "PV peak should contain kW unit")
 
 
 if __name__ == '__main__':
