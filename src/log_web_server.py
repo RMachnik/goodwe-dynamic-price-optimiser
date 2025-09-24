@@ -3277,6 +3277,65 @@ class LogWebServer:
         except Exception:
             return 0.0
     
+    def _convert_inverter_status_to_dashboard_format(self, status: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert inverter status to dashboard format"""
+        try:
+            # Get current price data
+            real_price_data = self._get_real_price_data()
+            
+            # Format battery data
+            battery_data = {
+                'soc_percent': status.get('battery_soc', {}).get('value', 0),
+                'voltage': status.get('vbattery1', {}).get('value', 0),
+                'current': status.get('ibattery1', {}).get('value', 0),
+                'power': status.get('pbattery1', {}).get('value', 0),
+                'temperature': status.get('battery_temperature', {}).get('value', 25),
+                'charging_status': status.get('charging_status', False)
+            }
+            
+            # Format grid data
+            grid_data = {
+                'power_w': status.get('meter_active_power_total', {}).get('value', 0),
+                'voltage': status.get('vgrid', {}).get('value', 0),
+                'l1_current_a': status.get('igrid', {}).get('value', 0),
+                'l2_current_a': status.get('igrid2', {}).get('value', 0),
+                'l3_current_a': status.get('igrid3', {}).get('value', 0),
+                'l1_power': status.get('meter_active_power1', {}).get('value', 0),
+                'l2_power': status.get('meter_active_power2', {}).get('value', 0),
+                'l3_power': status.get('meter_active_power3', {}).get('value', 0),
+                'daily_import_kwh': status.get('e_day_imp', {}).get('value', 0),
+                'daily_export_kwh': status.get('e_day_exp', {}).get('value', 0)
+            }
+            
+            # Format PV data
+            pv_data = {
+                'power_w': status.get('ppv', {}).get('value', 0),
+                'daily_production_kwh': status.get('e_day', {}).get('value', 0)
+            }
+            
+            # Format consumption data
+            consumption_data = {
+                'power_w': status.get('house_consumption', {}).get('value', 0)
+            }
+            
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'data_source': 'real',
+                'battery': battery_data,
+                'grid': grid_data,
+                'pv': pv_data,
+                'consumption': consumption_data,
+                'pricing': real_price_data if real_price_data else {
+                    'current_price_pln_kwh': 0.0,
+                    'cheapest_price_pln_kwh': 0.0,
+                    'most_expensive_price_pln_kwh': 0.0
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error converting inverter status to dashboard format: {e}")
+            return None
+    
     def _get_real_price_data(self) -> Optional[Dict[str, Any]]:
         """Get real price data using AutomatedPriceCharger (correct SC calculation) with caching"""
         try:
@@ -3349,15 +3408,11 @@ class LogWebServer:
             if cached_data:
                 return cached_data
             
-            # Try to get real-time data directly from the enhanced data collector
+            # Try to get real-time data directly from the inverter
             try:
-                from src.enhanced_data_collector import EnhancedDataCollector
+                from src.fast_charge import GoodWeFastCharger
                 import asyncio
                 import threading
-                
-                # Create a temporary collector instance to get current data
-                config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
-                collector = EnhancedDataCollector(config_path)
                 
                 # Use a separate thread to avoid event loop conflicts
                 result_container = {'data': None, 'error': None}
@@ -3367,12 +3422,15 @@ class LogWebServer:
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
                         try:
-                            # Initialize the collector first
-                            if loop.run_until_complete(collector.initialize()):
-                                real_data = loop.run_until_complete(collector.collect_comprehensive_data())
-                                result_container['data'] = real_data
-                            else:
-                                result_container['error'] = Exception("Failed to initialize collector")
+                            # Get data directly from inverter
+                            config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
+                            charger = GoodWeFastCharger(config_path)
+                            loop.run_until_complete(charger.connect_inverter())
+                            status = loop.run_until_complete(charger.get_inverter_status())
+                            
+                            # Format data for dashboard
+                            dashboard_data = self._convert_inverter_status_to_dashboard_format(status)
+                            result_container['data'] = dashboard_data
                         finally:
                             loop.close()
                     except Exception as e:
@@ -3388,11 +3446,9 @@ class LogWebServer:
                 
                 real_data = result_container['data']
                 if real_data:
-                    # Convert the enhanced data collector format to dashboard format
-                    dashboard_data = self._convert_enhanced_data_to_dashboard_format(real_data)
                     
                     # Cache the result
-                    self._set_cached_data('real_inverter_data', dashboard_data)
+                    self._set_cached_data('real_inverter_data', real_data)
                     
                     # Log success (reduced frequency)
                     current_time = time.time()
@@ -3400,10 +3456,10 @@ class LogWebServer:
                         logger.info(f"Successfully retrieved real inverter data with L1/L2/L3 currents")
                         self._last_real_data_time = current_time
                     
-                    return dashboard_data
+                    return real_data
                     
             except Exception as e:
-                logger.warning(f"Failed to get real-time data from enhanced collector: {e}")
+                logger.warning(f"Failed to get real-time data from inverter: {e}")
                 return None
             
             # Fallback: Check for recent state files
