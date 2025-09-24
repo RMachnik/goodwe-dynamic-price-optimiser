@@ -28,8 +28,7 @@ from queue import Queue, Empty
 from flask import Flask, Response, jsonify, request, render_template_string
 from flask_cors import CORS
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Logging configuration handled by main application
 logger = logging.getLogger(__name__)
 
 def format_uptime_human_readable(seconds: float) -> str:

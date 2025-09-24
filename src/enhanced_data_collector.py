@@ -36,14 +36,7 @@ project_root = Path(__file__).parent.parent
 logs_dir = project_root / "logs"
 logs_dir.mkdir(exist_ok=True)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(logs_dir / 'enhanced_data_collector.log'),
-        logging.StreamHandler()
-    ]
-)
+# Logging configuration moved to main application to avoid duplication
 logger = logging.getLogger(__name__)
 
 class EnhancedDataCollector:
