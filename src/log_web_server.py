@@ -3398,69 +3398,38 @@ class LogWebServer:
             if cached_data:
                 return cached_data
             
-            # Try to get real-time data from the master coordinator logs
-            # This is a simple approach to get the latest status
+            # Try to get real-time data directly from the enhanced data collector
             try:
-                log_file = Path(__file__).parent.parent / "logs" / "enhanced_data_collector.log"
-                if log_file.exists():
-                    # Read the last few lines to find the latest status
-                    with open(log_file, 'r') as f:
-                        lines = f.readlines()
+                from src.enhanced_data_collector import EnhancedDataCollector
+                import asyncio
+                
+                # Create a temporary collector instance to get current data
+                config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
+                collector = EnhancedDataCollector(config_path)
+                
+                # Get the latest data synchronously
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    real_data = loop.run_until_complete(collector.collect_comprehensive_data())
+                finally:
+                    loop.close()
+                
+                if real_data:
+                    # Cache the result
+                    self._set_cached_data('real_inverter_data', real_data)
                     
-                    # Look for the latest status line
-                    latest_status = None
-                    for line in reversed(lines[-50:]):  # Check last 50 lines
-                        if "Status - State:" in line and "Battery:" in line:
-                            latest_status = line.strip()
-                            break
+                    # Log success (reduced frequency)
+                    current_time = time.time()
+                    if current_time - self._last_real_data_time > 60:
+                        logger.info(f"Successfully retrieved real inverter data with L1/L2/L3 currents")
+                        self._last_real_data_time = current_time
                     
-                    if latest_status:
-                        # Parse the status line: "2025-09-18 22:41:40,252 - INFO - Status - State: monitoring, Battery: 72%, PV: 0W, Charging: False"
-                        import re
-                        battery_match = re.search(r'Battery: (\d+)%', latest_status)
-                        pv_match = re.search(r'PV: (\d+)W', latest_status)
-                        charging_match = re.search(r'Charging: (True|False)', latest_status)
-                        
-                        if battery_match and pv_match and charging_match:
-                            battery_soc = int(battery_match.group(1))
-                            pv_power = float(pv_match.group(1))  # Already in watts
-                            is_charging = charging_match.group(1) == "True"
-                            consumption_power = 0  # Not available in this format
-                            
-                            # Reduce logging frequency - only log once per minute
-                            current_time = time.time()
-                            if current_time - self._last_real_data_time > 60:
-                                logger.info(f"Successfully parsed real data: Battery {battery_soc}%, PV {pv_power}W, Charging {is_charging}")
-                                self._last_real_data_time = current_time
-                            
-                            # Create real data structure
-                            real_data = {
-                                'timestamp': datetime.now().isoformat(),
-                                'battery': {
-                                    'soc_percent': battery_soc,
-                                    'charging_status': is_charging
-                                },
-                                'photovoltaic': {
-                                    'current_power_w': pv_power
-                                },
-                                'house_consumption': {
-                                    'current_power_w': 0  # Will be calculated
-                                },
-                                'grid': {
-                                    'current_power_w': 0  # Will be calculated
-                                }
-                            }
-                            
-                            result = self._convert_real_data_to_dashboard_format(real_data)
-                            self._set_cached_data('real_inverter_data', result)
-                            return result
+                    return real_data
                     
             except Exception as e:
-                logger.warning(f"Failed to parse log data: {e}")
+                logger.warning(f"Failed to get real-time data from enhanced collector: {e}")
                 return None
-            
-            # Skip the fallback data collection to avoid timeouts
-            # The log parsing above should be sufficient for real data
             
             # Fallback: Check for recent state files
             project_root = Path(__file__).parent.parent
@@ -3658,7 +3627,7 @@ class LogWebServer:
             logger.warning("No real inverter data available, using mock data for demonstration")
             current_time = datetime.now()
             
-            # Mock current system state with real price data
+            # Mock current system state with real price data (includes L1/L2/L3 currents for testing)
             state = {
                 'timestamp': current_time.isoformat(),
                 'data_source': 'mock_with_real_prices' if real_price_data else 'mock',
@@ -3681,7 +3650,10 @@ class LogWebServer:
                     'current_power_w': -360,  # Negative means export
                     'flow_direction': 'export',
                     'daily_import_kwh': 3.2,
-                    'daily_export_kwh': 2.1
+                    'daily_export_kwh': 2.1,
+                    'l1_current_a': 2.3,  # Mock L1 current
+                    'l2_current_a': 1.8,  # Mock L2 current
+                    'l3_current_a': 2.1   # Mock L3 current
                 },
                 'pricing': real_price_data if real_price_data else {
                     'current_price_pln_kwh': 0.45,
