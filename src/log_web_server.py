@@ -3353,22 +3353,46 @@ class LogWebServer:
             try:
                 from src.enhanced_data_collector import EnhancedDataCollector
                 import asyncio
+                import threading
                 
                 # Create a temporary collector instance to get current data
                 config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
                 collector = EnhancedDataCollector(config_path)
                 
-                # Get the latest data synchronously
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    real_data = loop.run_until_complete(collector.collect_comprehensive_data())
-                finally:
-                    loop.close()
+                # Use a separate thread to avoid event loop conflicts
+                result_container = {'data': None, 'error': None}
                 
+                def run_async_collection():
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            # Initialize the collector first
+                            if loop.run_until_complete(collector.initialize()):
+                                real_data = loop.run_until_complete(collector.collect_comprehensive_data())
+                                result_container['data'] = real_data
+                            else:
+                                result_container['error'] = Exception("Failed to initialize collector")
+                        finally:
+                            loop.close()
+                    except Exception as e:
+                        result_container['error'] = e
+                
+                # Run in a separate thread
+                thread = threading.Thread(target=run_async_collection)
+                thread.start()
+                thread.join(timeout=10)  # 10 second timeout
+                
+                if result_container['error']:
+                    raise result_container['error']
+                
+                real_data = result_container['data']
                 if real_data:
+                    # Convert the enhanced data collector format to dashboard format
+                    dashboard_data = self._convert_enhanced_data_to_dashboard_format(real_data)
+                    
                     # Cache the result
-                    self._set_cached_data('real_inverter_data', real_data)
+                    self._set_cached_data('real_inverter_data', dashboard_data)
                     
                     # Log success (reduced frequency)
                     current_time = time.time()
@@ -3376,7 +3400,7 @@ class LogWebServer:
                         logger.info(f"Successfully retrieved real inverter data with L1/L2/L3 currents")
                         self._last_real_data_time = current_time
                     
-                    return real_data
+                    return dashboard_data
                     
             except Exception as e:
                 logger.warning(f"Failed to get real-time data from enhanced collector: {e}")
@@ -3477,6 +3501,88 @@ class LogWebServer:
             logger.error(f"Error getting real inverter data: {e}")
             return None
     
+    def _convert_enhanced_data_to_dashboard_format(self, enhanced_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert enhanced data collector format to dashboard format"""
+        try:
+            # Extract data sections
+            battery_data = enhanced_data.get('battery', {})
+            pv_data = enhanced_data.get('photovoltaic', {})
+            consumption_data = enhanced_data.get('house_consumption', {})
+            grid_data = enhanced_data.get('grid', {})
+            
+            # Get real price data if available
+            real_price_data = self._get_real_price_data()
+            
+            # Convert to dashboard format
+            dashboard_data = {
+                'timestamp': enhanced_data.get('timestamp', datetime.now().isoformat()),
+                'data_source': 'real_inverter',
+                'battery': {
+                    'soc_percent': battery_data.get('soc_percent', 'Unknown'),
+                    'temperature_c': battery_data.get('temperature', 'Unknown'),
+                    'charging_status': 'charging' if battery_data.get('charging_status', False) else 'idle',
+                    'health_status': 'good' if battery_data.get('soc_percent', 0) > 20 else 'warning'
+                },
+                'photovoltaic': {
+                    'current_power_w': pv_data.get('current_power_w', 0),
+                    'daily_generation_kwh': pv_data.get('daily_generation_kwh', 0),
+                    'efficiency_percent': pv_data.get('efficiency_percent', 0)
+                },
+                'house_consumption': {
+                    'current_power_w': consumption_data.get('current_power_w', 0),
+                    'daily_consumption_kwh': consumption_data.get('daily_consumption_kwh', 0)
+                },
+                'grid': {
+                    'current_power_w': grid_data.get('power_w', 0),
+                    'flow_direction': 'export' if grid_data.get('power_w', 0) < 0 else 'import',
+                    'daily_import_kwh': grid_data.get('today_imported_kwh', 0),
+                    'daily_export_kwh': grid_data.get('today_exported_kwh', 0),
+                    'l1_current_a': grid_data.get('l1_current_a', None),
+                    'l2_current_a': grid_data.get('l2_current_a', None),
+                    'l3_current_a': grid_data.get('l3_current_a', None)
+                },
+                'pricing': real_price_data if real_price_data else {
+                    'current_price_pln_kwh': 0.45,
+                    'average_price_pln_kwh': 0.68,
+                    'cheapest_price_pln_kwh': 0.23,
+                    'cheapest_hour': '02:00',
+                    'price_trend': 'stable'
+                },
+                'weather': {
+                    'condition': 'unknown',
+                    'temperature_c': 20,
+                    'cloud_cover_percent': 50,
+                    'forecast_4h': 'stable'
+                },
+                'decision_factors': {
+                    'price_score': 75,
+                    'battery_score': 70,
+                    'pv_score': 80,
+                    'consumption_score': 75,
+                    'weather_score': 80,
+                    'overall_confidence': 75
+                },
+                'recommendations': {
+                    'primary_action': 'wait',
+                    'reason': 'Monitoring system conditions',
+                    'confidence': 0.75,
+                    'alternative_actions': []
+                },
+                'system_health': {
+                    'status': 'healthy',
+                    'last_error': None,
+                    'uptime_hours': (time.time() - self.start_time) / 3600 if hasattr(self, 'start_time') else 0,
+                    'uptime_human': format_uptime_human_readable(time.time() - self.start_time if hasattr(self, 'start_time') else 0),
+                    'data_quality': 'good'
+                }
+            }
+            
+            return dashboard_data
+            
+        except Exception as e:
+            logger.error(f"Error converting enhanced data to dashboard format: {e}")
+            return None
+
     def _convert_real_data_to_dashboard_format(self, real_data: Dict[str, Any]) -> Dict[str, Any]:
         """Convert real inverter data to dashboard format"""
         try:
