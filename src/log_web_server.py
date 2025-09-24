@@ -237,7 +237,8 @@ class LogWebServer:
             try:
                 # Get query parameters
                 time_range = request.args.get('time_range', '24h')  # '24h' or '7d'
-                decision_type = request.args.get('type', 'all')  # 'all', 'charging', 'wait', 'battery_selling'
+                # Accept both 'type' and 'decision_type' for compatibility
+                decision_type = request.args.get('type') or request.args.get('decision_type') or 'all'
                 
                 decisions = self._get_decision_history(time_range=time_range, decision_type=decision_type)
                 return jsonify(decisions)
