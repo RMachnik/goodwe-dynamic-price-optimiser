@@ -474,6 +474,24 @@ class TestLogWebServerIntegration(unittest.TestCase):
                      "Status should be one of the expected values")
         self.assertGreaterEqual(health['log_files_count'], 0, "Log files count should be non-negative")
 
+    def test_decisions_endpoint_defaults_to_24h(self):
+        """The /decisions endpoint should default to 24h time_range and type=all"""
+        server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=self.logs_dir)
+
+        # Use Flask test client instead of starting a real server
+        client = server.app.test_client()
+
+        # Mock project root to point to a temp directory with no decisions (empty is fine)
+        with patch('log_web_server.Path') as mock_path:
+            mock_path.return_value.parent.parent = Path(self.temp_dir)
+
+            resp = client.get('/decisions')
+            self.assertEqual(resp.status_code, 200, "Decisions endpoint should return 200")
+            data = resp.get_json()
+            self.assertIsInstance(data, dict, "Response should be a JSON object")
+            self.assertEqual(data.get('time_range'), '24h', "Default time_range should be 24h")
+            self.assertEqual(data.get('decision_type'), 'all', "Default decision_type should be all")
+
 
 class TestLogWebServerPerformance(unittest.TestCase):
     """Test log web server performance characteristics"""
@@ -935,6 +953,18 @@ class TestDecisionHistoryBadgeCounts(unittest.TestCase):
             
             # Should have correct total count
             self.assertGreaterEqual(history['total_count'], 100, "Should process all 100 test decisions")
+
+
+class TestDashboardTemplateDefaults(unittest.TestCase):
+    """Tests for dashboard HTML defaults in the template"""
+
+    def test_dashboard_time_range_default_is_24h(self):
+        server = LogWebServer(host='127.0.0.1', port=8099, log_dir='/tmp')
+        template = server._get_dashboard_template()
+
+        # Ensure 24h option is selected by default and 7d is not selected
+        self.assertIn('value="24h" selected', template, "24h should be selected by default in template")
+        self.assertNotIn('value="7d" selected', template, "7d should not be selected by default in template")
 
 
 class TestTimeSeriesFunctionality(unittest.TestCase):

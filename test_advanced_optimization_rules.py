@@ -15,6 +15,7 @@ sys.path.insert(0, str(src_dir))
 from automated_price_charging import AutomatedPriceCharger
 import yaml
 import logging
+from datetime import datetime
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -48,9 +49,10 @@ def test_optimization_rule_1():
             'battery_soc': 10,
             'current_price': 0.5,  # Below 0.8 threshold
             'cheapest_price': 0.4,
+            # Keep constant cheap hour, compute expected hours dynamically below
             'cheapest_hour': 23,
             'expected_action': 'charge',
-                'expected_reason': 'waiting 9h for 20.0% savings not optimal'
+            'expected_reason_dynamic': True  # compute expected reason substring based on now
         },
         {
             'name': '9% SOC + High Price (1.0 PLN/kWh) - Should Use Normal Logic',
@@ -59,7 +61,7 @@ def test_optimization_rule_1():
             'cheapest_price': 0.4,
             'cheapest_hour': 23,
             'expected_action': 'charge',
-                'expected_reason': 'waiting 9h for 60.0% savings not optimal'
+            'expected_reason_dynamic': True
         }
     ]
     
@@ -78,16 +80,46 @@ def test_optimization_rule_1():
         
         logger.info(f"Decision: {decision}")
         
-        # Verify expected action
-        if scenario['expected_action'] == 'charge':
-            assert decision['should_charge'] == True, f"Expected to charge but got: {decision}"
+        # Verify expected action (support dynamic expectation for time-based cases)
+        if scenario.get('expected_reason_dynamic') and scenario['battery_soc'] == 9:
+            now_hour = datetime.now().hour
+            hours_to_wait = 23 - now_hour
+            if hours_to_wait < 0:
+                hours_to_wait += 24
+            # With 60% savings at 9% SOC, expect wait if within max_wait_hours (6h), else charge
+            expect_wait = hours_to_wait <= 6
+            if expect_wait:
+                assert decision['should_charge'] == False, f"Expected to wait (cheaper price in {hours_to_wait}h) but got: {decision}"
+            else:
+                assert decision['should_charge'] == True, f"Expected to charge (wait {hours_to_wait}h too long) but got: {decision}"
         else:
-            assert decision['should_charge'] == False, f"Expected to wait but got: {decision}"
+            if scenario['expected_action'] == 'charge':
+                assert decision['should_charge'] == True, f"Expected to charge but got: {decision}"
+            else:
+                assert decision['should_charge'] == False, f"Expected to wait but got: {decision}"
         
         # Verify reason contains expected text
         reason = decision['reason'].lower()
-        expected_reason = scenario['expected_reason'].lower()
-        assert expected_reason in reason, f"Expected reason '{expected_reason}' not found in '{reason}'"
+        # Build dynamic expected reason when marked
+        if scenario.get('expected_reason_dynamic'):
+            now_hour = datetime.now().hour
+            hours_to_wait = 23 - now_hour
+            if hours_to_wait < 0:
+                hours_to_wait += 24
+            if scenario['battery_soc'] == 10:
+                dynamic_expected = f"waiting {hours_to_wait}h for 20.0% savings not optimal".lower()
+                assert dynamic_expected in reason, f"Expected reason '{dynamic_expected}' not found in '{reason}'"
+            else:
+                # 9% case: if expect_wait, message talks about 'much cheaper price in Xh', else 'waiting Xh ... not optimal'
+                expect_wait = hours_to_wait <= 6
+                if expect_wait:
+                    dynamic_expected = f"much cheaper price in {hours_to_wait}h".lower()
+                else:
+                    dynamic_expected = f"waiting {hours_to_wait}h for 60.0% savings not optimal".lower()
+                assert dynamic_expected in reason, f"Expected reason '{dynamic_expected}' not found in '{reason}'"
+        else:
+            expected_reason = scenario['expected_reason'].lower()
+            assert expected_reason in reason, f"Expected reason '{expected_reason}' not found in '{reason}'"
         
         logger.info(f"✓ Test passed: {scenario['name']}")
 

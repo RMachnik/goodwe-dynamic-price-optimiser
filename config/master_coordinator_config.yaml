@@ -298,7 +298,7 @@ timing_awareness:
       pv_poor_threshold_w: 200      # PV power below this is considered poor
       battery_target_threshold: 80   # Charge proactively if battery below this %
       weather_improvement_hours: 6   # Hours to check for weather improvement
-      max_proactive_price_pln: 0.45  # Maximum price for proactive charging (below 0.5 PLN/kWh)
+      max_proactive_price_pln: 0.7  # Maximum price for proactive charging (≤ 0.7 PLN/kWh)
       
       # Rule 3: Super low price charging - prefer PV when excellent, use grid when PV insufficient
       super_low_price_charging_enabled: true

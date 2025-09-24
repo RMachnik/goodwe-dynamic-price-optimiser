@@ -236,7 +236,7 @@ class LogWebServer:
             """Get charging decision history with filtering options"""
             try:
                 # Get query parameters
-                time_range = request.args.get('time_range', '7d')  # '24h' or '7d'
+                time_range = request.args.get('time_range', '24h')  # '24h' or '7d'
                 decision_type = request.args.get('type', 'all')  # 'all', 'charging', 'wait', 'battery_selling'
                 
                 decisions = self._get_decision_history(time_range=time_range, decision_type=decision_type)
@@ -1211,8 +1211,8 @@ class LogWebServer:
                         <div class="filter-group">
                             <label for="time-range" style="font-weight: 600; margin-right: 8px;">Time Range:</label>
                             <select id="time-range" style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
-                                <option value="7d" selected>Last 7 Days</option>
-                                <option value="24h">Last 24 Hours</option>
+                                <option value="7d">Last 7 Days</option>
+                                <option value="24h" selected>Last 24 Hours</option>
                             </select>
                         </div>
                         
