@@ -233,14 +233,11 @@ class LogWebServer:
         
         @self.app.route('/decisions')
         def get_decisions():
-            """Get charging decision history with filtering options"""
+            """Get charging decision history"""
             try:
                 # Get query parameters
                 time_range = request.args.get('time_range', '24h')  # '24h' or '7d'
-                # Accept both 'type' and 'decision_type' for compatibility
-                decision_type = request.args.get('type') or request.args.get('decision_type') or 'all'
-                
-                decisions = self._get_decision_history(time_range=time_range, decision_type=decision_type)
+                decisions = self._get_decision_history(time_range=time_range)
                 return jsonify(decisions)
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
@@ -1217,16 +1214,6 @@ class LogWebServer:
                             </select>
                         </div>
                         
-                        <!-- Decision Type Filter -->
-                        <div class="filter-group">
-                            <label for="decision-type" style="font-weight: 600; margin-right: 8px;">Type:</label>
-                            <select id="decision-type" style="padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-color); color: var(--text-color);">
-                                <option value="all">All Types</option>
-                                <option value="charging">Charging</option>
-                                <option value="wait">Wait</option>
-                                <option value="battery_selling">Battery Selling</option>
-                            </select>
-                        </div>
                         
                         <!-- Refresh Button -->
                         <button id="refresh-decisions" style="padding: 8px 16px; background: var(--primary-color); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">
@@ -1748,12 +1735,10 @@ class LogWebServer:
         function loadDecisions() {
             // Get current filter values
             const timeRange = document.getElementById('time-range').value;
-            const decisionType = document.getElementById('decision-type').value;
             
             // Build query parameters
             const params = new URLSearchParams({
-                time_range: timeRange,
-                type: decisionType
+                time_range: timeRange
             });
             
             fetch(`/decisions?${params}`)
@@ -2737,14 +2722,10 @@ class LogWebServer:
             
             // Add event listeners for decision filters
             const timeRangeSelect = document.getElementById('time-range');
-            const decisionTypeSelect = document.getElementById('decision-type');
             const refreshButton = document.getElementById('refresh-decisions');
             
             if (timeRangeSelect) {
                 timeRangeSelect.addEventListener('change', loadDecisions);
-            }
-            if (decisionTypeSelect) {
-                decisionTypeSelect.addEventListener('change', loadDecisions);
             }
             if (refreshButton) {
                 refreshButton.addEventListener('click', loadDecisions);
@@ -2964,8 +2945,8 @@ class LogWebServer:
         """Check if the web server is running"""
         return getattr(self, '_running', False)
     
-    def _get_decision_history(self, time_range: str = '24h', decision_type: str = 'all') -> Dict[str, Any]:
-        """Get charging decision history from master coordinator with filtering"""
+    def _get_decision_history(self, time_range: str = '24h') -> Dict[str, Any]:
+        """Get charging decision history from master coordinator"""
         try:
             # Calculate time threshold based on time_range parameter
             now = datetime.now()
@@ -2992,46 +2973,44 @@ class LogWebServer:
             decisions = []
             
             # Load charging decisions
-            if decision_type in ['all', 'charging', 'wait'] or decision_type not in ['battery_selling']:
-                charging_files = list(energy_data_dir.glob("charging_decision_*.json"))
-                for file_path in sorted(charging_files, key=lambda x: x.stat().st_mtime, reverse=True)[:max_files]:
-                    try:
-                        with open(file_path, 'r') as f:
-                            decision_data = json.load(f)
+            charging_files = list(energy_data_dir.glob("charging_decision_*.json"))
+            for file_path in sorted(charging_files, key=lambda x: x.stat().st_mtime, reverse=True)[:max_files]:
+                try:
+                    with open(file_path, 'r') as f:
+                        decision_data = json.load(f)
+                        
+                        # Filter by time
+                        decision_time = datetime.fromisoformat(decision_data.get('timestamp', '').replace('Z', '+00:00'))
+                        if decision_time.replace(tzinfo=None) < time_threshold:
+                            continue
                             
-                            # Filter by time
-                            decision_time = datetime.fromisoformat(decision_data.get('timestamp', '').replace('Z', '+00:00'))
-                            if decision_time.replace(tzinfo=None) < time_threshold:
-                                continue
-                                
-                            # Add filename for categorization
-                            decision_data['filename'] = file_path.name
+                        # Add filename for categorization
+                        decision_data['filename'] = file_path.name
+                        
+                        # No filtering here - we'll do categorization after loading all decisions
                             
-                            # No filtering here - we'll do categorization after loading all decisions
-                                
-                            decisions.append(decision_data)
-                    except Exception as e:
-                        logger.warning(f"Failed to read charging decision file {file_path}: {e}")
+                        decisions.append(decision_data)
+                except Exception as e:
+                    logger.warning(f"Failed to read charging decision file {file_path}: {e}")
             
             # Load battery selling decisions
-            if decision_type in ['all', 'battery_selling'] or decision_type not in ['charging', 'wait']:
-                selling_files = list(energy_data_dir.glob("battery_selling_decision_*.json"))
-                for file_path in sorted(selling_files, key=lambda x: x.stat().st_mtime, reverse=True)[:max_files]:
-                    try:
-                        with open(file_path, 'r') as f:
-                            decision_data = json.load(f)
+            selling_files = list(energy_data_dir.glob("battery_selling_decision_*.json"))
+            for file_path in sorted(selling_files, key=lambda x: x.stat().st_mtime, reverse=True)[:max_files]:
+                try:
+                    with open(file_path, 'r') as f:
+                        decision_data = json.load(f)
+                        
+                        # Filter by time
+                        decision_time = datetime.fromisoformat(decision_data.get('timestamp', '').replace('Z', '+00:00'))
+                        if decision_time.replace(tzinfo=None) < time_threshold:
+                            continue
                             
-                            # Filter by time
-                            decision_time = datetime.fromisoformat(decision_data.get('timestamp', '').replace('Z', '+00:00'))
-                            if decision_time.replace(tzinfo=None) < time_threshold:
-                                continue
-                                
-                            # Add filename and decision type for battery selling
-                            decision_data['filename'] = file_path.name
-                            decision_data['action'] = 'battery_selling'
-                            decisions.append(decision_data)
-                    except Exception as e:
-                        logger.warning(f"Failed to read battery selling decision file {file_path}: {e}")
+                        # Add filename and decision type for battery selling
+                        decision_data['filename'] = file_path.name
+                        decision_data['action'] = 'battery_selling'
+                        decisions.append(decision_data)
+                except Exception as e:
+                    logger.warning(f"Failed to read battery selling decision file {file_path}: {e}")
             
             # Sort all decisions by timestamp (newest first)
             decisions.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
@@ -3073,37 +3052,11 @@ class LogWebServer:
                 else:
                     wait_decisions.append(decision)
             
-            # Filter decisions based on decision_type parameter
-            if decision_type == 'charging':
-                filtered_decisions = charging_decisions
-            elif decision_type == 'wait':
-                filtered_decisions = wait_decisions
-            elif decision_type == 'battery_selling':
-                filtered_decisions = battery_selling_decisions
-            else:  # 'all'
-                filtered_decisions = decisions
-            
-            
-            # Calculate statistics based on filtered decisions
-            total_count = len(filtered_decisions)
-            
-            # When filtering, only count the filtered decisions
-            if decision_type == 'charging':
-                charging_count = len(filtered_decisions)
-                wait_count = 0
-                battery_selling_count = 0
-            elif decision_type == 'wait':
-                charging_count = 0
-                wait_count = len(filtered_decisions)
-                battery_selling_count = 0
-            elif decision_type == 'battery_selling':
-                charging_count = 0
-                wait_count = 0
-                battery_selling_count = len(filtered_decisions)
-            else:  # 'all'
-                charging_count = len(charging_decisions)
-                wait_count = len(wait_decisions)
-                battery_selling_count = len(battery_selling_decisions)
+            # Calculate statistics
+            total_count = len(decisions)
+            charging_count = len(charging_decisions)
+            wait_count = len(wait_decisions)
+            battery_selling_count = len(battery_selling_decisions)
             
             # If no real decisions found, don't create mock data - return empty
             if not decisions:
@@ -3114,19 +3067,17 @@ class LogWebServer:
                     'wait_count': 0,
                     'battery_selling_count': 0,
                     'time_range': time_range,
-                    'decision_type': decision_type,
                     'timestamp': datetime.now().isoformat(),
                     'data_source': 'real' if total_count > 0 else 'none'
                 }
             
             return {
-                'decisions': filtered_decisions,
+                'decisions': decisions,
                 'total_count': total_count,
                 'charging_count': charging_count,
                 'wait_count': wait_count,
                 'battery_selling_count': battery_selling_count,
                 'time_range': time_range,
-                'decision_type': decision_type,
                 'timestamp': datetime.now().isoformat(),
                 'data_source': 'real'
             }
