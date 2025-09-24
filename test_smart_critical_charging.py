@@ -13,8 +13,8 @@ src_dir = Path(__file__).parent / "src"
 sys.path.insert(0, str(src_dir))
 
 from automated_price_charging import AutomatedPriceCharger
-from hybrid_charging_logic import HybridChargingLogic
 import yaml
+from datetime import datetime
 import logging
 
 # Setup logging
@@ -51,34 +51,35 @@ def test_smart_critical_charging():
                 'cheapest_price': 0.4,
                 'cheapest_hour': 23,
                 'expected_action': 'charge',
-                'expected_reason': 'waiting 9h for 20.0% savings not optimal'
+                'expected_reason_dynamic': True,
+                'expected_savings': '20.0%'
             },
             {
                 'name': 'Critical Level (8% SOC) - High Price, Good Savings Soon',
                 'battery_soc': 8,
                 'current_price': 1.5,  # High price
                 'cheapest_price': 0.4,  # Much cheaper
-                'cheapest_hour': 23,  # 2 hours away
-                'expected_action': 'charge',
-                'expected_reason': 'waiting 9h for 73.3% savings not optimal'
+                'cheapest_hour': 23,
+                'expected_action_dynamic': True,
+                'expected_savings': '73.3%'
             },
             {
                 'name': 'Critical Level (8% SOC) - High Price, Long Wait',
                 'battery_soc': 8,
                 'current_price': 1.5,  # High price
                 'cheapest_price': 0.4,  # Much cheaper
-                'cheapest_hour': 6,  # 8 hours away (next day)
-                'expected_action': 'charge',
-                'expected_reason': 'waiting 16h for 73.3% savings not optimal'
+                'cheapest_hour': 6,
+                'expected_action_dynamic': True,
+                'expected_savings': '73.3%'
             },
             {
                 'name': 'Critical Level (8% SOC) - High Price, Insufficient Savings',
                 'battery_soc': 8,
                 'current_price': 1.0,  # High price
                 'cheapest_price': 0.9,  # Small savings
-                'cheapest_hour': 23,  # 2 hours away
-                'expected_action': 'charge',
-                'expected_reason': 'waiting 9h for 10.0% savings not optimal'
+                'cheapest_hour': 23,
+                'expected_action_dynamic': True,
+                'expected_savings': '10.0%'
             }
     ]
     
@@ -118,16 +119,45 @@ def test_smart_critical_charging():
         # Check results
         logger.info(f"Decision: {decision}")
         
-        # Verify expected action
-        if scenario['expected_action'] == 'charge':
-            assert decision['should_charge'] == True, f"Expected to charge but got: {decision}"
+        # Verify expected action (dynamic where applicable)
+        if scenario.get('expected_action_dynamic'):
+            now_hour = datetime.now().hour
+            hours_to_wait = scenario['cheapest_hour'] - now_hour
+            if hours_to_wait < 0:
+                hours_to_wait += 24
+            savings_percent = float(scenario['expected_savings'].replace('%',''))
+            expect_wait = hours_to_wait <= 6 and savings_percent >= 30.0
+            if expect_wait:
+                assert decision['should_charge'] == False, f"Expected to wait (cheaper price in {hours_to_wait}h) but got: {decision}"
+            else:
+                assert decision['should_charge'] == True, f"Expected to charge (wait {hours_to_wait}h too long or savings low) but got: {decision}"
         else:
-            assert decision['should_charge'] == False, f"Expected to wait but got: {decision}"
+            if scenario['expected_action'] == 'charge':
+                assert decision['should_charge'] == True, f"Expected to charge but got: {decision}"
+            else:
+                assert decision['should_charge'] == False, f"Expected to wait but got: {decision}"
         
         # Verify reason contains expected text
         reason = decision['reason'].lower()
-        expected_reason = scenario['expected_reason'].lower()
-        assert expected_reason in reason, f"Expected reason '{expected_reason}' not found in '{reason}'"
+        if scenario.get('expected_reason_dynamic'):
+            now_hour = datetime.now().hour
+            hours_to_wait = scenario['cheapest_hour'] - now_hour
+            if hours_to_wait < 0:
+                hours_to_wait += 24
+            dynamic_expected = f"waiting {hours_to_wait}h for {scenario['expected_savings']} savings not optimal".lower()
+            assert dynamic_expected in reason, f"Expected reason '{dynamic_expected}' not found in '{reason}'"
+        elif scenario.get('expected_action_dynamic'):
+            now_hour = datetime.now().hour
+            hours_to_wait = scenario['cheapest_hour'] - now_hour
+            if hours_to_wait < 0:
+                hours_to_wait += 24
+            savings_text = scenario['expected_savings']
+            expect_wait = hours_to_wait <= 6 and float(savings_text.replace('%','')) >= 30.0
+            if expect_wait:
+                dynamic_expected = f"much cheaper price in {hours_to_wait}h".lower()
+            else:
+                dynamic_expected = f"waiting {hours_to_wait}h for {savings_text} savings not optimal".lower()
+            assert dynamic_expected in reason, f"Expected reason '{dynamic_expected}' not found in '{reason}'"
         
         logger.info(f"✓ Test passed: {scenario['name']}")
     
