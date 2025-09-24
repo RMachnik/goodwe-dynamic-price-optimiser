@@ -14,8 +14,7 @@ from typing import Dict, List, Tuple, Optional
 import statistics
 from dataclasses import dataclass
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Logging configuration handled by main application
 logger = logging.getLogger(__name__)
 
 @dataclass

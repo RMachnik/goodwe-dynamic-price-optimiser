@@ -26,8 +26,7 @@ sys.path.insert(0, str(current_dir))
 from fast_charge import GoodWeFastCharger
 from enhanced_data_collector import EnhancedDataCollector
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Logging configuration handled by main application
 logger = logging.getLogger(__name__)
 
 class AutomatedPriceCharger:
