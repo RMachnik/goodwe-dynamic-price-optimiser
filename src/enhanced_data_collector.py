@@ -162,6 +162,7 @@ class EnhancedDataCollector:
                 'grid': {
                     'power_w': sensor_data.get('meter_active_power_total', {}).get('value', 'Unknown'),
                     'power_kw': self._convert_to_kw(sensor_data.get('meter_active_power_total', {}).get('value', 0)),
+                    'voltage': sensor_data.get('vgrid', {}).get('value', 'Unknown'),  # Add grid voltage for safety checks
                     'flow_direction': self._determine_grid_flow(sensor_data.get('meter_active_power_total', {}).get('value', 0)),
                     'import_rate': self._get_import_rate(sensor_data.get('meter_active_power_total', {}).get('value', 0)),
                     'export_rate': self._get_export_rate(sensor_data.get('meter_active_power_total', {}).get('value', 0)),

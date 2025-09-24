@@ -217,8 +217,10 @@ class MasterCoordinator:
             battery_selling_enabled = self.config.get('battery_selling', {}).get('enabled', False)
             if battery_selling_enabled:
                 logger.info("Initializing Battery Selling Engine...")
-                self.battery_selling_engine = BatterySellingEngine(self.config)
-                self.battery_selling_monitor = BatterySellingMonitor(self.config)
+                # Pass only the battery_selling config section
+                battery_selling_config = self.config.get('battery_selling', {})
+                self.battery_selling_engine = BatterySellingEngine(battery_selling_config)
+                self.battery_selling_monitor = BatterySellingMonitor(battery_selling_config)
                 logger.info("Battery Selling Engine initialized successfully")
             else:
                 logger.info("Battery selling disabled in configuration")
@@ -775,9 +777,30 @@ class MasterCoordinator:
                 await self.battery_selling_monitor.emergency_stop(self.charging_controller.goodwe_charger.inverter)
                 return
             
+            # Prepare data in the format expected by battery selling engine
+            selling_data = {
+                'battery': {
+                    'soc_percent': self.current_data.get('battery', {}).get('soc_percent', 0),
+                    'charging_status': self.current_data.get('battery', {}).get('charging_status', False),
+                    'current': self.current_data.get('battery', {}).get('current', 0),
+                    'power': self.current_data.get('battery', {}).get('power', 0),
+                    'temperature': self.current_data.get('battery', {}).get('temperature', 25)
+                },
+                'pv': {
+                    'power_w': self.current_data.get('pv', {}).get('power', 0)  # Convert power to power_w
+                },
+                'consumption': {
+                    'power_w': self.current_data.get('consumption', {}).get('house_consumption', 0)  # Convert house_consumption to power_w
+                },
+                'grid': {
+                    'power': self.current_data.get('grid', {}).get('power', 0),
+                    'voltage': self.current_data.get('grid', {}).get('voltage', 0)  # Add voltage for safety checks
+                }
+            }
+            
             # Analyze selling opportunity
             selling_opportunity = await self.battery_selling_engine.analyze_selling_opportunity(
-                self.current_data, selling_price_data
+                selling_data, selling_price_data
             )
             
             # Log selling analysis
