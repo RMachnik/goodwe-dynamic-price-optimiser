@@ -5,7 +5,7 @@ A comprehensive, intelligent energy management system that optimizes battery cha
 ## 🚀 **Project Overview**
 
 This system transforms your GoodWe inverter into an intelligent energy manager that:
-- **✅ VALIDATED**: Monitors PV production, grid flow, battery status, and house consumption in real-time
+- **✅ VALIDATED**: Monitors PV production, grid flow, battery status, house consumption, and per-phase currents in real-time
 - **✅ EFFICIENT**: Optimizes battery charging based on Polish electricity market prices (95-98% accuracy)
 - **✅ RELIABLE**: Automates charging decisions using validated CSDAC-PLN API (100% uptime)
 - **✅ SMART**: Implements intelligent charging strategy with weather-aware PV forecasting and consumption analysis
@@ -36,6 +36,15 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - **Advanced Analytics**: Complex data analysis and trend reporting
 
 ## 🆕 **Latest Updates (January 2025)**
+
+### **Enhanced Per-Phase Current Monitoring**
+- **L1/L2/L3 Current Monitoring**: Real-time per-phase current readings (igrid, igrid2, igrid3)
+- **High-Resolution Sampling**: 20-second intervals (180 samples/hour) for detailed phase analysis
+- **Dashboard Integration**: Per-phase currents displayed in web dashboard current state panel
+- **Load Balancing Detection**: Monitor phase imbalances and load distribution across L1/L2/L3
+- **Enhanced Data Collection**: 4,320 data points per day (24 hours at 20-second intervals)
+- **API Exposure**: L1/L2/L3 currents available via `/current-state` endpoint
+- **Console Logging**: Per-phase current values printed in enhanced data collector output
 
 ### **Enhanced Critical Battery Charging**
 - **More Conservative Threshold**: Critical battery level lowered from 20% to 12% SOC
