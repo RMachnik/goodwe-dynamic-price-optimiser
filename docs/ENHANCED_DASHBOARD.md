@@ -32,7 +32,7 @@ The dashboard is organized into four main tabs:
 
 #### **📊 Overview Tab**
 - **System Status**: Real-time system health and status indicators
-- **Current State**: Battery SoC, PV power, consumption, grid flow
+- **Current State**: Battery SoC, PV power, consumption, grid flow, L1/L2/L3 currents
 - **Performance Metrics**: Efficiency scores and decision counts
 - **Cost & Savings**: Real-time cost tracking and savings analysis
 
@@ -164,7 +164,7 @@ curl http://localhost:8080/decisions
 # Get system metrics
 curl http://localhost:8080/metrics
 
-# Get current state
+# Get current state (includes L1/L2/L3 currents)
 curl http://localhost:8080/current-state
 ```
 

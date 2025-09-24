@@ -67,6 +67,11 @@ def test_inverter_connection():
                 print(
                     f"\t{sensor.id_:30}:\t{sensor.name} = {response[sensor.id_]} {sensor.unit}"
                 )
+        # Minimal validation for per-phase current availability when inverter is reachable
+        # Do not fail the test if missing; just print for visibility
+        for phase_id in ["igrid", "igrid2", "igrid3"]:
+            val = response.get(phase_id, None)
+            print(f"Per-phase current {phase_id}: {val if val is not None else 'N/A'}")
         assert True, "Inverter connection successful"
     except Exception as e:
         print(f"Inverter connection test skipped: {e}")

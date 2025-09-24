@@ -294,6 +294,15 @@ Replaced inefficient monitoring with smart scheduling:
   - ✅ **Actual Time**: 2 hours
   - **Status**: Grid flow fully monitored with 3-phase breakdown
 
+- [x] **1.1.4**: Add per-phase current monitoring ✅ **COMPLETED**
+  - ✅ Monitor L1/L2/L3 currents (igrid, igrid2, igrid3) from inverter
+  - ✅ High-resolution sampling at 20-second intervals (180 samples/hour)
+  - ✅ Dashboard integration with per-phase current display
+  - ✅ API exposure via `/current-state` endpoint
+  - ✅ Enhanced data collection with 4,320 daily data points
+  - ✅ **Actual Time**: 2 hours
+  - **Status**: Per-phase current monitoring fully operational
+
 - [x] **1.1.3**: Enhance battery monitoring ✅ **COMPLETED**
   - ✅ Current SoC (62% → 91% during monitoring)
   - ✅ Battery temperature (47.1°C → 50.1°C)

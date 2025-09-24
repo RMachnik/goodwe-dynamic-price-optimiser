@@ -1463,6 +1463,18 @@ class LogWebServer:
                             <span class="metric-value">${data.grid.current_power_w}W (${data.grid.flow_direction})</span>
                         </div>
                         <div class="metric">
+                            <span class="metric-label">L1 Current</span>
+                            <span class="metric-value">${(data.grid.l1_current_a ?? 'N/A')} A</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">L2 Current</span>
+                            <span class="metric-value">${(data.grid.l2_current_a ?? 'N/A')} A</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">L3 Current</span>
+                            <span class="metric-value">${(data.grid.l3_current_a ?? 'N/A')} A</span>
+                        </div>
+                        <div class="metric">
                             <span class="metric-label">Current Price</span>
                             <span class="metric-value">${data.pricing.current_price_pln_kwh} PLN/kWh</span>
                         </div>
@@ -3576,7 +3588,10 @@ class LogWebServer:
                     'current_power_w': grid_data.get('power_w', 0),
                     'flow_direction': 'export' if grid_data.get('power_w', 0) < 0 else 'import',
                     'daily_import_kwh': grid_data.get('today_imported_kwh', 0),
-                    'daily_export_kwh': grid_data.get('today_exported_kwh', 0)
+                    'daily_export_kwh': grid_data.get('today_exported_kwh', 0),
+                    'l1_current_a': grid_data.get('l1_current_a', None),
+                    'l2_current_a': grid_data.get('l2_current_a', None),
+                    'l3_current_a': grid_data.get('l3_current_a', None)
                 },
                 'pricing': {
                     'current_price_pln_kwh': 0.45,  # Placeholder - not relevant for GoodWe

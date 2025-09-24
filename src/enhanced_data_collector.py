@@ -65,7 +65,7 @@ class EnhancedDataCollector:
         self.daily_stats: Dict[str, Any] = {}
         
         # Monitoring intervals
-        self.monitoring_interval = 60  # seconds
+        self.monitoring_interval = 20  # seconds
         self.data_save_interval = 300  # 5 minutes
         
     async def initialize(self) -> bool:
@@ -165,6 +165,9 @@ class EnhancedDataCollector:
                     'flow_direction': self._determine_grid_flow(sensor_data.get('meter_active_power_total', {}).get('value', 0)),
                     'import_rate': self._get_import_rate(sensor_data.get('meter_active_power_total', {}).get('value', 0)),
                     'export_rate': self._get_export_rate(sensor_data.get('meter_active_power_total', {}).get('value', 0)),
+                    'l1_current_a': sensor_data.get('igrid', {}).get('value', 'Unknown'),
+                    'l2_current_a': sensor_data.get('igrid2', {}).get('value', 'Unknown'),
+                    'l3_current_a': sensor_data.get('igrid3', {}).get('value', 'Unknown'),
                     'l1_power': sensor_data.get('meter_active_power1', {}).get('value', 'Unknown'),
                     'l2_power': sensor_data.get('meter_active_power2', {}).get('value', 'Unknown'),
                     'l3_power': sensor_data.get('meter_active_power3', {}).get('value', 'Unknown'),
@@ -202,9 +205,9 @@ class EnhancedDataCollector:
             # Update daily statistics
             self._update_daily_stats(comprehensive_data)
             
-            # Limit historical data to last 24 hours (1440 data points at 1-minute intervals)
-            if len(self.historical_data) > 1440:
-                self.historical_data = self.historical_data[-1440:]
+            # Limit historical data to last 24 hours (4320 data points at 20-second intervals)
+            if len(self.historical_data) > 4320:
+                self.historical_data = self.historical_data[-4320:]
             
             logger.info(f"Data collected successfully at {comprehensive_data['time']}")
             return comprehensive_data
@@ -233,8 +236,8 @@ class EnhancedDataCollector:
             for data in daily_data:
                 pv_power = data.get('photovoltaic', {}).get('current_power_kw', 0.0)
                 if isinstance(pv_power, (int, float)) and pv_power > 0:
-                    # Convert power to energy (assuming 1-minute intervals)
-                    total_production += pv_power / 60.0  # kWh per minute
+                    # Convert power to energy (assuming 20-second intervals)
+                    total_production += pv_power / 180.0  # kWh per 20-second interval
             
             return round(total_production, 3)
         except Exception as e:
@@ -317,8 +320,8 @@ class EnhancedDataCollector:
             for data in daily_data:
                 consumption = data.get('house_consumption', {}).get('calculated_power_kw', 0.0)
                 if isinstance(consumption, (int, float)) and consumption > 0:
-                    # Convert power to energy (assuming 1-minute intervals)
-                    total_consumption += consumption / 60.0  # kWh per minute
+                    # Convert power to energy (assuming 20-second intervals)
+                    total_consumption += consumption / 180.0  # kWh per 20-second interval
             
             return round(total_consumption, 3)
         except Exception as e:
@@ -331,15 +334,15 @@ class EnhancedDataCollector:
             # PV Production stats
             pv_power = data.get('photovoltaic', {}).get('current_power_kw', 0.0)
             if isinstance(pv_power, (int, float)) and pv_power > 0:
-                self.daily_stats['pv_production']['total_kwh'] += pv_power / 60.0  # kWh per minute
+                self.daily_stats['pv_production']['total_kwh'] += pv_power / 180.0  # kWh per 20-second interval
                 if pv_power > self.daily_stats['pv_production']['peak_power']:
                     self.daily_stats['pv_production']['peak_power'] = pv_power
                     self.daily_stats['pv_production']['peak_time'] = data.get('time')
                 
                 if pv_power > 1.0:
-                    self.daily_stats['pv_production']['hours_above_1kw'] += 1/60
+                    self.daily_stats['pv_production']['hours_above_1kw'] += 1/180
                 if pv_power > 5.0:
-                    self.daily_stats['pv_production']['hours_above_5kw'] += 1/60
+                    self.daily_stats['pv_production']['hours_above_5kw'] += 1/180
             
             # Battery stats
             battery_soc = data.get('battery', {}).get('soc_percent', 0)
@@ -353,19 +356,19 @@ class EnhancedDataCollector:
             battery_power = data.get('battery', {}).get('power_kw', 0.0)
             if isinstance(battery_power, (int, float)):
                 if battery_power > 0:  # Charging
-                    self.daily_stats['battery']['total_charge_kwh'] += battery_power / 60.0
+                    self.daily_stats['battery']['total_charge_kwh'] += battery_power / 180.0
                 elif battery_power < 0:  # Discharging
-                    self.daily_stats['battery']['total_discharge_kwh'] += abs(battery_power) / 60.0
+                    self.daily_stats['battery']['total_discharge_kwh'] += abs(battery_power) / 180.0
             
             # Grid stats
             grid_power = data.get('grid', {}).get('power_kw', 0.0)
             if isinstance(grid_power, (int, float)):
                 if grid_power > 0:  # Import
-                    self.daily_stats['grid']['total_import_kwh'] += grid_power / 60.0
+                    self.daily_stats['grid']['total_import_kwh'] += grid_power / 180.0
                     if grid_power > self.daily_stats['grid']['peak_import']:
                         self.daily_stats['grid']['peak_import'] = grid_power
                 elif grid_power < 0:  # Export
-                    self.daily_stats['grid']['total_export_kwh'] += abs(grid_power) / 60.0
+                    self.daily_stats['grid']['total_export_kwh'] += abs(grid_power) / 180.0
                     if abs(grid_power) > self.daily_stats['grid']['peak_export']:
                         self.daily_stats['grid']['peak_export'] = abs(grid_power)
                 
@@ -375,7 +378,7 @@ class EnhancedDataCollector:
             # House consumption stats
             house_power = data.get('house_consumption', {}).get('current_power_kw', 0.0)
             if isinstance(house_power, (int, float)) and house_power > 0:
-                self.daily_stats['house_consumption']['total_kwh'] += house_power / 60.0
+                self.daily_stats['house_consumption']['total_kwh'] += house_power / 180.0
                 if house_power > self.daily_stats['house_consumption']['peak_power']:
                     self.daily_stats['house_consumption']['peak_power'] = house_power
                     self.daily_stats['house_consumption']['peak_time'] = data.get('time')
@@ -455,6 +458,9 @@ class EnhancedDataCollector:
         grid = data.get('grid', {})
         print("⚡ GRID STATUS:")
         print(f"  Total Power: {grid.get('power_w', 'Unknown')} W ({grid.get('power_kw', 'Unknown')} kW)")
+        print(f"  L1 Current: {grid.get('l1_current_a', 'Unknown')} A")
+        print(f"  L2 Current: {grid.get('l2_current_a', 'Unknown')} A")
+        print(f"  L3 Current: {grid.get('l3_current_a', 'Unknown')} A")
         print(f"  L1 Power: {grid.get('l1_power', 'Unknown')} W")
         print(f"  L2 Power: {grid.get('l2_power', 'Unknown')} W")
         print(f"  L3 Power: {grid.get('l3_power', 'Unknown')} W")
