@@ -321,7 +321,7 @@ timing_awareness:
 # PV vs consumption analysis configuration
 pv_consumption_analysis:
   enabled: true
-  pv_overproduction_threshold_w: 500  # Minimum excess PV power to start charging
+  pv_overproduction_threshold_w: 1500  # Minimum excess PV power to start charging (increased to allow charging during negative prices)
   consumption_forecast_hours: 4       # Hours ahead to forecast consumption
   power_balance_check_interval_minutes: 5  # How often to check power balance
   historical_data_days: 7             # Days of historical data to keep
