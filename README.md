@@ -37,6 +37,14 @@ The system currently uses file-based JSON storage with in-memory data limited to
 
 ## 🆕 **Latest Updates (September 2025)**
 
+### **Logging System Optimization**
+- **Eliminated Log Spam**: Implemented log deduplication to prevent repeated messages flooding systemd journal
+- **Reduced Inverter Requests**: Increased cache TTL from 10s to 60s, reducing inverter communication by 83%
+- **Request Throttling**: Added 5-second throttling to prevent excessive API calls from dashboard polling
+- **Smart Status Logging**: Status messages only logged when values change or every 5 minutes
+- **Enhanced Caching**: Endpoint-specific caching (30s) for status, metrics, and current-state endpoints
+- **Improved Debugging**: Clean systemd journal logs now show actual events instead of repetitive status messages
+
 ### **PV Overproduction Threshold Optimization**
 - **Enhanced Negative Price Handling**: PV overproduction threshold increased from 500W to 1500W
 - **Better Market Utilization**: System now charges during negative prices (-0.25 PLN/kWh) even with moderate PV overproduction

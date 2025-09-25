@@ -926,7 +926,7 @@ class MasterCoordinator:
         })
     
     def _log_system_status(self):
-        """Log current system status"""
+        """Log current system status with deduplication"""
         if not self.current_data:
             return
         
@@ -934,10 +934,22 @@ class MasterCoordinator:
         pv_power = self.current_data.get('photovoltaic', {}).get('current_power_w', 0)
         charging_status = self.current_data.get('battery', {}).get('charging_status', False)
         
-        logger.info(f"Status - State: {self.state.value}, "
-                   f"Battery: {battery_soc}%, "
-                   f"PV: {pv_power}W, "
-                   f"Charging: {charging_status}")
+        status_msg = (f"Status - State: {self.state.value}, "
+                     f"Battery: {battery_soc}%, "
+                     f"PV: {pv_power}W, "
+                     f"Charging: {charging_status}")
+        
+        # Only log if status has changed or every 5 minutes
+        current_time = time.time()
+        if not hasattr(self, '_last_status_log_time'):
+            self._last_status_log_time = 0
+            self._last_status_msg = ""
+        
+        if (status_msg != self._last_status_msg or 
+            current_time - self._last_status_log_time > 300):  # 5 minutes
+            logger.info(status_msg)
+            self._last_status_log_time = current_time
+            self._last_status_msg = status_msg
     
     async def shutdown(self):
         """Gracefully shutdown the coordinator"""

@@ -61,61 +61,80 @@ class GoodWeFastCharger:
             raise ValueError(f"Invalid YAML configuration: {e}")
     
     def _setup_logging(self):
-        """Setup logging configuration"""
+        """Setup logging configuration - avoid duplicate handlers"""
         log_config = self.config.get('logging', {})
         log_level = getattr(logging, log_config.get('level', 'INFO'))
         
-        # Create formatter
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        
-        # Setup root logger
+        # Get the root logger
         root_logger = logging.getLogger()
-        root_logger.setLevel(log_level)
         
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(log_level)
-        console_handler.setFormatter(formatter)
-        root_logger.addHandler(console_handler)
-        
-        # File handler if enabled
-        if log_config.get('log_to_file', False):
-            # Get the project root directory (parent of src)
-            project_root = Path(__file__).parent.parent
-            logs_dir = project_root / "logs"
-            logs_dir.mkdir(exist_ok=True)
+        # Only setup logging if it hasn't been configured yet
+        if not root_logger.handlers:
+            # Create formatter
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            )
             
-            log_file = log_config.get('log_file', str(logs_dir / 'fast_charge.log'))
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setLevel(log_level)
-            file_handler.setFormatter(formatter)
-            root_logger.addHandler(file_handler)
+            root_logger.setLevel(log_level)
+            
+            # Console handler
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(log_level)
+            console_handler.setFormatter(formatter)
+            root_logger.addHandler(console_handler)
+            
+            # File handler if enabled
+            if log_config.get('log_to_file', False):
+                # Get the project root directory (parent of src)
+                project_root = Path(__file__).parent.parent
+                logs_dir = project_root / "logs"
+                logs_dir.mkdir(exist_ok=True)
+                
+                log_file = log_config.get('log_file', str(logs_dir / 'fast_charge.log'))
+                file_handler = logging.FileHandler(log_file)
+                file_handler.setLevel(log_level)
+                file_handler.setFormatter(formatter)
+                root_logger.addHandler(file_handler)
+        else:
+            # Just set the log level if handlers already exist
+            root_logger.setLevel(log_level)
     
-    async def connect_inverter(self) -> bool:
-        """Connect to the GoodWe inverter"""
-        try:
-            inverter_config = self.config['inverter']
-            
-            self.logger.info(f"Connecting to inverter at {inverter_config['ip_address']}")
-            
-            self.inverter = await goodwe.connect(
-                host=inverter_config['ip_address'],
-                family=inverter_config['family'],
-                timeout=inverter_config['timeout'],
-                retries=inverter_config['retries']
-            )
-            
-            self.logger.info(
-                f"Connected to inverter: {self.inverter.model_name} "
-                f"(Serial: {self.inverter.serial_number})"
-            )
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Failed to connect to inverter: {e}")
-            return False
+    async def connect_inverter(self, max_retries: int = None, retry_delay: float = None) -> bool:
+        """Connect to the GoodWe inverter with retry logic and delays"""
+        inverter_config = self.config['inverter']
+        
+        # Use configuration values or defaults
+        max_retries = max_retries or inverter_config.get('max_retries', 3)
+        retry_delay = retry_delay or inverter_config.get('retry_delay', 2.0)
+        
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    self.logger.info(f"Retry attempt {attempt + 1}/{max_retries} for inverter connection...")
+                    await asyncio.sleep(retry_delay)  # Add delay between retries
+                else:
+                    self.logger.info(f"Connecting to inverter at {inverter_config['ip_address']}")
+                
+                self.inverter = await goodwe.connect(
+                    host=inverter_config['ip_address'],
+                    family=inverter_config['family'],
+                    timeout=inverter_config['timeout'],
+                    retries=inverter_config['retries']
+                )
+                
+                self.logger.info(
+                    f"Connected to inverter: {self.inverter.model_name} "
+                    f"(Serial: {self.inverter.serial_number})"
+                )
+                return True
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"Connection attempt {attempt + 1} failed: {e}. Retrying in {retry_delay}s...")
+                else:
+                    self.logger.error(f"Failed to connect to inverter after {max_retries} attempts: {e}")
+        
+        return False
     
     def is_connected(self) -> bool:
         """Check if inverter is connected"""
