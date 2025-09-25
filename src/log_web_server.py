@@ -1424,8 +1424,40 @@ class LogWebServer:
                         return;
                     }
                     
+                    // Normalize payload to support older/newer backends
+                    const normalized = (() => {
+                        const d = { ...data };
+                        // Map legacy keys to new structure
+                        d.photovoltaic = d.photovoltaic || d.pv || {};
+                        d.house_consumption = d.house_consumption || d.consumption || {};
+                        // Normalize power fields
+                        if (d.pv && d.photovoltaic && d.photovoltaic.current_power_w == null) {
+                            d.photovoltaic.current_power_w = d.pv.current_power_w ?? d.pv.power_w ?? d.pv.power ?? null;
+                        }
+                        if (d.consumption && d.house_consumption && d.house_consumption.current_power_w == null) {
+                            d.house_consumption.current_power_w = d.consumption.current_power_w ?? d.consumption.power_w ?? d.consumption.power ?? null;
+                        }
+                        if (d.grid) {
+                            if (d.grid.current_power_w == null && d.grid.power_w != null) {
+                                d.grid.current_power_w = d.grid.power_w;
+                            }
+                        } else {
+                            d.grid = {};
+                        }
+                        // Normalize data source indicator
+                        const src = (d.data_source || '').toLowerCase();
+                        if (src === 'real' || src === 'real_inverter') {
+                            d.data_source = 'real_inverter';
+                        } else if (!src) {
+                            d.data_source = 'mock';
+                        } else {
+                            d.data_source = d.data_source;
+                        }
+                        return d;
+                    })();
+
                     // Update data source indicator
-                    const dataSource = data.data_source || 'mock';
+                    const dataSource = normalized.data_source || 'mock';
                     const dataSourceText = dataSource === 'real_inverter' ? 'Real Inverter Data' : 'Mock Data';
                     const dataSourceElement = document.getElementById('data-source-text');
                     dataSourceElement.textContent = dataSourceText;
@@ -1434,43 +1466,43 @@ class LogWebServer:
                     const stateHtml = `
                         <div class="metric">
                             <span class="metric-label">Battery SoC</span>
-                            <span class="metric-value">${data.battery.soc_percent}%</span>
+                            <span class="metric-value">${(normalized.battery && normalized.battery.soc_percent != null) ? normalized.battery.soc_percent : 'N/A'}%</span>
                         </div>
                         <div class="metric">
                             <span class="metric-label">PV Power</span>
-                            <span class="metric-value">${data.photovoltaic.current_power_w}W</span>
+                            <span class="metric-value">${(normalized.photovoltaic && normalized.photovoltaic.current_power_w != null) ? normalized.photovoltaic.current_power_w : 'N/A'}W</span>
                         </div>
                         <div class="metric">
                             <span class="metric-label">House Consumption</span>
-                            <span class="metric-value">${data.house_consumption.current_power_w}W</span>
+                            <span class="metric-value">${(normalized.house_consumption && normalized.house_consumption.current_power_w != null) ? normalized.house_consumption.current_power_w : 'N/A'}W</span>
                         </div>
                         <div class="metric">
                             <span class="metric-label">Grid Flow</span>
-                            <span class="metric-value">${data.grid.current_power_w}W (${data.grid.flow_direction})</span>
+                            <span class="metric-value">${(normalized.grid && normalized.grid.current_power_w != null) ? normalized.grid.current_power_w : 'N/A'}W (${normalized.grid && normalized.grid.flow_direction ? normalized.grid.flow_direction : 'N/A'})</span>
                         </div>
                         <div class="metric">
                             <span class="metric-label">L1 Current</span>
-                            <span class="metric-value">${(data.grid.l1_current_a ?? 'N/A')} A</span>
+                            <span class="metric-value">${(normalized.grid && normalized.grid.l1_current_a != null ? normalized.grid.l1_current_a : 'N/A')} A</span>
                         </div>
                         <div class="metric">
                             <span class="metric-label">L2 Current</span>
-                            <span class="metric-value">${(data.grid.l2_current_a ?? 'N/A')} A</span>
+                            <span class="metric-value">${(normalized.grid && normalized.grid.l2_current_a != null ? normalized.grid.l2_current_a : 'N/A')} A</span>
                         </div>
                         <div class="metric">
                             <span class="metric-label">L3 Current</span>
-                            <span class="metric-value">${(data.grid.l3_current_a ?? 'N/A')} A</span>
+                            <span class="metric-value">${(normalized.grid && normalized.grid.l3_current_a != null ? normalized.grid.l3_current_a : 'N/A')} A</span>
                         </div>
                         <div class="metric">
                             <span class="metric-label">Current Price</span>
-                            <span class="metric-value">${data.pricing.current_price_pln_kwh} PLN/kWh</span>
+                            <span class="metric-value">${(normalized.pricing && normalized.pricing.current_price_pln_kwh != null) ? normalized.pricing.current_price_pln_kwh : 'N/A'} PLN/kWh</span>
                         </div>
                         <div class="metric">
                             <span class="metric-label">Cheapest Price</span>
-                            <span class="metric-value">${data.pricing.cheapest_price_pln_kwh} PLN/kWh (${data.pricing.cheapest_hour})</span>
+                            <span class="metric-value">${(normalized.pricing && normalized.pricing.cheapest_price_pln_kwh != null) ? normalized.pricing.cheapest_price_pln_kwh : 'N/A'} PLN/kWh (${normalized.pricing && normalized.pricing.cheapest_hour ? normalized.pricing.cheapest_hour : 'N/A'})</span>
                         </div>
                         <div class="system-health">
-                            <span class="health-indicator health-${data.system_health.status}">${data.system_health.status.toUpperCase()}</span>
-                            <span>Uptime: ${data.system_health.uptime_human || data.system_health.uptime_hours + 'h'}</span>
+                            <span class="health-indicator health-${(normalized.system_health && normalized.system_health.status) ? normalized.system_health.status : 'unknown'}">${(normalized.system_health && normalized.system_health.status ? String(normalized.system_health.status).toUpperCase() : 'UNKNOWN')}</span>
+                            <span>Uptime: ${(normalized.system_health && (normalized.system_health.uptime_human || normalized.system_health.uptime_hours != null)) ? (normalized.system_health.uptime_human || (normalized.system_health.uptime_hours + 'h')) : 'N/A'}</span>
                         </div>
                     `;
                     document.getElementById('current-state').innerHTML = stateHtml;
