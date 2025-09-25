@@ -59,7 +59,7 @@ class AutomatedPriceCharger:
         self.low_battery_threshold = 30  # % - Consider charging if below this
         self.medium_battery_threshold = 50  # % - Only charge if conditions are favorable
         self.price_savings_threshold = 0.3  # 30% savings required to wait
-        self.overproduction_threshold = 500  # W - Significant overproduction
+        self.overproduction_threshold = 1500  # W - Significant overproduction (increased to allow charging during negative prices)
         self.high_consumption_threshold = 1000  # W - High consumption
         
         # Smart critical charging configuration
