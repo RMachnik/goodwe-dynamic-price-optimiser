@@ -3441,7 +3441,13 @@ class LogWebServer:
             
             # Try to get real-time data directly from the inverter
             try:
-                from src.fast_charge import GoodWeFastCharger
+                # Add src directory to path if not already there
+                import sys
+                src_path = Path(__file__).parent
+                if str(src_path) not in sys.path:
+                    sys.path.insert(0, str(src_path))
+                
+                from fast_charge import GoodWeFastCharger
                 import asyncio
                 import threading
                 
