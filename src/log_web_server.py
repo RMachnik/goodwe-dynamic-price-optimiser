@@ -74,6 +74,14 @@ class LogWebServer:
         self._last_historical_data_time = 0
         self._cache_ttl = 30  # Cache for 30 seconds
         
+        # Log deduplication to prevent repeated messages
+        self._last_log_messages = {}
+        self._log_deduplication_window = 60  # seconds
+        
+        # Request throttling to prevent excessive API calls
+        self._last_request_times = {}
+        self._min_request_interval = 5  # seconds between requests to same endpoint
+        
         # Set up log directory
         if log_dir is None:
             project_root = Path(__file__).parent.parent
@@ -118,6 +126,42 @@ class LogWebServer:
         """Clear all cached data"""
         with self._cache_lock:
             self._cache.clear()
+    
+    def _should_log_message(self, message: str, level: str = 'INFO') -> bool:
+        """Check if message should be logged (deduplication)"""
+        current_time = time.time()
+        message_key = f"{level}:{message}"
+        
+        with self._cache_lock:
+            if message_key in self._last_log_messages:
+                last_time = self._last_log_messages[message_key]
+                if current_time - last_time < self._log_deduplication_window:
+                    return False  # Don't log duplicate message
+            
+            # Update last log time
+            self._last_log_messages[message_key] = current_time
+            
+            # Clean up old entries
+            for key in list(self._last_log_messages.keys()):
+                if current_time - self._last_log_messages[key] > self._log_deduplication_window * 2:
+                    del self._last_log_messages[key]
+        
+        return True
+    
+    def _should_throttle_request(self, endpoint: str) -> bool:
+        """Check if request should be throttled"""
+        current_time = time.time()
+        
+        with self._cache_lock:
+            if endpoint in self._last_request_times:
+                last_time = self._last_request_times[endpoint]
+                if current_time - last_time < self._min_request_interval:
+                    return True  # Throttle request
+            
+            # Update last request time
+            self._last_request_times[endpoint] = current_time
+        
+        return False
         
     def _setup_routes(self):
         """Setup Flask routes"""
@@ -140,8 +184,14 @@ class LogWebServer:
         def status():
             """Get system status"""
             try:
-                # Try to get status from master coordinator if available
+                # Throttle requests to prevent excessive calls
+                if self._should_throttle_request('status'):
+                    cached_data = self._get_cached_data('system_status', ttl=30)
+                    if cached_data:
+                        return jsonify(cached_data)
+                
                 status_data = self._get_system_status()
+                self._set_cached_data('system_status', status_data)
                 return jsonify(status_data)
             except Exception as e:
                 return jsonify({
@@ -245,7 +295,14 @@ class LogWebServer:
         def get_metrics():
             """Get system performance metrics"""
             try:
+                # Throttle requests to prevent excessive calls
+                if self._should_throttle_request('metrics'):
+                    cached_data = self._get_cached_data('system_metrics', ttl=30)
+                    if cached_data:
+                        return jsonify(cached_data)
+                
                 metrics = self._get_system_metrics()
+                self._set_cached_data('system_metrics', metrics)
                 return jsonify(metrics)
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
@@ -254,8 +311,16 @@ class LogWebServer:
         def get_current_state():
             """Get current system state and decision factors"""
             try:
-                state = self._get_current_system_state()
-                return jsonify(state)
+                # Throttle requests to prevent excessive inverter calls
+                if self._should_throttle_request('current-state'):
+                    # Return cached data if available
+                    cached_data = self._get_cached_data('current_system_state', ttl=30)
+                    if cached_data:
+                        return jsonify(cached_data)
+                
+                state_data = self._get_current_system_state()
+                self._set_cached_data('current_system_state', state_data)
+                return jsonify(state_data)
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
         
@@ -3434,8 +3499,8 @@ class LogWebServer:
     def _get_real_inverter_data(self) -> Optional[Dict[str, Any]]:
         """Get real data from GoodWe inverter or master coordinator"""
         try:
-            # Check cache first (cache for 10 seconds)
-            cached_data = self._get_cached_data('real_inverter_data', ttl=10)
+            # Check cache first (cache for 60 seconds to reduce inverter requests)
+            cached_data = self._get_cached_data('real_inverter_data', ttl=60)
             if cached_data:
                 return cached_data
             
@@ -3487,10 +3552,12 @@ class LogWebServer:
                     # Cache the result
                     self._set_cached_data('real_inverter_data', real_data)
                     
-                    # Log success (reduced frequency)
+                    # Log success (reduced frequency with deduplication)
                     current_time = time.time()
                     if current_time - self._last_real_data_time > 60:
-                        logger.info(f"Successfully retrieved real inverter data with L1/L2/L3 currents")
+                        success_msg = "Successfully retrieved real inverter data with L1/L2/L3 currents"
+                        if self._should_log_message(success_msg):
+                            logger.info(success_msg)
                         self._last_real_data_time = current_time
                     
                     return real_data
@@ -3758,19 +3825,24 @@ class LogWebServer:
         """Get current system state and decision factors"""
         try:
             # Try to get real data from the master coordinator or data collector
-            logger.info("Attempting to get real inverter data...")
+            if self._should_log_message("Attempting to get real inverter data..."):
+                logger.info("Attempting to get real inverter data...")
             real_data = self._get_real_inverter_data()
             
             # Always try to get real price data from PSE API
-            logger.info("Fetching real price data from PSE API...")
+            if self._should_log_message("Fetching real price data from PSE API..."):
+                logger.info("Fetching real price data from PSE API...")
             real_price_data = self._get_real_price_data()
             
             if real_data:
-                logger.info("Real data retrieved successfully, returning real data")
+                if self._should_log_message("Real data retrieved successfully, returning real data"):
+                    logger.info("Real data retrieved successfully, returning real data")
                 # Update pricing data with real PSE data if available
                 if real_price_data:
                     real_data['pricing'] = real_price_data
-                    logger.info(f"Updated pricing with real PSE data: current={real_price_data['current_price_pln_kwh']} PLN/kWh, cheapest={real_price_data['cheapest_price_pln_kwh']} PLN/kWh")
+                    pricing_msg = f"Updated pricing with real PSE data: current={real_price_data['current_price_pln_kwh']} PLN/kWh, cheapest={real_price_data['cheapest_price_pln_kwh']} PLN/kWh"
+                    if self._should_log_message(pricing_msg):
+                        logger.info(pricing_msg)
                 return real_data
             
             # Fallback to mock data if no real data available, but use real price data

@@ -104,9 +104,9 @@ class TestSmartChargingStrategy(unittest.TestCase):
         """Test that PV overproduction prevents grid charging"""
         current_data = {
             'battery': {'soc_percent': 40},  # Medium level
-            'photovoltaic': {'current_power_w': 2000},
-            'house_consumption': {'current_power_w': 1000},  # 1000W overproduction
-            'grid': {'power_w': -1000, 'flow_direction': 'Export'}
+            'photovoltaic': {'current_power_w': 3000},
+            'house_consumption': {'current_power_w': 1000},  # 2000W overproduction (>1500W threshold)
+            'grid': {'power_w': -2000, 'flow_direction': 'Export'}
         }
         
         decision = self.charger.make_smart_charging_decision(current_data, self.mock_price_data)

@@ -8,6 +8,7 @@ inverter:
   port: 8899
   timeout: 1
   retries: 3
+  retry_delay: 2.0  # Delay between retry attempts in seconds (to avoid overwhelming inverter)
   family: "ET"  # Inverter family (ET, ES, DT, or null for auto-detect)
   comm_addr: 0xf7  # Communication address (usually 0xf7 for ET/ES, 0x7f for DT)
 

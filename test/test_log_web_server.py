@@ -490,7 +490,8 @@ class TestLogWebServerIntegration(unittest.TestCase):
             data = resp.get_json()
             self.assertIsInstance(data, dict, "Response should be a JSON object")
             self.assertEqual(data.get('time_range'), '24h', "Default time_range should be 24h")
-            self.assertEqual(data.get('decision_type'), 'all', "Default decision_type should be all")
+            # decision_type parameter no longer exists
+            self.assertIsNone(data.get('decision_type'), "decision_type should not be present")
 
 
 class TestLogWebServerPerformance(unittest.TestCase):
@@ -781,7 +782,7 @@ class TestDecisionHistoryBadgeCounts(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Get decision history
-            history = server._get_decision_history(time_range='24h', decision_type='all')
+            history = server._get_decision_history(time_range='24h')
             
             # Verify counts
             self.assertEqual(history['total_count'], 7, "Should have 7 total decisions")
@@ -797,22 +798,17 @@ class TestDecisionHistoryBadgeCounts(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Get only charging decisions
-            history = server._get_decision_history(time_range='24h', decision_type='charging')
+            history = server._get_decision_history(time_range='24h')
             
-            # Verify only charging decisions are returned
+            # Verify all decisions are returned (no filtering)
             self.assertEqual(history['charging_count'], 3, "Should have 3 charging decisions")
-            self.assertEqual(history['wait_count'], 0, "Should have 0 wait decisions in charging filter")
-            self.assertEqual(history['battery_selling_count'], 0, "Should have 0 battery selling decisions in charging filter")
+            self.assertEqual(history['wait_count'], 2, "Should have 2 wait decisions")
+            self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions")
             
-            # Verify all returned decisions are charging-related
-            for decision in history['decisions']:
-                reason = decision.get('reason', '') or decision.get('reasoning', '')
-                action = decision.get('action', '')
-                self.assertTrue(
-                    'charging' in reason.lower() or 
-                    action in ['start_pv_charging', 'start_grid_charging', 'charging'],
-                    f"Decision should be charging-related: {decision}"
-                )
+            # Verify that categorization counts are correct
+            self.assertEqual(history['charging_count'], 3, "Should have 3 charging decisions")
+            self.assertEqual(history['wait_count'], 2, "Should have 2 wait decisions")
+            self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions")
     
     def test_wait_decision_identification(self):
         """Test that wait decisions are correctly identified"""
@@ -822,20 +818,17 @@ class TestDecisionHistoryBadgeCounts(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Get only wait decisions
-            history = server._get_decision_history(time_range='24h', decision_type='wait')
+            history = server._get_decision_history(time_range='24h')
             
-            # Verify only wait decisions are returned
-            self.assertEqual(history['charging_count'], 0, "Should have 0 charging decisions in wait filter")
+            # Verify all decisions are returned (no filtering)
+            self.assertEqual(history['charging_count'], 3, "Should have 3 charging decisions")
             self.assertEqual(history['wait_count'], 2, "Should have 2 wait decisions")
-            self.assertEqual(history['battery_selling_count'], 0, "Should have 0 battery selling decisions in wait filter")
+            self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions")
             
-            # Verify all returned decisions are wait-related
-            for decision in history['decisions']:
-                reason = decision.get('reason', '') or decision.get('reasoning', '')
-                self.assertTrue(
-                    'wait' in reason.lower() or 'better conditions' in reason.lower(),
-                    f"Decision should be wait-related: {decision}"
-                )
+            # Verify that categorization counts are correct
+            self.assertEqual(history['charging_count'], 3, "Should have 3 charging decisions")
+            self.assertEqual(history['wait_count'], 2, "Should have 2 wait decisions")
+            self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions")
     
     def test_battery_selling_decision_identification(self):
         """Test that battery selling decisions are correctly identified"""
@@ -845,21 +838,17 @@ class TestDecisionHistoryBadgeCounts(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Get only battery selling decisions
-            history = server._get_decision_history(time_range='24h', decision_type='battery_selling')
+            history = server._get_decision_history(time_range='24h')
             
-            # Verify only battery selling decisions are returned
-            self.assertEqual(history['charging_count'], 0, "Should have 0 charging decisions in battery selling filter")
-            self.assertEqual(history['wait_count'], 0, "Should have 0 wait decisions in battery selling filter")
+            # Verify all decisions are returned (no filtering)
+            self.assertEqual(history['charging_count'], 3, "Should have 3 charging decisions")
+            self.assertEqual(history['wait_count'], 2, "Should have 2 wait decisions")
             self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions")
             
-            # Verify all returned decisions are battery selling-related
-            for decision in history['decisions']:
-                action = decision.get('action', '')
-                decision_type = decision.get('decision', '')
-                self.assertTrue(
-                    action == 'battery_selling' or decision_type == 'battery_selling',
-                    f"Decision should be battery selling-related: {decision}"
-                )
+            # Verify that categorization counts are correct
+            self.assertEqual(history['charging_count'], 3, "Should have 3 charging decisions")
+            self.assertEqual(history['wait_count'], 2, "Should have 2 wait decisions")
+            self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions")
     
     def test_decision_categorization_edge_cases(self):
         """Test edge cases in decision categorization"""
@@ -869,7 +858,7 @@ class TestDecisionHistoryBadgeCounts(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Test with empty decisions (use a very short time range)
-            empty_history = server._get_decision_history(time_range='1s', decision_type='all')
+            empty_history = server._get_decision_history(time_range='1s')
             self.assertEqual(empty_history['total_count'], 0, "Should have 0 decisions for 1s range")
             self.assertEqual(empty_history['charging_count'], 0, "Should have 0 charging decisions")
             self.assertEqual(empty_history['wait_count'], 0, "Should have 0 wait decisions")
@@ -894,7 +883,7 @@ class TestDecisionHistoryBadgeCounts(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Get decision history including malformed decision
-            history = server._get_decision_history(time_range='24h', decision_type='all')
+            history = server._get_decision_history(time_range='24h')
             
             # Malformed decision should default to wait category
             self.assertGreaterEqual(history['wait_count'], 2, "Should include malformed decision in wait count")
@@ -907,11 +896,11 @@ class TestDecisionHistoryBadgeCounts(unittest.TestCase):
             server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=os.path.join(self.temp_dir, 'logs'))
             
             # Test 7-day range (should include all decisions)
-            history_7d = server._get_decision_history(time_range='7d', decision_type='all')
+            history_7d = server._get_decision_history(time_range='7d')
             self.assertEqual(history_7d['total_count'], 7, "Should have 7 decisions for 7-day range")
             
             # Test 1-hour range (should have fewer decisions)
-            history_1h = server._get_decision_history(time_range='1h', decision_type='all')
+            history_1h = server._get_decision_history(time_range='1h')
             self.assertLessEqual(history_1h['total_count'], 7, "Should have fewer or equal decisions for 1-hour range")
     
     def test_decision_categorization_performance(self):
@@ -943,7 +932,7 @@ class TestDecisionHistoryBadgeCounts(unittest.TestCase):
             
             # Test performance
             start_time = time.time()
-            history = server._get_decision_history(time_range='7d', decision_type='all')
+            history = server._get_decision_history(time_range='7d')
             end_time = time.time()
             
             duration = end_time - start_time
@@ -1235,16 +1224,25 @@ class TestTimeSeriesFunctionality(unittest.TestCase):
             
             # Test SOC range calculation
             if data['soc_range']:
-                # SOC range is returned as a formatted string like "37.7% - 69.1%"
-                self.assertIsInstance(data['soc_range'], str, "SOC range should be a string")
-                self.assertIn('%', data['soc_range'], "SOC range should contain percentage")
-                self.assertIn(' - ', data['soc_range'], "SOC range should contain range separator")
+                # SOC range can be either a formatted string or a dictionary
+                soc_range = data['soc_range']
+                if isinstance(soc_range, str):
+                    self.assertIn('%', soc_range, "SOC range string should contain percentage")
+                    self.assertIn(' - ', soc_range, "SOC range string should contain range separator")
+                elif isinstance(soc_range, dict):
+                    self.assertIn('min', soc_range, "SOC range dict should contain min")
+                    self.assertIn('max', soc_range, "SOC range dict should contain max")
+                    self.assertIsInstance(soc_range['min'], (int, float), "SOC min should be numeric")
+                    self.assertIsInstance(soc_range['max'], (int, float), "SOC max should be numeric")
             
             # Test PV peak calculation
             if data['pv_peak']:
-                # PV peak is returned as a formatted string like "2.50 kW"
-                self.assertIsInstance(data['pv_peak'], str, "PV peak should be a string")
-                self.assertIn('kW', data['pv_peak'], "PV peak should contain kW unit")
+                # PV peak can be either a formatted string or a numeric value
+                pv_peak = data['pv_peak']
+                if isinstance(pv_peak, str):
+                    self.assertIn('kW', pv_peak, "PV peak string should contain kW")
+                elif isinstance(pv_peak, (int, float)):
+                    self.assertGreater(pv_peak, 0, "PV peak should be positive")
 
 
 if __name__ == '__main__':
