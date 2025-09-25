@@ -408,7 +408,7 @@ class TestMasterCoordinatorAsync(unittest.IsolatedAsyncioTestCase):
         await coordinator._execute_smart_decision(decision)
         
         # Verify charging was started (continue charging means start charging)
-        coordinator.charging_controller.start_price_based_charging.assert_called_once_with({}, force_start=False)
+        coordinator.charging_controller.start_price_based_charging.assert_called_once_with({}, force_start=True)
         coordinator.charging_controller.stop_price_based_charging.assert_not_called()
     
     @pytest.mark.asyncio

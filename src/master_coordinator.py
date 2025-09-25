@@ -854,6 +854,11 @@ class MasterCoordinator:
             battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
             force_start = battery_soc <= 20 or priority == 'critical'
             
+            # Always force start if decision was made to charge (decision engine already validated)
+            if not force_start:
+                force_start = True
+                logger.info("Decision was made to charge - forcing start (decision engine already validated conditions)")
+            
             await self.charging_controller.start_price_based_charging(
                 decision.get('price_data', {}), 
                 force_start=force_start
@@ -875,8 +880,19 @@ class MasterCoordinator:
             battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
             force_start = battery_soc <= 5  # Emergency battery level only
             
+            # If decision was made by smart charging system, trust it and force start
+            # This prevents re-checking price when decision was already made with proper analysis
+            if decision.get('priority') in ['medium', 'high', 'critical', 'emergency']:
+                force_start = True
+                logger.info(f"Trusting smart charging decision (priority: {decision.get('priority')}) - forcing start")
+            
+            # Always force start if decision was made to charge (decision engine already validated)
+            if not force_start:
+                force_start = True
+                logger.info("Decision was made to charge - forcing start (decision engine already validated conditions)")
+            
             await self.charging_controller.start_price_based_charging(
-                decision.get('price_data'), 
+                decision.get('price_data', {}), 
                 force_start=force_start
             )
             
