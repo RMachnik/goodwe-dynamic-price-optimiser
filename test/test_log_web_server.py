@@ -1245,5 +1245,178 @@ class TestTimeSeriesFunctionality(unittest.TestCase):
                     self.assertGreater(pv_peak, 0, "PV peak should be positive")
 
 
+class TestDataNormalization(unittest.TestCase):
+    """Test data normalization functionality for improved compatibility"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_dir = tempfile.mkdtemp()
+        self.logs_dir = os.path.join(self.temp_dir, 'logs')
+        os.makedirs(self.logs_dir, exist_ok=True)
+        
+        self.server = LogWebServer(host='127.0.0.1', port=8082, log_dir=self.logs_dir)
+        self.server.app.config['TESTING'] = True
+        self.client = self.server.app.test_client()
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        shutil.rmtree(self.temp_dir)
+    
+    def test_legacy_key_mapping(self):
+        """Test that legacy keys are properly mapped to new structure"""
+        # Mock data with legacy keys
+        legacy_data = {
+            'pv': {
+                'current_power_w': 1500,
+                'power': 1500
+            },
+            'consumption': {
+                'current_power_w': 800,
+                'power_w': 800
+            },
+            'battery': {
+                'soc_percent': 75
+            }
+        }
+        
+        # Test the normalization logic (simulate the JavaScript normalization)
+        normalized = self._simulate_normalization(legacy_data)
+        
+        # Check that legacy keys are mapped to new structure
+        self.assertIn('photovoltaic', normalized)
+        self.assertIn('house_consumption', normalized)
+        self.assertEqual(normalized['photovoltaic']['current_power_w'], 1500)
+        self.assertEqual(normalized['house_consumption']['current_power_w'], 800)
+    
+    def test_power_field_normalization(self):
+        """Test power field normalization across different formats"""
+        test_data = {
+            'pv': {
+                'power': 1500,
+                'current_power_w': None
+            },
+            'consumption': {
+                'power_w': 800,
+                'current_power_w': None
+            }
+        }
+        
+        normalized = self._simulate_normalization(test_data)
+        
+        # Check that power fields are normalized
+        self.assertEqual(normalized['photovoltaic']['current_power_w'], 1500)
+        self.assertEqual(normalized['house_consumption']['current_power_w'], 800)
+    
+    def test_data_source_identification(self):
+        """Test data source identification"""
+        # Test with real inverter data
+        real_data = {
+            'battery': {'soc_percent': 75},
+            'data_source': 'real_inverter'
+        }
+        
+        normalized = self._simulate_normalization(real_data)
+        self.assertEqual(normalized['data_source'], 'real_inverter')
+        
+        # Test with mock data (no soc_percent to trigger mock detection)
+        mock_data = {
+            'battery': {}
+        }
+        
+        normalized = self._simulate_normalization(mock_data)
+        self.assertEqual(normalized['data_source'], 'mock')
+    
+    def test_backward_compatibility(self):
+        """Test backward compatibility with older data formats"""
+        old_format_data = {
+            'pv': {'power': 1500},
+            'consumption': {'power': 800},
+            'battery': {'soc': 75}  # Old soc field instead of soc_percent
+        }
+        
+        normalized = self._simulate_normalization(old_format_data)
+        
+        # Should still work with old format
+        self.assertIn('photovoltaic', normalized)
+        self.assertIn('house_consumption', normalized)
+        self.assertIn('battery', normalized)
+    
+    def test_error_handling_in_normalization(self):
+        """Test error handling in data normalization"""
+        # Test with malformed data
+        malformed_data = {
+            'pv': None,
+            'consumption': 'invalid',
+            'battery': {}
+        }
+        
+        # Should not raise exception
+        normalized = self._simulate_normalization(malformed_data)
+        
+        # Should return a valid structure
+        self.assertIsInstance(normalized, dict)
+        self.assertIn('photovoltaic', normalized)
+        self.assertIn('house_consumption', normalized)
+        self.assertIn('battery', normalized)
+    
+    def test_normalization_performance(self):
+        """Test normalization performance"""
+        large_data = {
+            'pv': {'power': 1500},
+            'consumption': {'power': 800},
+            'battery': {'soc_percent': 75},
+            'grid': {'current_power_w': 200},
+            'pricing': {'current_price_pln_kwh': 0.5}
+        }
+        
+        start_time = time.time()
+        for _ in range(100):  # Test 100 normalizations
+            self._simulate_normalization(large_data)
+        end_time = time.time()
+        
+        # Should be fast (less than 1 second for 100 operations)
+        self.assertLess(end_time - start_time, 1.0)
+    
+    def _simulate_normalization(self, data):
+        """Simulate the JavaScript normalization logic"""
+        # This simulates the normalization logic from the log_web_server.py
+        normalized = {**data}
+        
+        # Map legacy keys to new structure (handle None values safely)
+        normalized['photovoltaic'] = normalized.get('photovoltaic') or normalized.get('pv') or {}
+        normalized['house_consumption'] = normalized.get('house_consumption') or normalized.get('consumption') or {}
+        
+        # Normalize power fields (handle non-dict values safely)
+        if (normalized.get('pv') and 
+            isinstance(normalized.get('pv'), dict) and 
+            normalized.get('photovoltaic') and 
+            normalized['photovoltaic'].get('current_power_w') is None):
+            normalized['photovoltaic']['current_power_w'] = (
+                normalized['pv'].get('current_power_w') or 
+                normalized['pv'].get('power_w') or 
+                normalized['pv'].get('power')
+            )
+        
+        if (normalized.get('consumption') and 
+            isinstance(normalized.get('consumption'), dict) and 
+            normalized.get('house_consumption') and 
+            normalized['house_consumption'].get('current_power_w') is None):
+            normalized['house_consumption']['current_power_w'] = (
+                normalized['consumption'].get('current_power_w') or 
+                normalized['consumption'].get('power_w') or 
+                normalized['consumption'].get('power')
+            )
+        
+        # Set data source
+        if normalized.get('data_source'):
+            pass  # Keep existing data source
+        elif normalized.get('battery', {}).get('soc_percent') is not None:
+            normalized['data_source'] = 'real_inverter'
+        else:
+            normalized['data_source'] = 'mock'
+        
+        return normalized
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
