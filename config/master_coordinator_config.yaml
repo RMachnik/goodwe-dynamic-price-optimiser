@@ -282,7 +282,7 @@ timing_awareness:
   # Smart Critical Charging Configuration
   smart_critical_charging:
     enabled: true                    # Enable smart critical charging logic
-    max_critical_price_pln: 0.35    # Maximum price to charge at critical level (PLN/kWh)
+    max_critical_price_pln: 0.70    # Maximum price to charge at critical level (PLN/kWh)
     max_wait_hours: 6               # Maximum hours to wait for better price
     min_price_savings_percent: 30  # Minimum savings % to wait for better price
     emergency_override_price: true  # Always charge at emergency level regardless of price

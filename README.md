@@ -8,7 +8,7 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **✅ VALIDATED**: Monitors PV production, grid flow, battery status, house consumption, and per-phase currents in real-time
 - **✅ EFFICIENT**: Optimizes battery charging based on Polish electricity market prices (95-98% accuracy)
 - **✅ RELIABLE**: Automates charging decisions using validated CSDAC-PLN API (100% uptime)
-- **✅ SMART**: Implements intelligent charging strategy with weather-aware PV forecasting and consumption analysis
+- **✅ SMART**: Implements intelligent charging strategy with weather-aware PV forecasting and consumption analysis (1500W PV overproduction threshold)
 - **✅ INTELLIGENT**: Considers consumption patterns and price optimization opportunities
 - **✅ INTEGRATED**: Polish electricity pricing with SC component and G12 distribution tariff
 - **✅ WEATHER-ENHANCED**: Real-time weather data from IMGW + Open-Meteo for accurate PV forecasting
@@ -35,7 +35,15 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - **Cloud Archival**: Automated archival to AWS S3, Google Cloud, or Azure
 - **Advanced Analytics**: Complex data analysis and trend reporting
 
-## 🆕 **Latest Updates (January 2025)**
+## 🆕 **Latest Updates (September 2025)**
+
+### **PV Overproduction Threshold Optimization**
+- **Enhanced Negative Price Handling**: PV overproduction threshold increased from 500W to 1500W
+- **Better Market Utilization**: System now charges during negative prices (-0.25 PLN/kWh) even with moderate PV overproduction
+- **Improved Decision Logic**: Prevents missing charging opportunities during excellent market conditions
+- **Real-world Impact**: Better utilization of renewable energy market dynamics
+
+## 🆕 **Previous Updates (January 2025)**
 
 ### **Enhanced Per-Phase Current Monitoring**
 - **L1/L2/L3 Current Monitoring**: Real-time per-phase current readings (igrid, igrid2, igrid3)

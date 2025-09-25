@@ -47,7 +47,7 @@ The system now includes advanced optimization rules based on real-world charging
 
 #### **Smart Critical Charging**
 - **Emergency Threshold**: 5% SOC (always charge regardless of price)
-- **Critical Threshold**: 10% SOC (price-aware charging)
+- **Critical Threshold**: 12% SOC (price-aware charging)
 - **Rule 1**: At exactly 10% SOC with high price (>0.8 PLN/kWh), always wait for price drop
 - **Rule 2**: Proactive charging when PV is poor (<200W) + battery <80% + price ≤0.7 PLN/kWh + weather poor
 
@@ -97,6 +97,12 @@ smart_critical_charging:
 - ✅ **Enhanced**: Weather-aware critical charging - system now considers PV forecast even at critical battery levels
 - ✅ **Enhanced**: Smart PV waiting logic - only waits for PV improvement if ≥2kW within 30 minutes AND price >0.4 PLN/kWh
 - ✅ **Enhanced**: More intelligent charging decisions that balance safety, cost, and renewable energy utilization
+
+#### **Recent PV Overproduction Threshold Fix (September 2025)**
+- ✅ **Fixed**: PV overproduction threshold increased from 500W to 1500W to allow charging during negative prices
+- ✅ **Enhanced**: System now takes advantage of negative electricity prices (-0.25 PLN/kWh) even with moderate PV overproduction
+- ✅ **Optimized**: Better utilization of market opportunities while still prioritizing PV charging during high overproduction
+- ✅ **Real-world Impact**: Prevents missing charging opportunities during excellent market conditions
 
 #### **Remaining Test Failures (6 tests)**
 1. **Hybrid Charging Logic Tests (3 failures)**:
