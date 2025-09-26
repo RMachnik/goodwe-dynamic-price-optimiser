@@ -14,7 +14,7 @@ inverter:
 
 # Charging Configuration
 charging:
-  max_power: 5000  # Maximum charging power in Watts
+  max_power: 10000  # Maximum charging power in Watts
   safety_voltage_min: 320.0  # Minimum safe battery voltage (GoodWe Lynx-D spec)
   safety_voltage_max: 480.0  # Maximum safe battery voltage (GoodWe Lynx-D spec)
   safety_current_max: 32.0   # Maximum safe charging current
@@ -145,7 +145,12 @@ safety:
   # Minimum battery SoC before starting charge (0-100)
   min_battery_soc: 10
   # Maximum grid power usage in watts (0 to disable)
-  max_grid_power: 5000
+  max_grid_power: 10000
+
+# Hybrid Charging Configuration
+hybrid_charging:
+  max_charging_power: 10000    # Absolute cap for total charging power
+  grid_charging_power: 10000   # Cap for grid contribution specifically
 
 # Logging Configuration (unified)
 logging:
