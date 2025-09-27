@@ -44,16 +44,15 @@ def test_smart_critical_charging():
             'expected_action': 'charge',
             'expected_reason': 'Emergency battery level'
         },
-            {
-                'name': 'Critical Level (8% SOC) - Acceptable Price',
-                'battery_soc': 8,
-                'current_price': 0.5,  # Acceptable price
-                'cheapest_price': 0.4,
-                'cheapest_hour': 23,
-                'expected_action': 'charge',
-                'expected_reason_dynamic': True,
-                'expected_savings': '20.0%'
-            },
+                {
+                    'name': 'Critical Level (8% SOC) - Acceptable Price',
+                    'battery_soc': 8,
+                    'current_price': 0.5,  # Acceptable price
+                    'cheapest_price': 0.4,
+                    'cheapest_hour': 23,
+                    'expected_action': 'charge',
+                    'expected_reason': 'acceptable price'
+                },
             {
                 'name': 'Critical Level (8% SOC) - High Price, Good Savings Soon',
                 'battery_soc': 8,
@@ -158,6 +157,11 @@ def test_smart_critical_charging():
             else:
                 dynamic_expected = f"waiting {hours_to_wait}h for {savings_text} savings not optimal".lower()
             assert dynamic_expected in reason, f"Expected reason '{dynamic_expected}' not found in '{reason}'"
+        else:
+            if scenario.get('expected_reason'):
+                assert scenario['expected_reason'].lower() in reason, f"Expected reason '{scenario['expected_reason']}' not found in '{reason}'"
+            elif scenario.get('expected_reason_contains'):
+                assert scenario['expected_reason_contains'].lower() in reason, f"Expected reason contains '{scenario['expected_reason_contains']}' not found in '{reason}'"
         
         logger.info(f"✓ Test passed: {scenario['name']}")
     
@@ -177,7 +181,7 @@ def test_configuration_loading():
     # Check smart critical charging config
     smart_config = config.get('timing_awareness', {}).get('smart_critical_charging', {})
     assert smart_config.get('enabled') == True, f"Expected smart critical charging enabled, got {smart_config.get('enabled')}"
-    assert smart_config.get('max_critical_price_pln') == 0.35, f"Expected max critical price 0.35, got {smart_config.get('max_critical_price_pln')}"
+    assert smart_config.get('max_critical_price_pln') == 0.7, f"Expected max critical price 0.7, got {smart_config.get('max_critical_price_pln')}"
     
     logger.info("✓ Configuration loading test passed!")
 

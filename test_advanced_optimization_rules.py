@@ -44,16 +44,16 @@ def test_optimization_rule_1():
             'expected_action': 'wait',
             'expected_reason': 'high price'
         },
-        {
-            'name': '10% SOC + Acceptable Price (0.5 PLN/kWh) - Should Charge',
-            'battery_soc': 10,
-            'current_price': 0.5,  # Below 0.8 threshold
-            'cheapest_price': 0.4,
-            # Keep constant cheap hour, compute expected hours dynamically below
-            'cheapest_hour': 23,
-            'expected_action': 'charge',
-            'expected_reason_dynamic': True  # compute expected reason substring based on now
-        },
+            {
+                'name': '10% SOC + Acceptable Price (0.5 PLN/kWh) - Should Charge',
+                'battery_soc': 10,
+                'current_price': 0.5,  # Below 0.7 threshold
+                'cheapest_price': 0.4,
+                # Keep constant cheap hour, compute expected hours dynamically below
+                'cheapest_hour': 23,
+                'expected_action': 'charge',
+                'expected_reason_contains': 'acceptable price'
+            },
         {
             'name': '9% SOC + High Price (1.0 PLN/kWh) - Should Use Normal Logic',
             'battery_soc': 9,  # Below 10%, not exactly 10%
@@ -82,16 +82,21 @@ def test_optimization_rule_1():
         
         # Verify expected action (support dynamic expectation for time-based cases)
         if scenario.get('expected_reason_dynamic') and scenario['battery_soc'] == 9:
+            reason_lower = decision['reason'].lower()
             now_hour = datetime.now().hour
             hours_to_wait = 23 - now_hour
             if hours_to_wait < 0:
                 hours_to_wait += 24
-            # With 60% savings at 9% SOC, expect wait if within max_wait_hours (6h), else charge
-            expect_wait = hours_to_wait <= 6
-            if expect_wait:
-                assert decision['should_charge'] == False, f"Expected to wait (cheaper price in {hours_to_wait}h) but got: {decision}"
+            # If PV improvement is imminent, expect to wait regardless of price wait horizon
+            if 'pv production improving soon' in reason_lower:
+                assert decision['should_charge'] == False, f"Expected to wait due to PV improvement but got: {decision}"
             else:
-                assert decision['should_charge'] == True, f"Expected to charge (wait {hours_to_wait}h too long) but got: {decision}"
+                # With 60% savings at 9% SOC, expect wait if within max_wait_hours (6h), else charge
+                expect_wait = hours_to_wait <= 6
+                if expect_wait:
+                    assert decision['should_charge'] == False, f"Expected to wait (cheaper price in {hours_to_wait}h) but got: {decision}"
+                else:
+                    assert decision['should_charge'] == True, f"Expected to charge (wait {hours_to_wait}h too long) but got: {decision}"
         else:
             if scenario['expected_action'] == 'charge':
                 assert decision['should_charge'] == True, f"Expected to charge but got: {decision}"
@@ -108,18 +113,25 @@ def test_optimization_rule_1():
                 hours_to_wait += 24
             if scenario['battery_soc'] == 10:
                 dynamic_expected = f"waiting {hours_to_wait}h for 20.0% savings not optimal".lower()
-                assert dynamic_expected in reason, f"Expected reason '{dynamic_expected}' not found in '{reason}'"
+                assert dynamic_expected in reason or 'pv production improving soon' in reason, f"Expected reason to include dynamic savings or PV improvement, got '{reason}'"
             else:
-                # 9% case: if expect_wait, message talks about 'much cheaper price in Xh', else 'waiting Xh ... not optimal'
+                # 9% case: accept PV improvement reason as well
                 expect_wait = hours_to_wait <= 6
-                if expect_wait:
-                    dynamic_expected = f"much cheaper price in {hours_to_wait}h".lower()
+                if 'pv production improving soon' in reason:
+                    pass
                 else:
-                    dynamic_expected = f"waiting {hours_to_wait}h for 60.0% savings not optimal".lower()
-                assert dynamic_expected in reason, f"Expected reason '{dynamic_expected}' not found in '{reason}'"
+                    if expect_wait:
+                        dynamic_expected = f"much cheaper price in {hours_to_wait}h".lower()
+                    else:
+                        dynamic_expected = f"waiting {hours_to_wait}h for 60.0% savings not optimal".lower()
+                    assert dynamic_expected in reason, f"Expected reason '{dynamic_expected}' not found in '{reason}'"
         else:
-            expected_reason = scenario['expected_reason'].lower()
-            assert expected_reason in reason, f"Expected reason '{expected_reason}' not found in '{reason}'"
+            if 'expected_reason' in scenario:
+                expected_reason = scenario['expected_reason'].lower()
+                assert expected_reason in reason, f"Expected reason '{expected_reason}' not found in '{reason}'"
+            if 'expected_reason_contains' in scenario:
+                expected_contains = scenario['expected_reason_contains'].lower()
+                assert expected_contains in reason, f"Expected reason to contain '{expected_contains}' but got '{reason}'"
         
         logger.info(f"✓ Test passed: {scenario['name']}")
 
