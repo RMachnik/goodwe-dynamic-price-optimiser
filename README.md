@@ -64,7 +64,7 @@ The system currently uses file-based JSON storage with in-memory data limited to
 
 ### **Enhanced Critical Battery Charging**
 - **More Conservative Threshold**: Critical battery level lowered from 20% to 12% SOC
-- **Lower Price Limit**: Maximum critical charging price reduced from 0.6 to 0.35 PLN/kWh
+- **Lower Price Limit**: Maximum critical charging price reduced from 0.6 to 0.7 PLN/kWh
 - **Weather-Aware Decisions**: System now considers PV forecast even at critical battery levels
 - **Smart PV Waiting**: Only waits for PV improvement if ≥2kW within 30 minutes AND price >0.4 PLN/kWh
 - **Better Cost Control**: Prevents unnecessary expensive charging while maintaining safety
@@ -74,7 +74,7 @@ The system currently uses file-based JSON storage with in-memory data limited to
 ## 🆕 **Recent Updates (December 2024)**
 
 ### **Advanced Optimization Rules**
-- **Smart Critical Charging**: Emergency (5% SOC) vs Critical (12% SOC) with weather-aware price optimization (max 0.35 PLN/kWh)
+- **Smart Critical Charging**: Emergency (5% SOC) vs Critical (12% SOC) with weather-aware price optimization (max 0.7 PLN/kWh)
 - **Cost Optimization**: Real-world tested rules save up to 70% on charging costs
 - **Proactive Charging**: Charges when conditions are favorable, not just when battery is low
 - **Prevents Expensive Charging**: Avoids charging at high prices when better prices are available soon
@@ -124,7 +124,7 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - **Test Coverage**: ✅ 227/234 tests passing (97.0% pass rate)
 - **Configuration System**: ✅ Fixed critical config loading bug
 - **Recent Fixes**: ✅ Price window analyzer, critical battery thresholds, test data formats
-- **Latest Updates**: ✅ Critical battery threshold lowered to 12% SOC, max price reduced to 0.35 PLN/kWh, weather-aware critical charging
+- **Latest Updates**: ✅ Critical battery threshold lowered to 12% SOC, max price reduced to 0.7 PLN/kWh, weather-aware critical charging
 
 ## 🏗️ **System Architecture**
 
