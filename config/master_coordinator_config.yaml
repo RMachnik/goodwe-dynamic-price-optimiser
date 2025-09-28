@@ -4,7 +4,7 @@
 
 # Inverter Configuration
 inverter:
-  ip_address: "192.168.33.15"  # Your inverter IP
+  ip_address: "192.168.33.6"  # Your inverter IP
   port: 8899
   timeout: 1
   retries: 3
