@@ -70,10 +70,19 @@ coordinator:
   
   # Charging decision thresholds
   charging_thresholds:
-    start_charging_score: 70    # Start charging if total score >= this
+    start_charging_score: 50    # Start charging if total score >= this (lowered from 70)
     stop_charging_score: 30     # Stop charging if total score <= this
     continue_charging_min: 30   # Continue charging if score >= this
     continue_charging_max: 70   # Continue charging if score <= this
+  
+  # Aggressive charging during cheapest price periods
+  cheapest_price_aggressive_charging:
+    enabled: true                    # Enable aggressive charging during cheapest periods
+    max_price_difference_pln: 0.05   # Charge if current price within 0.05 PLN/kWh of cheapest
+    min_battery_soc_for_aggressive: 30  # Minimum SOC to trigger aggressive charging
+    max_battery_soc_for_aggressive: 85  # Maximum SOC to trigger aggressive charging
+    override_pv_overproduction: true    # Override PV overproduction check during cheapest periods
+    min_charging_duration_minutes: 15   # Minimum charging duration during cheapest periods
 
 # Price Analysis Configuration
 price_analysis:
@@ -255,7 +264,7 @@ weather_integration:
   location:
     latitude: 50.1
     longitude: 19.7
-    timezone: "Europe/Warsaw"
+    timezone: "Europe/Warsaw"  # Server timezone now correctly set to Warsaw
     
   # Weather Data Processing
   processing:

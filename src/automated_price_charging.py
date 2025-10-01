@@ -95,6 +95,9 @@ class AutomatedPriceCharger:
         
         # Load electricity pricing configuration
         self._load_pricing_config()
+        
+        # Load aggressive cheapest price charging configuration
+        self._load_aggressive_cheapest_config()
     
     def _load_config(self):
         """Load configuration from config file"""
@@ -129,6 +132,27 @@ class AutomatedPriceCharger:
             self.sc_component_gross = 0.1097
             self.minimum_price_floor = 0.0050
             self.charging_threshold_percentile = 0.25
+    
+    def _load_aggressive_cheapest_config(self):
+        """Load aggressive cheapest price charging configuration"""
+        try:
+            coordinator_config = self.config.get('coordinator', {})
+            self.aggressive_cheapest_config = coordinator_config.get('cheapest_price_aggressive_charging', {})
+            
+            # Set defaults if not configured
+            self.aggressive_cheapest_enabled = self.aggressive_cheapest_config.get('enabled', True)
+            self.max_price_difference_pln = self.aggressive_cheapest_config.get('max_price_difference_pln', 0.05)
+            self.min_battery_soc_for_aggressive = self.aggressive_cheapest_config.get('min_battery_soc_for_aggressive', 30)
+            self.max_battery_soc_for_aggressive = self.aggressive_cheapest_config.get('max_battery_soc_for_aggressive', 85)
+            self.override_pv_overproduction = self.aggressive_cheapest_config.get('override_pv_overproduction', True)
+            self.min_charging_duration_minutes = self.aggressive_cheapest_config.get('min_charging_duration_minutes', 15)
+            
+            logger.info(f"Aggressive cheapest price charging: {'enabled' if self.aggressive_cheapest_enabled else 'disabled'}")
+            
+        except Exception as e:
+            logger.error(f"Failed to load aggressive cheapest price configuration: {e}")
+            self.aggressive_cheapest_config = {}
+            self.aggressive_cheapest_enabled = False
     
     def calculate_final_price(self, market_price: float) -> float:
         """Calculate final price including SC component (Składnik cenotwórczy)"""
@@ -727,6 +751,38 @@ class AutomatedPriceCharger:
                 'charging_time_hours': grid_charging_time
             }
 
+    def _check_aggressive_cheapest_price_conditions(self, battery_soc: int, current_price: Optional[float], 
+                                                   cheapest_price: Optional[float], cheapest_hour: Optional[int]) -> bool:
+        """Check if aggressive charging conditions are met during cheapest price periods"""
+        
+        # Check if aggressive cheapest price charging is enabled
+        if not self.aggressive_cheapest_enabled:
+            return False
+        
+        # Need price data to make decision
+        if not current_price or not cheapest_price:
+            return False
+        
+        # Check if battery SOC is within acceptable range for aggressive charging
+        if battery_soc < self.min_battery_soc_for_aggressive or battery_soc > self.max_battery_soc_for_aggressive:
+            return False
+        
+        # Check if current price is close enough to cheapest price
+        price_difference = abs(current_price - cheapest_price)
+        if price_difference > self.max_price_difference_pln:
+            return False
+        
+        # Check if we're currently at or very close to the cheapest hour
+        current_hour = datetime.now().hour
+        if cheapest_hour is not None:
+            # Allow charging if we're at the cheapest hour or within 1 hour of it
+            hour_difference = abs(current_hour - cheapest_hour)
+            if hour_difference > 1:
+                return False
+        
+        logger.info(f"Aggressive cheapest price conditions met: SOC={battery_soc}%, current_price={current_price:.3f}, cheapest_price={cheapest_price:.3f} PLN/kWh")
+        return True
+
     def _make_charging_decision(self, battery_soc: int, overproduction: int, grid_power: int,
                               grid_direction: str, current_price: Optional[float],
                               cheapest_price: Optional[float], cheapest_hour: Optional[int]) -> Dict[str, any]:
@@ -746,6 +802,15 @@ class AutomatedPriceCharger:
             return self._smart_critical_charging_decision(
                 battery_soc, current_price, cheapest_price, cheapest_hour
             )
+        
+        # AGGRESSIVE CHEAPEST PRICE CHARGING: Charge aggressively during cheapest price periods
+        if self._check_aggressive_cheapest_price_conditions(battery_soc, current_price, cheapest_price, cheapest_hour):
+            return {
+                'should_charge': True,
+                'reason': f'Aggressive charging during cheapest price period (current: {current_price:.3f}, cheapest: {cheapest_price:.3f} PLN/kWh)',
+                'priority': 'high',
+                'confidence': 0.9
+            }
         
         # HIGH: PV overproduction - no need to charge from grid
         if overproduction > self.overproduction_threshold:
