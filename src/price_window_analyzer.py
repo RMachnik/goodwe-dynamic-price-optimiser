@@ -192,7 +192,18 @@ class PriceWindowAnalyzer:
             if 'value' in price_data:
                 # Original format with detailed price data
                 for item in price_data['value']:
-                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                    # Handle different datetime formats
+                    dtime_str = item['dtime']
+                    try:
+                        if ':' in dtime_str and dtime_str.count(':') == 2:
+                            # Format: "2025-10-14 22:00:00"
+                            item_time = datetime.strptime(dtime_str, '%Y-%m-%d %H:%M:%S')
+                        else:
+                            # Format: "2025-10-14 22:00"
+                            item_time = datetime.strptime(dtime_str, '%Y-%m-%d %H:%M')
+                    except ValueError:
+                        logger.error(f"Error parsing datetime: {dtime_str}")
+                        continue
                     
                     # Check if current time falls within this 15-minute period
                     if item_time <= current_time < item_time + timedelta(minutes=15):
@@ -1021,6 +1032,390 @@ class PriceWindowAnalyzer:
         except Exception as e:
             logger.error(f"Error ranking windows by priority: {e}")
             return windows
+    
+    def analyze_with_forecast(self, current_data: Dict, price_data: Dict, forecast_data: List) -> Dict[str, Any]:
+        """
+        Analyze price windows using forecast data for enhanced decision making
+        
+        Args:
+            current_data: Current system data
+            price_data: Current price data (CSDAC)
+            forecast_data: List of PriceForecastPoint objects
+            
+        Returns:
+            Enhanced analysis with forecast insights
+        """
+        try:
+            logger.info("Analyzing price windows with forecast data")
+            
+            # Get standard analysis first
+            standard_analysis = self.analyze_price_windows(price_data)
+            
+            if not forecast_data:
+                logger.warning("No forecast data available, using standard analysis")
+                return standard_analysis
+            
+            # Find optimal windows using forecasts
+            forecast_windows = self.find_optimal_windows_with_forecast(forecast_data)
+            
+            # Compare forecast vs current prices
+            price_comparison = self._compare_forecast_vs_current(price_data, forecast_data)
+            
+            # Determine if we should wait for better prices
+            current_price = price_data.get('current_price_pln', 0)
+            wait_decision = self._should_wait_for_better_price(current_price, forecast_data)
+            
+            # Enhanced analysis
+            enhanced_analysis = {
+                'standard_windows': standard_analysis,
+                'forecast_enhanced': True,
+                'forecast_windows': [
+                    {
+                        'start_time': w.start_time.isoformat(),
+                        'end_time': w.end_time.isoformat(),
+                        'duration_hours': w.duration_hours,
+                        'avg_price_pln': w.avg_price_pln,
+                        'savings_potential_pln': w.savings_potential_pln,
+                        'price_category': w.price_category
+                    }
+                    for w in forecast_windows
+                ],
+                'price_comparison': price_comparison,
+                'wait_decision': wait_decision,
+                'forecast_confidence': self._calculate_forecast_confidence(forecast_data),
+                'forecast_statistics': self._get_forecast_statistics(forecast_data)
+            }
+            
+            logger.info(f"Enhanced analysis completed with {len(forecast_windows)} forecast windows")
+            return enhanced_analysis
+            
+        except Exception as e:
+            logger.error(f"Error in forecast-enhanced analysis: {e}")
+            return standard_analysis
+    
+    def find_optimal_windows_with_forecast(self, forecast_data: List) -> List[PriceWindow]:
+        """
+        Find optimal charging windows using forecast data
+        
+        Args:
+            forecast_data: List of PriceForecastPoint objects
+            
+        Returns:
+            List of optimal PriceWindow objects based on forecasts
+        """
+        try:
+            if not forecast_data:
+                return []
+            
+            logger.info(f"Finding optimal windows from {len(forecast_data)} forecast points")
+            
+            # Convert forecast data to price windows
+            forecast_windows = []
+            current_time = datetime.now()
+            
+            # Group forecast points into potential charging windows
+            window_size = 4  # 4-hour windows
+            step_size = 1    # 1-hour steps
+            
+            for i in range(0, len(forecast_data) - window_size, step_size):
+                window_points = forecast_data[i:i + window_size]
+                
+                if len(window_points) < window_size:
+                    break
+                
+                # Calculate window statistics
+                prices = [p.forecasted_price_pln for p in window_points]
+                avg_price = statistics.mean(prices)
+                min_price = min(prices)
+                max_price = max(prices)
+                
+                # Only consider future windows
+                start_time = window_points[0].time
+                if start_time <= current_time:
+                    continue
+                
+                end_time = window_points[-1].time + timedelta(hours=1)  # Add 1 hour for end time
+                duration_hours = (end_time - start_time).total_seconds() / 3600
+                
+                # Calculate savings potential (vs average forecast price)
+                overall_avg = statistics.mean([p.forecasted_price_pln for p in forecast_data])
+                savings_potential = overall_avg - avg_price
+                
+                # Determine price category
+                price_category = self._categorize_price(avg_price)
+                
+                # Create price window
+                window = PriceWindow(
+                    start_time=start_time,
+                    end_time=end_time,
+                    duration_hours=duration_hours,
+                    avg_price_pln=avg_price,
+                    min_price_pln=min_price,
+                    max_price_pln=max_price,
+                    price_category=price_category,
+                    savings_potential_pln=savings_potential
+                )
+                
+                forecast_windows.append(window)
+            
+            # Filter and rank windows
+            optimal_windows = self._filter_optimal_forecast_windows(forecast_windows)
+            optimal_windows = self.rank_windows_by_priority(optimal_windows)
+            
+            logger.info(f"Found {len(optimal_windows)} optimal forecast windows")
+            return optimal_windows
+            
+        except Exception as e:
+            logger.error(f"Error finding optimal forecast windows: {e}")
+            return []
+    
+    def should_wait_for_better_price(self, current_price: float, forecast_data: List) -> bool:
+        """
+        Determine if we should wait for a better price based on forecasts
+        
+        Args:
+            current_price: Current electricity price in PLN/MWh
+            forecast_data: List of PriceForecastPoint objects
+            
+        Returns:
+            True if we should wait for a better price
+        """
+        try:
+            if not forecast_data:
+                return False
+            
+            # Get forecast configuration
+            forecast_config = self.config.get('pse_price_forecast', {})
+            decision_rules = forecast_config.get('decision_rules', {})
+            
+            wait_enabled = decision_rules.get('wait_for_better_price_enabled', True)
+            min_savings_percent = decision_rules.get('min_savings_to_wait_percent', 15)
+            max_wait_hours = decision_rules.get('max_wait_time_hours', 4)
+            
+            if not wait_enabled:
+                return False
+            
+            current_time = datetime.now()
+            max_wait_time = current_time + timedelta(hours=max_wait_hours)
+            
+            # Find best price within wait window
+            best_price = None
+            best_price_time = None
+            
+            for point in forecast_data:
+                if current_time < point.time <= max_wait_time:
+                    if best_price is None or point.forecasted_price_pln < best_price:
+                        best_price = point.forecasted_price_pln
+                        best_price_time = point.time
+            
+            if best_price is None:
+                return False
+            
+            # Calculate potential savings
+            savings_percent = ((current_price - best_price) / current_price) * 100
+            
+            should_wait = savings_percent >= min_savings_percent
+            
+            if should_wait:
+                wait_hours = (best_price_time - current_time).total_seconds() / 3600
+                logger.info(f"Should wait {wait_hours:.1f}h for better price: {best_price:.2f} PLN/MWh (savings: {savings_percent:.1f}%)")
+            else:
+                logger.debug(f"Not worth waiting: potential savings {savings_percent:.1f}% below threshold {min_savings_percent}%")
+            
+            return should_wait
+            
+        except Exception as e:
+            logger.error(f"Error determining wait decision: {e}")
+            return False
+    
+    def _compare_forecast_vs_current(self, price_data: Dict, forecast_data: List) -> Dict[str, Any]:
+        """Compare forecast prices with current prices"""
+        try:
+            if not forecast_data:
+                return {'available': False}
+            
+            current_price = price_data.get('current_price_pln', 0)
+            forecast_prices = [p.forecasted_price_pln for p in forecast_data]
+            
+            return {
+                'available': True,
+                'current_price_pln': current_price,
+                'forecast_avg_pln': statistics.mean(forecast_prices),
+                'forecast_min_pln': min(forecast_prices),
+                'forecast_max_pln': max(forecast_prices),
+                'price_trend': 'increasing' if forecast_prices[-1] > forecast_prices[0] else 'decreasing',
+                'best_forecast_price_pln': min(forecast_prices),
+                'potential_savings_percent': ((current_price - min(forecast_prices)) / current_price * 100) if current_price > 0 else 0
+            }
+        except Exception as e:
+            logger.error(f"Error comparing forecast vs current: {e}")
+            return {'available': False, 'error': str(e)}
+    
+    def _should_wait_for_better_price(self, current_price: float, forecast_data: List) -> Dict[str, Any]:
+        """Detailed wait decision analysis"""
+        try:
+            if not forecast_data:
+                return {
+                    'should_wait': False,
+                    'reason': 'No forecast data available',
+                    'better_price_time': None,
+                    'expected_savings_percent': 0.0
+                }
+            
+            # Get configuration
+            forecast_config = self.config.get('pse_price_forecast', {})
+            decision_rules = forecast_config.get('decision_rules', {})
+            
+            wait_enabled = decision_rules.get('wait_for_better_price_enabled', True)
+            min_savings_percent = decision_rules.get('min_savings_to_wait_percent', 15)
+            max_wait_hours = decision_rules.get('max_wait_time_hours', 4)
+            
+            if not wait_enabled:
+                return {
+                    'should_wait': False,
+                    'reason': 'Wait for better price feature is disabled',
+                    'better_price_time': None,
+                    'expected_savings_percent': 0.0
+                }
+            
+            current_time = datetime.now()
+            max_wait_time = current_time + timedelta(hours=max_wait_hours)
+            
+            # Find best price within wait window
+            best_price = None
+            best_price_time = None
+            
+            for point in forecast_data:
+                if current_time < point.time <= max_wait_time:
+                    if best_price is None or point.forecasted_price_pln < best_price:
+                        best_price = point.forecasted_price_pln
+                        best_price_time = point.time
+            
+            if best_price is None:
+                return {
+                    'should_wait': False,
+                    'reason': 'No forecast data within wait window',
+                    'better_price_time': None,
+                    'expected_savings_percent': 0.0
+                }
+            
+            # Calculate potential savings
+            savings_percent = ((current_price - best_price) / current_price) * 100
+            
+            if savings_percent >= min_savings_percent:
+                wait_hours = (best_price_time - current_time).total_seconds() / 3600
+                return {
+                    'should_wait': True,
+                    'reason': f'Better price expected in {wait_hours:.1f}h (savings: {savings_percent:.1f}%)',
+                    'better_price_time': best_price_time.isoformat(),
+                    'expected_savings_percent': savings_percent,
+                    'current_price': current_price,
+                    'forecasted_price': best_price,
+                    'wait_hours': wait_hours
+                }
+            
+            return {
+                'should_wait': False,
+                'reason': f'Potential savings ({savings_percent:.1f}%) below threshold ({min_savings_percent}%)',
+                'better_price_time': best_price_time.isoformat(),
+                'expected_savings_percent': savings_percent,
+                'current_price': current_price,
+                'forecasted_price': best_price
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in wait decision analysis: {e}")
+            return {
+                'should_wait': False,
+                'reason': f'Error in analysis: {str(e)}',
+                'better_price_time': None,
+                'expected_savings_percent': 0.0
+            }
+    
+    def _filter_optimal_forecast_windows(self, windows: List[PriceWindow]) -> List[PriceWindow]:
+        """Filter forecast windows to find optimal ones"""
+        try:
+            if not windows:
+                return []
+            
+            # Filter by price thresholds
+            optimal_windows = []
+            
+            for window in windows:
+                # Only consider windows with reasonable prices
+                if window.avg_price_pln <= self.price_thresholds['high']:
+                    # Only consider windows with positive savings potential
+                    if window.savings_potential_pln > 0:
+                        # Only consider windows of reasonable duration
+                        if 0.5 <= window.duration_hours <= 6.0:
+                            optimal_windows.append(window)
+            
+            return optimal_windows
+            
+        except Exception as e:
+            logger.error(f"Error filtering optimal forecast windows: {e}")
+            return windows
+    
+    def _calculate_forecast_confidence(self, forecast_data: List) -> float:
+        """Calculate confidence level of forecast data"""
+        try:
+            if not forecast_data:
+                return 0.0
+            
+            # Base confidence on data freshness and consistency
+            current_time = datetime.now()
+            future_points = [p for p in forecast_data if p.time > current_time]
+            
+            if not future_points:
+                return 0.0
+            
+            # Calculate price consistency (lower variance = higher confidence)
+            prices = [p.forecasted_price_pln for p in future_points]
+            if len(prices) < 2:
+                return 0.5
+            
+            price_variance = statistics.variance(prices)
+            avg_price = statistics.mean(prices)
+            
+            # Normalize variance (lower is better)
+            consistency_score = max(0.0, 1.0 - (price_variance / (avg_price * avg_price)))
+            
+            # Factor in data age (newer is better)
+            age_score = 1.0  # Assume fresh data for now
+            
+            return min(1.0, consistency_score * age_score)
+            
+        except Exception as e:
+            logger.error(f"Error calculating forecast confidence: {e}")
+            return 0.0
+    
+    def _get_forecast_statistics(self, forecast_data: List) -> Dict[str, Any]:
+        """Get statistical summary of forecast data"""
+        try:
+            if not forecast_data:
+                return {'available': False, 'count': 0}
+            
+            prices = [p.forecasted_price_pln for p in forecast_data]
+            times = [p.time for p in forecast_data]
+            
+            return {
+                'available': True,
+                'count': len(forecast_data),
+                'min_price_pln': min(prices),
+                'max_price_pln': max(prices),
+                'avg_price_pln': statistics.mean(prices),
+                'median_price_pln': statistics.median(prices),
+                'price_std_dev': statistics.stdev(prices) if len(prices) > 1 else 0,
+                'time_range': {
+                    'start': min(times).isoformat(),
+                    'end': max(times).isoformat()
+                },
+                'confidence': self._calculate_forecast_confidence(forecast_data)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting forecast statistics: {e}")
+            return {'available': False, 'error': str(e)}
 
 
 def create_price_window_analyzer(config: Dict[str, Any]) -> PriceWindowAnalyzer:

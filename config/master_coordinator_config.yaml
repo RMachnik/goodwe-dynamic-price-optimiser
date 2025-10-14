@@ -403,6 +403,27 @@ battery_selling:
     track_cycles: true              # Track discharge cycles
     alert_on_anomalies: true        # Alert on unusual patterns
 
+# PSE Price Forecast Configuration
+pse_price_forecast:
+  enabled: true                              # Enable price forecasts
+  api_url: "https://api.raporty.pse.pl/api/price-fcst"
+  update_interval_minutes: 60                # Update every 60 minutes
+  forecast_hours_ahead: 24                   # Forecast 24 hours ahead
+  confidence_threshold: 0.7                  # Minimum confidence to use forecasts
+  
+  # Forecast-based decision rules
+  decision_rules:
+    wait_for_better_price_enabled: true      # Wait if forecast shows better prices
+    min_savings_to_wait_percent: 15          # Wait if forecast shows 15%+ savings
+    max_wait_time_hours: 4                   # Maximum time to wait for better price
+    prefer_forecast_over_current: true       # Prefer forecast when available
+    
+  # Fallback configuration
+  fallback:
+    use_csdac_if_unavailable: true          # Use CSDAC if forecast unavailable
+    retry_attempts: 3                        # Retry attempts for API calls
+    retry_delay_seconds: 60                  # Delay between retries
+
 # Development/Debug Configuration
 debug:
   enabled: false               # Enable debug mode

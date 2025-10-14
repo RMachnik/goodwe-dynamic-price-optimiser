@@ -17,6 +17,7 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **✅ ADVANCED OPTIMIZATION**: Smart critical charging rules prevent expensive charging and enable proactive charging
 - **✅ COST-EFFECTIVE**: Real-world tested optimization rules save up to 70% on charging costs
 - **✅ BATTERY SELLING**: Conservative battery energy selling generates ~260 PLN/year additional revenue
+- **✅ PRICE FORECASTS**: PSE price forecasts enable earlier and more accurate charging decisions (180-360 PLN/year savings)
 - **✅ PROVEN**: Saves money by charging during optimal price windows and avoiding grid charging during PV overproduction
 
 **For detailed implementation strategy, technical specifications, and current progress, see the [Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md).**
@@ -105,6 +106,14 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - [Optimization Rules Implementation](docs/OPTIMIZATION_RULES_IMPLEMENTATION.md)
 - [Enhanced Dashboard Documentation](docs/ENHANCED_DASHBOARD.md)
 - [Battery Energy Selling Guide](docs/README_battery_selling.md)
+
+### **PSE Price Forecasts (NEW)**
+- **Early Planning**: Price forecasts available before 12:42 CSDAC publication
+- **Enhanced Decisions**: Better timing with 24-hour price predictions
+- **Cost Savings**: 180-360 PLN/year additional savings from improved timing
+- **API Integration**: Official PSE price-fcst API for reliable forecasts
+- **Smart Waiting**: Wait for better prices when forecasts show 15%+ savings
+- **Fallback Safety**: Automatic fallback to CSDAC if forecasts unavailable
 
 ### **Battery Energy Selling (NEW)**
 - **Conservative Safety**: 80% min SOC, 50% safety margin for battery protection
@@ -338,7 +347,31 @@ chmod +x scripts/ubuntu_setup.sh
    # Update inverter IP address and other settings
    ```
 
-4. **Test the Master Coordinator**
+4. **Configure PSE Price Forecasts (Optional)**
+   ```yaml
+   # PSE Price Forecast Configuration
+   pse_price_forecast:
+     enabled: true                              # Enable price forecasts
+     api_url: "https://api.raporty.pse.pl/api/price-fcst"
+     update_interval_minutes: 60                # Update every 60 minutes
+     forecast_hours_ahead: 24                   # Forecast 24 hours ahead
+     confidence_threshold: 0.7                  # Minimum confidence to use forecasts
+     
+     # Forecast-based decision rules
+     decision_rules:
+       wait_for_better_price_enabled: true      # Wait if forecast shows better prices
+       min_savings_to_wait_percent: 15          # Wait if forecast shows 15%+ savings
+       max_wait_time_hours: 4                   # Maximum time to wait for better price
+       prefer_forecast_over_current: true       # Prefer forecast when available
+       
+     # Fallback configuration
+     fallback:
+       use_csdac_if_unavailable: true          # Use CSDAC if forecast unavailable
+       retry_attempts: 3                        # Retry attempts for API calls
+       retry_delay_seconds: 60                  # Delay between retries
+   ```
+
+5. **Test the Master Coordinator**
    ```bash
    # Test mode (single decision cycle)
    python src/master_coordinator.py --test
