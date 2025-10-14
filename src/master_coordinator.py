@@ -46,6 +46,7 @@ from pv_trend_analyzer import PVTrendAnalyzer
 from multi_session_manager import MultiSessionManager
 from battery_selling_engine import BatterySellingEngine
 from battery_selling_monitor import BatterySellingMonitor
+from pse_price_forecast_collector import PSEPriceForecastCollector
 
 # Setup logging
 project_root = Path(__file__).parent.parent
@@ -101,6 +102,7 @@ class MasterCoordinator:
         self.multi_session_manager = None
         self.battery_selling_engine = None
         self.battery_selling_monitor = None
+        self.forecast_collector = None
         
         # System data
         self.current_data = {}
@@ -189,6 +191,15 @@ class MasterCoordinator:
             else:
                 logger.info("Weather integration disabled in configuration")
             
+            # Initialize PSE Price Forecast Collector
+            logger.info("Initializing PSE Price Forecast Collector...")
+            forecast_enabled = self.config.get('pse_price_forecast', {}).get('enabled', True)
+            if forecast_enabled:
+                self.forecast_collector = PSEPriceForecastCollector(self.config)
+                logger.info("PSE Price Forecast Collector initialized successfully")
+            else:
+                logger.info("PSE price forecast disabled in configuration")
+            
             # Initialize decision engine
             logger.info("Initializing Decision Engine...")
             self.decision_engine = MultiFactorDecisionEngine(self.config, self.charging_controller)
@@ -207,6 +218,11 @@ class MasterCoordinator:
             if self.decision_engine and self.pv_consumption_analyzer:
                 self.decision_engine.pv_consumption_analyzer = self.pv_consumption_analyzer
                 logger.info("PV consumption analyzer integrated with decision engine")
+            
+            # Set forecast collector in decision engine
+            if self.decision_engine and self.forecast_collector:
+                self.decision_engine.forecast_collector = self.forecast_collector
+                logger.info("PSE Price Forecast Collector integrated with decision engine")
             
             # Initialize multi-session manager
             logger.info("Initializing Multi-Session Manager...")
@@ -1076,6 +1092,9 @@ class MultiFactorDecisionEngine:
         
         # PV trend analysis for weather-aware decisions
         self.pv_trend_analyzer = PVTrendAnalyzer(config)
+        
+        # PSE Price Forecast integration
+        self.forecast_collector = None  # Will be set by MasterCoordinator
     
     def analyze_and_decide(self, current_data: Dict, price_data: Dict, historical_data: List) -> Dict[str, Any]:
         """Analyze current situation and make charging decision with timing awareness"""
@@ -1092,6 +1111,22 @@ class MultiFactorDecisionEngine:
         logger.info("Using timing-aware decision engine with weather integration and PV vs consumption analysis")
         
         try:
+            # Get PSE price forecasts if available
+            forecast_data = []
+            forecast_enhanced_analysis = None
+            if self.forecast_collector and self.forecast_collector.is_forecast_available():
+                logger.info("Using PSE price forecasts for enhanced decision making")
+                forecast_data = self.forecast_collector.fetch_price_forecast()
+                
+                # Enhanced price analysis with forecasts
+                if forecast_data:
+                    forecast_enhanced_analysis = self.price_analyzer.analyze_with_forecast(
+                        current_data, price_data, forecast_data
+                    )
+                    logger.info(f"Forecast-enhanced analysis completed with {len(forecast_data)} forecast points")
+            else:
+                logger.debug("No forecast data available, using standard analysis")
+            
             # Get weather-enhanced PV forecast
             pv_forecast = self._get_weather_enhanced_pv_forecast(current_data)
             
@@ -1201,6 +1236,13 @@ class MultiFactorDecisionEngine:
                         'confidence': timing_recommendation.confidence if timing_recommendation else 0.0,
                         'alternative_action': timing_recommendation.alternative_action if timing_recommendation else 'charge_now'
                     }
+                },
+                'forecast_analysis': {
+                    'forecast_available': bool(forecast_data),
+                    'forecast_enhanced': forecast_enhanced_analysis is not None,
+                    'forecast_data': forecast_enhanced_analysis if forecast_enhanced_analysis else None,
+                    'forecast_confidence': self.forecast_collector.get_forecast_confidence() if self.forecast_collector else 0.0,
+                    'forecast_statistics': self.forecast_collector.get_forecast_statistics() if self.forecast_collector else None
                 }
             }
             
