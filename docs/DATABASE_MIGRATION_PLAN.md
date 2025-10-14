@@ -1,34 +1,19 @@
 # Plan Optymalizacji: Migracja z Plików na Bazę Danych
-## Enhanced Database Migration Plan - Complete System Analysis
-
-**Document Version**: 2.0  
-**Updated**: 2025-01-09  
-**Status**: Comprehensive Analysis Complete  
-
----
 
 ## 1. Przygotowanie infrastruktury bazy danych
 
 **Cel**: Utworzenie struktury bazy danych i warstwy abstrakcji
 
-### 1.1 Rozszerzony schemat bazy danych SQLite
+### 1.1 Schemat bazy danych SQLite
 
 - Utworzenie pliku `src/database/schema.py` z definicjami tabel:
-
-**Tabele podstawowe:**
 - `energy_data` - dane energetyczne (timestamp, battery_soc, pv_power, grid_power, consumption, price)
 - `charging_sessions` - sesje ładowania (session_id, start_time, end_time, energy_kwh, cost_pln, status)
 - `daily_stats` - statystyki dzienne (date, total_consumption, total_pv, total_grid_import, avg_price)
 - `system_state` - stan systemu (timestamp, state, uptime, metrics)
 - `battery_selling_sessions` - sesje sprzedaży energii
+- `price_forecasts` - prognozy cen
 - `coordinator_decisions` - historia decyzji
-
-**Tabele dla prognoz i danych zewnętrznych:**
-- `weather_data` - dane pogodowe (timestamp, source, temperature, humidity, pressure, wind_speed, wind_direction, precipitation, cloud_cover, solar_irradiance)
-- `price_forecasts` - prognozy cen energii (timestamp, forecast_date, hour, price_pln, confidence, source)
-- `pv_forecasts` - prognozy produkcji PV (timestamp, forecast_date, hour, predicted_power_w, confidence, weather_conditions)
-- `peak_hours_data` - dane o godzinach szczytowych (timestamp, date, peak_hours, recommended_usage, savings_potential)
-- `price_window_analysis` - analiza okien cenowych (timestamp, window_start, window_end, price_category, savings_pln)
 
 ### 1.2 Warstwa abstrakcji danych
 
@@ -42,29 +27,19 @@
 - Dodanie `aiosqlite>=0.19.0` - async SQLite
 - Dodanie `sqlalchemy>=2.0.0` - ORM (opcjonalnie dla przyszłej migracji do PostgreSQL)
 - Dodanie `alembic>=1.12.0` - migracje bazy danych
-- Dodanie `pydantic>=2.0.0` - walidacja danych
-- Dodanie `backoff>=2.2.0` - retry logic dla operacji bazodanowych
 
 ## 2. Implementacja narzędzia migracji danych
 
 **Cel**: Przeniesienie istniejących danych z JSON do bazy
 
-### 2.1 Rozszerzony skrypt migracji
+### 2.1 Skrypt migracji
 
 - Utworzenie `scripts/migrate_json_to_db.py`:
-- Skanowanie katalogów `out/`, `out/energy_data/`, `out/battery_selling_analytics/`, `out/multi_session_data/`
-- Parsowanie plików JSON:
-  - `coordinator_state_*.json` → tabela `system_state`
-  - `charging_decision_*.json` → tabela `coordinator_decisions`
-  - `charging_schedule_*.json` → tabela `charging_sessions`
-  - `battery_selling_decision_*.json` → tabela `battery_selling_sessions`
-  - `session_records.json`, `daily_summaries.json`, `monthly_reports.json` → tabele analytics
-  - Pliki pogodowe i prognoz → tabele `weather_data`, `price_forecasts`, `pv_forecasts`
-- Import danych do odpowiednich tabel z walidacją Pydantic
-- Raportowanie postępu i błędów z szczegółowymi logami
+- Skanowanie katalogów `out/`, `out/energy_data/`, `out/battery_selling_analytics/`
+- Parsowanie plików JSON (coordinator_state_*.json, charging_schedule_*.json, session_records.json, daily_summaries.json)
+- Import danych do odpowiednich tabel z walidacją
+- Raportowanie postępu i błędów
 - Opcja dry-run do testowania
-- **Backup automatyczny** przed migracją
-- **Rollback mechanism** w przypadku błędów
 
 ### 2.2 Walidacja migracji
 
@@ -78,12 +53,11 @@
 
 ### 3.1 EnhancedDataCollector (`src/enhanced_data_collector.py`)
 
-- Zamiana `save_data_to_file()` (linie 383-406) na `save_data_to_db()`
-- Usunięcie zapisu do JSON
+- Zamiana `save_data_to_file()` na `save_data_to_db()`
+- Usunięcie zapisu do JSON (linie ~383-406)
 - Dodanie async zapisów do tabeli `energy_data`
 - Batch insert co 10 pomiarów dla wydajności
 - Zachowanie metody `get_current_data()` z cache w pamięci
-- **Error handling** z retry logic dla operacji bazodanowych
 
 ### 3.2 MasterCoordinator (`src/master_coordinator.py`)
 
@@ -114,33 +88,6 @@
 
 - Zamiana zapisów prognoz na tabelę `pv_forecasts`
 - Szybkie zapytania o prognozy z indeksami
-- **Error handling** dla operacji bazodanowych
-
-### 3.7 WeatherDataCollector (`src/weather_data_collector.py`)
-
-- Zamiana zapisów danych pogodowych na tabelę `weather_data`
-- Async zapisy dla IMGW i Open-Meteo danych
-- Cache w pamięci dla najnowszych danych
-
-### 3.8 PSEPriceForecastCollector (`src/pse_price_forecast_collector.py`)
-
-- Zamiana zapisów prognoz cen na tabelę `price_forecasts`
-- Batch insert dla prognoz 24h
-- Walidacja danych przed zapisem
-
-### 3.9 PSEPeakHoursCollector (`src/pse_peak_hours_collector.py`)
-
-- Zamiana zapisów godzin szczytowych na tabelę `peak_hours_data`
-- Async zapisy z retry logic
-- Cache dla najnowszych danych
-
-### 3.10 LogWebServer (`src/log_web_server.py`)
-
-- **KRYTYCZNE**: Zamiana odczytu z plików JSON na zapytania SQL
-- Linie 756-787: `_get_battery_selling_data()` - zamiana na SQL
-- Linie 686-750: `_get_system_status()` - zamiana na SQL
-- Dodanie endpoint'ów API dla danych z bazy
-- **Backward compatibility** - zachowanie istniejących endpoint'ów
 
 ## 4. Optymalizacja wydajności
 
@@ -169,8 +116,6 @@
 - Redis-like cache dla najczęściej używanych danych (current_data, latest_price)
 - TTL 60s dla danych real-time
 - Invalidacja cache przy zapisie
-- **Connection pooling** z retry logic
-- **Circuit breaker** dla operacji bazodanowych
 
 ## 5. Aktualizacja konfiguracji
 
@@ -178,17 +123,10 @@
 
 ### 5.1 master_coordinator_config.yaml
 
-- **Fazowe przełączanie**:
-  - Faza 1: `data_storage.file_storage.enabled: true`, `data_storage.database_storage.enabled: false`
-  - Faza 2: `data_storage.file_storage.enabled: true`, `data_storage.database_storage.enabled: true` (dual mode)
-  - Faza 3: `data_storage.file_storage.enabled: false`, `data_storage.database_storage.enabled: true`
+- Zmiana `data_storage.file_storage.enabled: false`
+- Zmiana `data_storage.database_storage.enabled: true`
 - Dodanie ścieżki do bazy SQLite: `/opt/goodwe-dynamic-price-optimiser/data/goodwe_energy.db`
 - Konfiguracja retention (auto-delete danych starszych niż 30 dni)
-- **Error handling configuration**:
-  - `database.retry_attempts: 3`
-  - `database.retry_delay_seconds: 5`
-  - `database.connection_pool_size: 10`
-  - `database.fallback_to_file: true` (during migration)
 
 ### 5.2 Zmienne środowiskowe
 
@@ -225,19 +163,13 @@
 
 - `test/test_database_storage.py` - testy warstwy storage
 - `test/test_migration.py` - testy migracji danych
-- `test/test_error_handling.py` - testy error handling i rollback
-- `test/test_web_server_migration.py` - testy LogWebServer z bazą danych
 - Testy wydajnościowe (insert 1000 rekordów < 1s)
-- **Testy integracyjne** dla wszystkich komponentów
 
 ### 7.2 Testy integracyjne
 
 - Test pełnego cyklu: collect → store → retrieve → analyze
 - Test równoległego dostępu (multi-threading)
 - Test recovery po błędzie połączenia
-- **Test migracji** - pełny cykl migracji z rollback
-- **Test backward compatibility** - LogWebServer z nowymi endpoint'ami
-- **Test error scenarios** - błędy bazy, network issues, disk full
 
 ### 7.3 Benchmarki
 
@@ -293,113 +225,35 @@
 ✅ **Atomowość**: Brak częściowych zapisów przy crashu  
 ✅ **Backup**: Pojedynczy plik bazy zamiast tysięcy JSON-ów
 
-## Szacowany czas implementacji (ZAKTUALIZOWANY)
+## Szacowany czas implementacji
 
-- **Faza 1-3**: ~12-18 godzin (infrastruktura + migracja + refaktoryzacja + **nowe komponenty**)
-- **Faza 4-6**: ~6-8 godzin (optymalizacja + konfiguracja + deployment + **error handling**)
-- **Faza 7-8**: ~6-8 godzin (testy + dokumentacja + **testy integracyjne**)
-- **Faza 9**: ~4-6 godzin (**LogWebServer migration** + backward compatibility)
-- **Łącznie**: ~28-40 godzin pracy (vs. oryginalne 15-22h)
+- Faza 1-3: ~8-12 godzin (infrastruktura + migracja + refaktoryzacja)
+- Faza 4-6: ~4-6 godzin (optymalizacja + konfiguracja + deployment)
+- Faza 7-8: ~3-4 godziny (testy + dokumentacja)
+- **Łącznie**: ~15-22 godziny pracy
 
-**Dodatkowe komponenty wymagające migracji:**
-- WeatherDataCollector: +2-3h
-- PSEPriceForecastCollector: +2-3h  
-- PSEPeakHoursCollector: +2-3h
-- LogWebServer: +4-6h (krytyczne!)
-- Error handling & rollback: +3-4h
-- Extended testing: +3-4h
-
-## Ryzyko i mitygacja (ZAKTUALIZOWANE)
+## Ryzyko i mitygacja
 
 ⚠️ **Ryzyko**: Utrata danych podczas migracji  
-✅ **Mitygacja**: **Automatyczny backup** przed migracją, dry-run, walidacja, **rollback mechanism**
+✅ **Mitygacja**: Backup plików JSON przed migracją, dry-run, walidacja
 
 ⚠️ **Ryzyko**: Problemy z wydajnością SQLite przy dużym obciążeniu  
-✅ **Mitygacja**: Connection pooling, batch operations, indeksy, **circuit breaker**, przygotowanie do migracji na PostgreSQL
+✅ **Mitygacja**: Connection pooling, batch operations, indeksy, przygotowanie do migracji na PostgreSQL
 
 ⚠️ **Ryzyko**: Kompatybilność wstecz  
-✅ **Mitygacja**: Zachowanie możliwości eksportu do JSON, narzędzie migracji w obie strony, **fazowe przełączanie**
+✅ **Mitygacja**: Zachowanie możliwości eksportu do JSON, narzędzie migracji w obie strony
 
-⚠️ **Ryzyko**: LogWebServer przestanie działać  
-✅ **Mitygacja**: **Backward compatibility**, dual mode, **extensive testing**
+## Lista zadań
 
-⚠️ **Ryzyko**: Błędy operacji bazodanowych  
-✅ **Mitygacja**: **Retry logic**, **fallback to files**, **error monitoring**
-
-⚠️ **Ryzyko**: Problemy z migracją nowych komponentów  
-✅ **Mitygacja**: **Fazowe podejście**, testy każdego komponentu osobno, **rollback per component**
-
-## Lista zadań (ZAKTUALIZOWANA)
-
-### **Faza 1: Infrastruktura (8-12h)**
 1. Utworzenie struktury bazy danych (schema.py, storage_interface.py, sqlite_storage.py, connection_manager.py) i aktualizacja requirements.txt
-2. **Implementacja error handling i retry logic** w warstwie abstrakcji
-3. **Implementacja rollback mechanism** dla migracji
-4. Implementacja narzędzia migracji (migrate_json_to_db.py) do przeniesienia istniejących danych JSON do bazy SQLite
-5. **Dodanie backup automatycznego** przed migracją
-
-### **Faza 2: Komponenty podstawowe (6-8h)**
-6. Refaktoryzacja EnhancedDataCollector - zamiana save_data_to_file() na async operacje bazodanowe z batch insert
-7. Refaktoryzacja MasterCoordinator - zamiana _save_system_state() i _save_decision_to_file() na zapisy do bazy
-8. Refaktoryzacja BatterySellingAnalytics i MultiSessionManager - zamiana operacji na plikach JSON na zapytania SQL
-9. Refaktoryzacja HybridChargingLogic i PVForecaster - migracja zapisów na operacje bazodanowe
-
-### **Faza 3: Komponenty dodatkowe (6-8h)**
-10. **Refaktoryzacja WeatherDataCollector** - migracja danych pogodowych na tabelę weather_data
-11. **Refaktoryzacja PSEPriceForecastCollector** - migracja prognoz cen na tabelę price_forecasts  
-12. **Refaktoryzacja PSEPeakHoursCollector** - migracja danych o godzinach szczytowych
-13. **Refaktoryzacja LogWebServer** - zamiana odczytu z JSON na SQL (KRYTYCZNE!)
-
-### **Faza 4: Optymalizacja i konfiguracja (4-6h)**
-14. Implementacja connection pooling, batch operations, indeksów i cache w pamięci dla maksymalnej wydajności
-15. **Implementacja circuit breaker** dla operacji bazodanowych
-16. Aktualizacja master_coordinator_config.yaml - **fazowe przełączanie** na database_storage
-17. Aktualizacja Dockerfile i docker-compose.yml - dodanie volume dla bazy, health checks i inicjalizacji
-
-### **Faza 5: Testy i dokumentacja (4-6h)**
-18. Utworzenie testów jednostkowych i integracyjnych (test_database_storage.py, test_migration.py, **test_error_handling.py**, **test_web_server_migration.py**)
-19. **Testy backward compatibility** dla LogWebServer
-20. **Testy rollback mechanism** i error scenarios
-21. Aktualizacja README.md i utworzenie nowej dokumentacji (DATABASE_ARCHITECTURE.md, MIGRATION_GUIDE.md)
-
-### **Faza 6: Deployment i monitoring (2-4h)**
-22. **Implementacja monitoring** dla operacji bazodanowych
-23. **Deployment fazowy** z możliwością rollback
-24. **Walidacja produkcyjna** i optymalizacja wydajności
-
----
-
-## 🎯 **Podsumowanie kluczowych ulepszeń planu**
-
-### **✅ Dodane komponenty:**
-- **WeatherDataCollector** - migracja danych pogodowych
-- **PSEPriceForecastCollector** - migracja prognoz cen  
-- **PSEPeakHoursCollector** - migracja godzin szczytowych
-- **LogWebServer** - krytyczna migracja odczytu z JSON na SQL
-
-### **✅ Rozszerzona architektura bazy:**
-- **5 nowych tabel** dla prognoz i danych zewnętrznych
-- **Error handling** i retry logic w całej warstwie
-- **Rollback mechanism** dla bezpiecznej migracji
-- **Circuit breaker** dla odporności na błędy
-
-### **✅ Fazowe podejście:**
-- **6 faz** zamiast 3 oryginalnych
-- **Dual mode** podczas przejścia (JSON + SQL)
-- **Backward compatibility** dla LogWebServer
-- **Rollback per component** dla bezpieczeństwa
-
-### **✅ Zaktualizowane szacunki:**
-- **28-40 godzin** zamiast 15-22h
-- **24 zadania** zamiast 11 oryginalnych  
-- **6 faz** zamiast 3 oryginalnych
-- **Rozszerzone testy** i walidacja
-
-### **🚨 Krytyczne elementy do priorytetyzacji:**
-1. **LogWebServer migration** - bez tego dashboard nie będzie działać
-2. **Error handling** - bez tego system będzie niestabilny  
-3. **Rollback mechanism** - bez tego ryzyko utraty danych
-4. **Backward compatibility** - bez tego przerwa w działaniu systemu
-
-**Plan jest teraz kompletny i gotowy do implementacji!** 🚀
+2. Implementacja narzędzia migracji (migrate_json_to_db.py) do przeniesienia istniejących danych JSON do bazy SQLite
+3. Refaktoryzacja EnhancedDataCollector - zamiana save_data_to_file() na async operacje bazodanowe z batch insert
+4. Refaktoryzacja MasterCoordinator - zamiana _save_system_state() i _save_decision_to_file() na zapisy do bazy
+5. Refaktoryzacja BatterySellingAnalytics i MultiSessionManager - zamiana operacji na plikach JSON na zapytania SQL
+6. Refaktoryzacja HybridChargingLogic i PVForecaster - migracja zapisów na operacje bazodanowe
+7. Implementacja connection pooling, batch operations, indeksów i cache w pamięci dla maksymalnej wydajności
+8. Aktualizacja master_coordinator_config.yaml - przełączenie na database_storage i konfiguracja ścieżek
+9. Aktualizacja Dockerfile i docker-compose.yml - dodanie volume dla bazy, health checks i inicjalizacji
+10. Utworzenie testów jednostkowych i integracyjnych (test_database_storage.py, test_migration.py) oraz benchmarków wydajności
+11. Aktualizacja README.md i utworzenie nowej dokumentacji (DATABASE_ARCHITECTURE.md, MIGRATION_GUIDE.md)
 
