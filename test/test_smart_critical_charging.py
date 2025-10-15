@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 # Add src directory to path
-src_dir = Path(__file__).parent / "src"
+src_dir = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_dir))
 
 from automated_price_charging import AutomatedPriceCharger
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def load_config():
     """Load configuration"""
-    config_path = Path(__file__).parent / "config" / "master_coordinator_config.yaml"
+    config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
@@ -83,7 +83,7 @@ def test_smart_critical_charging():
     ]
     
     # Initialize the automated price charger
-    config_path = Path(__file__).parent / "config" / "master_coordinator_config.yaml"
+    config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
     charger = AutomatedPriceCharger(str(config_path))
     
     # Test each scenario

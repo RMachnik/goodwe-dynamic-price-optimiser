@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 # Add src directory to path
-src_dir = Path(__file__).parent / "src"
+src_dir = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_dir))
 
 from automated_price_charging import AutomatedPriceCharger
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def load_config():
     """Load configuration"""
-    config_path = Path(__file__).parent / "config" / "master_coordinator_config.yaml"
+    config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
@@ -31,7 +31,7 @@ def test_optimization_rule_1():
     """Test Rule 1: At 10% SOC with high price, always wait for price drop"""
     logger.info("\n=== Testing Rule 1: 10% SOC + High Price = Wait ===")
     
-    config_path = Path(__file__).parent / "config" / "master_coordinator_config.yaml"
+    config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
     charger = AutomatedPriceCharger(str(config_path))
     
     test_scenarios = [
@@ -139,7 +139,7 @@ def test_optimization_rule_2():
     """Test Rule 2: Proactive charging when PV is poor, weather won't improve, battery <80%, and price is not high"""
     logger.info("\n=== Testing Rule 2: Proactive Charging ===")
     
-    config_path = Path(__file__).parent / "config" / "master_coordinator_config.yaml"
+    config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
     charger = AutomatedPriceCharger(str(config_path))
     
     test_scenarios = [
@@ -217,7 +217,7 @@ def test_real_world_scenario():
     """Test the real-world scenario from your charging session"""
     logger.info("\n=== Testing Real-World Scenario ===")
     
-    config_path = Path(__file__).parent / "config" / "master_coordinator_config.yaml"
+    config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
     charger = AutomatedPriceCharger(str(config_path))
     
     # Your actual scenario: 18% SOC, 1.577 PLN/kWh, 0.468 PLN/kWh at 23:00

@@ -424,6 +424,19 @@ pse_price_forecast:
     retry_attempts: 3                        # Retry attempts for API calls
     retry_delay_seconds: 60                  # Delay between retries
 
+# PSE Peak Hours (Kompas) Configuration
+pse_peak_hours:
+  enabled: true
+  api_url: "https://api.raporty.pse.pl/api/pdgsz"
+  update_interval_minutes: 60
+  decision_weights:
+    recommended_usage_wait_delta_percent: -5
+    recommended_saving_wait_delta_percent: 10
+    required_reduction_block_grid_charging: true
+  fallback:
+    retry_attempts: 3
+    retry_delay_seconds: 60
+
 # Development/Debug Configuration
 debug:
   enabled: false               # Enable debug mode
