@@ -2007,6 +2007,65 @@ The conservative parameters (80% min SOC, 50% safety margin) are:
 
 ---
 
+## ✅ **Phase 2: Kompas Energetyczny (PSE Peak Hours API) - COMPLETED**
+**Duration**: 1-2 days
+**Priority**: High
+**Dependencies**: Phase 1 completion
+**Status**: ✅ **COMPLETED**
+
+### **Task 2.0: Integrate PSE Peak Hours API (Kompas Energetyczny)**
+- [x] **2.0.1**: Dodać moduł `src/pse_peak_hours_collector.py` z obsługą `pdgsz`
+  - ✅ Pobieranie danych z `https://api.raporty.pse.pl/api/pdgsz`
+  - ✅ Filtrowanie po `business_date` i `is_active eq true`
+  - ✅ Mapowanie `usage_fcst` na statusy: `NORMAL USAGE` (0), `RECOMMENDED USAGE` (1), `RECOMMENDED SAVING` (2), `REQUIRED REDUCTION` (3)
+  - ✅ Cache danych (np. 60 minut)
+  - ✅ Obsługa błędów i retry logic
+  - **Estimated Time**: 4-6 hours
+
+- [x] **2.0.2**: Dodać sekcję `pse_peak_hours` do `master_coordinator_config.yaml`
+  - ✅ `enabled: true`
+  - ✅ `api_url: "https://api.raporty.pse.pl/api/pdgsz"`
+  - ✅ `update_interval_minutes: 60`
+  - ✅ `peak_hours_ahead: 24`
+  - ✅ `decision_rules` dla każdego statusu (`required_reduction`, `recommended_saving`, `recommended_usage`, `normal_usage`)
+  - ✅ `fallback` konfiguracja
+  - **Estimated Time**: 1 hour
+
+- [x] **2.0.3**: Zintegrować kolektor z `master_coordinator.py` i `MultiFactorDecisionEngine`
+  - ✅ Inicjalizacja `PSEPeakHoursCollector` w `MasterCoordinator`
+  - ✅ Przekazanie `peak_hours_collector` do `MultiFactorDecisionEngine`
+  - ✅ Pobieranie danych w `_analyze_and_decide_with_timing`
+  - ✅ Dodanie `peak_hours_analysis` do zwracanego słownika decyzji
+  - **Estimated Time**: 2 hours
+
+- [x] **2.0.4**: Zaimplementować wpływ `usage_fcst` na decyzje ładowania
+  - ✅ **REQUIRED REDUCTION (3)**: Blokuj ładowanie z sieci (force wait/stop), preferuj rozładowanie na potrzeby domu, ignoruj okazje cenowe.
+  - ✅ **RECOMMENDED SAVING (2)**: Podnieś próg "czekaj" (np. `min_savings_to_wait_percent` +10 pp), możesz ograniczyć maksymalną moc ładowania.
+  - ✅ **RECOMMENDED USAGE (1)**: Obniż próg "czekaj" (łagodniejsze warunki ładowania).
+  - ✅ **NORMAL USAGE (0)**: Użyj logiki bazowej.
+  - **Estimated Time**: 4-6 hours
+
+- [x] **2.0.5**: Dodać testy jednostkowe i integracyjne
+  - ✅ Testy mapowania `usage_fcst`
+  - ✅ Testy wersjonowania (`is_active`, `publication_ts`)
+  - ✅ Testy E2E blokady ładowania przy `REQUIRED REDUCTION`
+  - ✅ Testy wpływu na decyzje przy `RECOMMENDED SAVING` i `RECOMMENDED USAGE`
+  - **Estimated Time**: 3-4 hours
+
+- [x] **2.0.6**: Uaktualnić `README.md` z opisem Kompasu Energetycznego i konfiguracji
+  - ✅ Opis korzyści i działania
+  - ✅ Instrukcje konfiguracji
+  - **Estimated Time**: 1 hour
+
+**Phase 2 Deliverables**:
+- ✅ Integracja Kompasu Energetycznego (PSE Peak Hours API)
+- ✅ Dynamiczne dostosowywanie decyzji ładowania na podstawie statusu sieci
+- ✅ Zwiększona świadomość systemu o obciążeniu sieci
+- **Total Estimated Time**: 15-20 hours
+- **Expected Benefits**: Lepsze dostosowanie do warunków sieci, potencjalne uniknięcie kar/opłat za nadmierne obciążenie, wsparcie stabilności sieci.
+
+---
+
 **Ready to continue building your intelligent energy management system?** 
 
-Begin with Phase 2, Task 2.1.2 - implementing PV vs consumption analysis with timing awareness. This is the **CRITICAL** missing component that will enable hybrid charging during optimal price windows! 🚀⚡🔋
+The system now includes comprehensive PSE Peak Hours integration (Kompas Energetyczny) for grid-aware charging decisions! 🚀⚡🔋

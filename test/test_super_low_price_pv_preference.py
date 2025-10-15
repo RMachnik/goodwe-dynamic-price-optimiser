@@ -45,7 +45,7 @@ def test_configuration_loading():
     assert pv_preference.get('pv_charging_time_limit_hours') == 2.0, f"PV charging time limit incorrect: {pv_preference.get('pv_charging_time_limit_hours')}"
     
     logger.info("✓ PV preference configuration loading test passed!")
-    # Test functions should not return values when run under pytest
+    return True
 
 def test_pv_preference_logic():
     """Test the PV preference logic during super low prices"""
@@ -204,7 +204,7 @@ def test_pv_preference_logic():
         logger.info(f"✓ Test passed: {scenario['name']}")
     
     logger.info("✓ PV preference logic tests passed!")
-    # Test functions should not return values when run under pytest
+    return True
 
 def test_real_world_scenarios():
     """Test real-world scenarios based on your requirements"""
@@ -267,7 +267,7 @@ def test_real_world_scenarios():
     assert result2 == "grid", f"Scenario 2 should use grid but got {result2}"
     
     logger.info("✓ Real-world scenarios test passed!")
-    # Test functions should not return values when run under pytest
+    return True
 
 def test_economic_benefits():
     """Test the economic benefits of PV preference during super low prices"""
@@ -289,7 +289,7 @@ def test_economic_benefits():
     assert pv_cost < grid_cost, "PV charging should always be cheaper than grid charging"
     
     logger.info("✓ Economic benefits test passed - PV charging is always free!")
-    # Test functions should not return values when run under pytest
+    return True
 
 if __name__ == "__main__":
     try:

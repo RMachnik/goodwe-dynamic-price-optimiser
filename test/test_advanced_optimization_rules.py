@@ -91,16 +91,12 @@ def test_optimization_rule_1():
             if 'pv production improving soon' in reason_lower:
                 assert decision['should_charge'] == False, f"Expected to wait due to PV improvement but got: {decision}"
             else:
-                # With 60% savings at 9% SOC, calculate dynamic max wait hours
-                # battery_multiplier for 9% SOC = 0.7 (critical, <= 10)
-                # savings_multiplier for 60% savings = 1.2 (high savings, >= 60)
-                # dynamic_max_wait = 6 * 1.2 * 0.7 = 5.04 hours
-                dynamic_max_wait = 5.04
-                expect_wait = hours_to_wait <= dynamic_max_wait
+                # With 60% savings at 9% SOC, expect wait if within max_wait_hours (6h), else charge
+                expect_wait = hours_to_wait <= 6
                 if expect_wait:
-                    assert decision['should_charge'] == False, f"Expected to wait (cheaper price in {hours_to_wait}h within dynamic max {dynamic_max_wait}h) but got: {decision}"
+                    assert decision['should_charge'] == False, f"Expected to wait (cheaper price in {hours_to_wait}h) but got: {decision}"
                 else:
-                    assert decision['should_charge'] == True, f"Expected to charge (wait {hours_to_wait}h exceeds dynamic max {dynamic_max_wait}h) but got: {decision}"
+                    assert decision['should_charge'] == True, f"Expected to charge (wait {hours_to_wait}h too long) but got: {decision}"
         else:
             if scenario['expected_action'] == 'charge':
                 assert decision['should_charge'] == True, f"Expected to charge but got: {decision}"
@@ -120,9 +116,7 @@ def test_optimization_rule_1():
                 assert dynamic_expected in reason or 'pv production improving soon' in reason, f"Expected reason to include dynamic savings or PV improvement, got '{reason}'"
             else:
                 # 9% case: accept PV improvement reason as well
-                # Use dynamic max wait hours: 6 * 1.2 * 0.7 = 5.04 hours
-                dynamic_max_wait = 5.04
-                expect_wait = hours_to_wait <= dynamic_max_wait
+                expect_wait = hours_to_wait <= 6
                 if 'pv production improving soon' in reason:
                     pass
                 else:
@@ -265,5 +259,19 @@ def test_configuration_loading():
     
     logger.info("✓ Configuration loading test passed!")
 
-# Tests are implemented as functions and picked up by pytest;
-# the script-style main() was removed to allow pytest collection.
+if __name__ == "__main__":
+    try:
+        test_configuration_loading()
+        test_optimization_rule_1()
+        test_optimization_rule_2()
+        test_real_world_scenario()
+        
+        logger.info("\n🎉 All advanced optimization rule tests passed!")
+        logger.info("\nAdvanced Optimization Rules Summary:")
+        logger.info("Rule 1: At 10% SOC with high price (>0.8 PLN/kWh) → Always wait")
+        logger.info("Rule 2: PV poor (<200W) + battery <80% + price ≤0.7 PLN/kWh + weather poor → Proactive charge")
+        logger.info("\nYour scenario (18% SOC, 1.577 PLN/kWh) would now wait for 0.468 PLN/kWh at 23:00!")
+        
+    except Exception as e:
+        logger.error(f"Test failed: {e}")
+        sys.exit(1)

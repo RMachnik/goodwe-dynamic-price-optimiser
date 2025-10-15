@@ -30,7 +30,7 @@ echo ""
 
 echo "⚙️  Configuration:"
 echo "  Inverter IP: 192.168.68.51 (configured but not accessible in demo)"
-echo "  Battery: 2x GoodWe Lynx-D LX-D5.0-10 (20kWh LFP)"
+echo "  Battery: GoodWe Lynx-D LX-D5.0-10 (10kWh LFP)"
 echo "  PV System: 6.8kW maximum"
 echo "  Charging: Up to 5kW with safety limits"
 echo ""

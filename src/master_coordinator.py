@@ -47,6 +47,7 @@ from multi_session_manager import MultiSessionManager
 from battery_selling_engine import BatterySellingEngine
 from battery_selling_monitor import BatterySellingMonitor
 from pse_price_forecast_collector import PSEPriceForecastCollector
+from pse_peak_hours_collector import PSEPeakHoursCollector
 
 # Setup logging
 project_root = Path(__file__).parent.parent
@@ -103,6 +104,7 @@ class MasterCoordinator:
         self.battery_selling_engine = None
         self.battery_selling_monitor = None
         self.forecast_collector = None
+        self.peak_hours_collector = None
         
         # System data
         self.current_data = {}
@@ -199,6 +201,15 @@ class MasterCoordinator:
                 logger.info("PSE Price Forecast Collector initialized successfully")
             else:
                 logger.info("PSE price forecast disabled in configuration")
+
+            # Initialize PSE Peak Hours Collector (Kompas)
+            logger.info("Initializing PSE Peak Hours Collector...")
+            peak_enabled = self.config.get('pse_peak_hours', {}).get('enabled', False)
+            if peak_enabled:
+                self.peak_hours_collector = PSEPeakHoursCollector(self.config)
+                logger.info("PSE Peak Hours Collector initialized successfully")
+            else:
+                logger.info("PSE peak hours disabled in configuration")
             
             # Initialize decision engine
             logger.info("Initializing Decision Engine...")
@@ -223,6 +234,11 @@ class MasterCoordinator:
             if self.decision_engine and self.forecast_collector:
                 self.decision_engine.forecast_collector = self.forecast_collector
                 logger.info("PSE Price Forecast Collector integrated with decision engine")
+
+            # Set peak hours collector in decision engine
+            if self.decision_engine and self.peak_hours_collector:
+                self.decision_engine.peak_hours_collector = self.peak_hours_collector
+                logger.info("PSE Peak Hours Collector integrated with decision engine")
             
             # Initialize multi-session manager
             logger.info("Initializing Multi-Session Manager...")
@@ -1075,6 +1091,7 @@ class MultiFactorDecisionEngine:
         self.pv_forecaster = PVForecaster(config)
         self.price_analyzer = PriceWindowAnalyzer(config)
         self.hybrid_logic = HybridChargingLogic(config)
+        self.peak_hours_collector = None  # Will be set by MasterCoordinator
         
         # Timing awareness flag
         self.timing_awareness_enabled = config.get('timing_awareness_enabled', True)
@@ -1173,6 +1190,9 @@ class MultiFactorDecisionEngine:
             action = self._apply_weather_aware_timing(
                 charging_decision.action, timing_recommendation, pv_trend_analysis, current_data
             )
+
+            # Soft policy from Kompas (Peak Hours): optionally adjust action
+            action = self._apply_peak_hours_policy(action)
             
             # Calculate scores for compatibility with weather enhancement
             price_score = self._calculate_price_score(price_data)
@@ -1216,6 +1236,7 @@ class MultiFactorDecisionEngine:
                     'start_time': charging_decision.start_time.isoformat(),
                     'end_time': charging_decision.end_time.isoformat()
                 },
+                'kompas': self._get_peak_status_summary(),
                 'weather_aware_analysis': {
                     'pv_trend': {
                         'trend_direction': pv_trend_analysis.trend_direction,
@@ -1330,6 +1351,52 @@ class MultiFactorDecisionEngine:
             'wait': 'none'
         }
         return action_mapping.get(hybrid_action, 'none')
+
+    def _apply_peak_hours_policy(self, action: str) -> str:
+        """Adjust action based on Kompas (Peak Hours) policy if configured.
+
+        - REQUIRED REDUCTION (code 3): block grid charging -> return 'none'
+        - RECOMMENDED SAVING (code 2): prefer wait -> return 'none' if action is start
+        - RECOMMENDED USAGE (code 1): slightly permissive (no hard change here)
+        """
+        try:
+            if not getattr(self, 'peak_hours_collector', None):
+                return action
+            # Determine current hour status
+            status = self.peak_hours_collector.get_status_for_time(datetime.now())
+            if not status:
+                return action
+
+            if status.code == 3:  # REQUIRED REDUCTION
+                if action.startswith('start'):
+                    logger.warning("Kompas REQUIRED REDUCTION: blocking grid charging in this hour")
+                    return 'none'
+            elif status.code == 2:  # RECOMMENDED SAVING
+                if action.startswith('start'):
+                    logger.info("Kompas RECOMMENDED SAVING: deferring start to reduce load")
+                    return 'none'
+            # code 1 (RECOMMENDED USAGE) and 0 (NORMAL) -> no strict change
+            return action
+        except Exception as e:
+            logger.debug(f"Peak Hours policy application failed: {e}")
+            return action
+
+    def _get_peak_status_summary(self) -> Dict[str, Any]:
+        """Return current hour Kompas status for telemetry in decision output."""
+        try:
+            if not getattr(self, 'peak_hours_collector', None):
+                return {'available': False}
+            status = self.peak_hours_collector.get_status_for_time(datetime.now())
+            if not status:
+                return {'available': False}
+            return {
+                'available': True,
+                'time': status.time.isoformat(),
+                'code': status.code,
+                'label': status.label,
+            }
+        except Exception:
+            return {'available': False}
     
     def _get_weather_enhanced_pv_forecast(self, current_data: Dict) -> List[Dict]:
         """Get PV forecast enhanced with weather data"""

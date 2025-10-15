@@ -115,6 +115,15 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - **Smart Waiting**: Wait for better prices when forecasts show 15%+ savings
 - **Fallback Safety**: Automatic fallback to CSDAC if forecasts unavailable
 
+### **PSE Peak Hours (Kompas Energetyczny) (NEW)**
+- **Grid Status Awareness**: Real-time monitoring of Polish grid load status
+- **Smart Charging Decisions**: Adapts charging behavior based on grid conditions
+- **REQUIRED REDUCTION**: Blocks all grid charging when grid is overloaded
+- **RECOMMENDED SAVING**: Increases wait thresholds and limits charging power
+- **RECOMMENDED USAGE**: Relaxes charging conditions when grid has capacity
+- **API Integration**: Official PSE pdgsz API for reliable grid status data
+- **Network Stability**: Supports Polish grid stability by avoiding charging during peak load
+
 ### Bugfixes
 - Fixed division-by-zero in forecast waiting logic when `current_price` is non-positive (0 or negative). This affects:
   - `src/pse_price_forecast_collector.py::should_wait_for_better_price`
@@ -378,7 +387,44 @@ chmod +x scripts/ubuntu_setup.sh
        retry_delay_seconds: 60                  # Delay between retries
    ```
 
-5. **Test the Master Coordinator**
+5. **Configure PSE Peak Hours (Kompas Energetyczny) (Optional)**
+   ```yaml
+   # PSE Peak Hours Configuration (Kompas Energetyczny)
+   pse_peak_hours:
+     enabled: true                              # Enable Peak Hours monitoring
+     api_url: "https://api.raporty.pse.pl/api/pdgsz"
+     update_interval_minutes: 60                # Update every 60 minutes
+     peak_hours_ahead: 24                     # Monitor 24 hours ahead
+     
+     # Decision rules based on Peak Hours status
+     decision_rules:
+       # REQUIRED REDUCTION (usage_fcst = 3)
+       required_reduction:
+         block_charging: true                 # Block all grid charging
+         prefer_discharge_for_home: true      # Prefer battery discharge for home use
+         ignore_price_opportunities: true     # Ignore low price opportunities
+         
+       # RECOMMENDED SAVING (usage_fcst = 2)
+       recommended_saving:
+         increase_wait_threshold_percent: 10  # Increase min_savings_to_wait_percent by 10%
+         limit_charging_power_percent: 50    # Limit charging power to 50%
+         
+       # RECOMMENDED USAGE (usage_fcst = 1)
+       recommended_usage:
+         decrease_wait_threshold_percent: 5   # Decrease min_savings_to_wait_percent by 5%
+         
+       # NORMAL USAGE (usage_fcst = 0)
+       normal_usage:
+         default_logic: true                  # Use default charging logic
+         
+     # Fallback configuration
+     fallback:
+       use_default_if_unavailable: true       # Use default logic if Peak Hours data unavailable
+       retry_attempts: 3                      # Retry attempts for API calls
+       retry_delay_seconds: 60                # Delay between retries
+   ```
+
+6. **Test the Master Coordinator**
    ```bash
    # Test mode (single decision cycle)
    python src/master_coordinator.py --test

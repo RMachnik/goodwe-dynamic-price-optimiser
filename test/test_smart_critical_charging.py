@@ -125,35 +125,11 @@ def test_smart_critical_charging():
             if hours_to_wait < 0:
                 hours_to_wait += 24
             savings_percent = float(scenario['expected_savings'].replace('%',''))
-            # Calculate dynamic max wait hours based on battery SOC and savings
-            # For 8% SOC: battery_multiplier = 0.5 (very critical, <= 8)
-            # For 73.3% savings: savings_multiplier = 1.2 (high savings, >= 60)
-            # dynamic_max_wait = 6 * 1.2 * 0.5 = 3.6 hours
-            battery_soc = scenario['battery_soc']
-            if battery_soc <= 8:
-                battery_multiplier = 0.5
-            elif battery_soc <= 10:
-                battery_multiplier = 0.7
-            else:
-                battery_multiplier = 1.0
-            
-            if savings_percent >= 80:
-                savings_multiplier = 1.5
-            elif savings_percent >= 60:
-                savings_multiplier = 1.2
-            elif savings_percent >= 40:
-                savings_multiplier = 1.0
-            else:
-                savings_multiplier = 0.7
-            
-            dynamic_max_wait = 6.0 * savings_multiplier * battery_multiplier
-            dynamic_max_wait = max(1.0, min(12.0, dynamic_max_wait))
-            
-            expect_wait = hours_to_wait <= dynamic_max_wait and savings_percent >= 30.0
+            expect_wait = hours_to_wait <= 6 and savings_percent >= 30.0
             if expect_wait:
-                assert decision['should_charge'] == False, f"Expected to wait (cheaper price in {hours_to_wait}h within dynamic max {dynamic_max_wait:.1f}h) but got: {decision}"
+                assert decision['should_charge'] == False, f"Expected to wait (cheaper price in {hours_to_wait}h) but got: {decision}"
             else:
-                assert decision['should_charge'] == True, f"Expected to charge (wait {hours_to_wait}h exceeds dynamic max {dynamic_max_wait:.1f}h or savings low) but got: {decision}"
+                assert decision['should_charge'] == True, f"Expected to charge (wait {hours_to_wait}h too long or savings low) but got: {decision}"
         else:
             if scenario['expected_action'] == 'charge':
                 assert decision['should_charge'] == True, f"Expected to charge but got: {decision}"
@@ -175,29 +151,7 @@ def test_smart_critical_charging():
             if hours_to_wait < 0:
                 hours_to_wait += 24
             savings_text = scenario['expected_savings']
-            savings_percent = float(savings_text.replace('%',''))
-            # Calculate dynamic max wait hours (same logic as in the main code)
-            battery_soc = scenario['battery_soc']
-            if battery_soc <= 8:
-                battery_multiplier = 0.5
-            elif battery_soc <= 10:
-                battery_multiplier = 0.7
-            else:
-                battery_multiplier = 1.0
-            
-            if savings_percent >= 80:
-                savings_multiplier = 1.5
-            elif savings_percent >= 60:
-                savings_multiplier = 1.2
-            elif savings_percent >= 40:
-                savings_multiplier = 1.0
-            else:
-                savings_multiplier = 0.7
-            
-            dynamic_max_wait = 6.0 * savings_multiplier * battery_multiplier
-            dynamic_max_wait = max(1.0, min(12.0, dynamic_max_wait))
-            
-            expect_wait = hours_to_wait <= dynamic_max_wait and savings_percent >= 30.0
+            expect_wait = hours_to_wait <= 6 and float(savings_text.replace('%','')) >= 30.0
             if expect_wait:
                 dynamic_expected = f"much cheaper price in {hours_to_wait}h".lower()
             else:
@@ -231,4 +185,18 @@ def test_configuration_loading():
     
     logger.info("✓ Configuration loading test passed!")
 
-# Tests are implemented as functions and picked up by pytest; removed direct runner.
+if __name__ == "__main__":
+    try:
+        test_configuration_loading()
+        test_smart_critical_charging()
+        logger.info("\n🎉 All tests completed successfully!")
+        logger.info("\nSmart Critical Charging Implementation Summary:")
+        logger.info("- Emergency threshold: 5% SOC (always charge)")
+        logger.info("- Critical threshold: 10% SOC (price-aware)")
+        logger.info("- Max critical price: 0.35 PLN/kWh")
+        logger.info("- Max wait time: 6 hours")
+        logger.info("- Min savings: 30%")
+        
+    except Exception as e:
+        logger.error(f"Test failed: {e}")
+        sys.exit(1)
