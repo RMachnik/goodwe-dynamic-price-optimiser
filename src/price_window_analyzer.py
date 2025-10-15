@@ -1211,7 +1211,9 @@ class PriceWindowAnalyzer:
             if best_price is None:
                 return False
             
-            # Calculate potential savings
+            # Calculate potential savings (guard division by zero/non-positive current price)
+            if current_price is None or current_price <= 0:
+                return False
             savings_percent = ((current_price - best_price) / current_price) * 100
             
             should_wait = savings_percent >= min_savings_percent
@@ -1299,7 +1301,16 @@ class PriceWindowAnalyzer:
                     'expected_savings_percent': 0.0
                 }
             
-            # Calculate potential savings
+            # Calculate potential savings (guard division by zero/non-positive current price)
+            if current_price is None or current_price <= 0:
+                return {
+                    'should_wait': False,
+                    'reason': 'Invalid or non-positive current price; cannot compute savings',
+                    'better_price_time': best_price_time.isoformat(),
+                    'expected_savings_percent': 0.0,
+                    'current_price': current_price,
+                    'forecasted_price': best_price
+                }
             savings_percent = ((current_price - best_price) / current_price) * 100
             
             if savings_percent >= min_savings_percent:

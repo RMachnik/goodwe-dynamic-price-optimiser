@@ -1,12 +1,7 @@
-import sys
-from pathlib import Path
 import pytest
 from datetime import datetime, timedelta
 
-# Add src directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
-
-from pse_price_forecast_collector import PSEPriceForecastCollector, PriceForecastPoint
+from src.pse_price_forecast_collector import PSEPriceForecastCollector, PriceForecastPoint
 
 
 def _collector():

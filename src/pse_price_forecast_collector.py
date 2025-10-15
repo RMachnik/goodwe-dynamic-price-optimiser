@@ -309,6 +309,17 @@ class PSEPriceForecastCollector:
             }
         
         # Calculate potential savings
+        # Guard against division by zero or non-positive current price
+        if current_price is None or current_price <= 0:
+            return {
+                'should_wait': False,
+                'reason': 'Invalid or non-positive current price; cannot compute savings',
+                'better_price_time': best_price_time,
+                'expected_savings_percent': 0.0,
+                'current_price': current_price,
+                'forecasted_price': best_price
+            }
+
         savings_percent = ((current_price - best_price) / current_price) * 100
         
         if savings_percent >= self.min_savings_to_wait_percent:

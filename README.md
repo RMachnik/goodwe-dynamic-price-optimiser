@@ -115,6 +115,13 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - **Smart Waiting**: Wait for better prices when forecasts show 15%+ savings
 - **Fallback Safety**: Automatic fallback to CSDAC if forecasts unavailable
 
+### Bugfixes
+- Fixed division-by-zero in forecast waiting logic when `current_price` is non-positive (0 or negative). This affects:
+  - `src/pse_price_forecast_collector.py::should_wait_for_better_price`
+  - `src/price_window_analyzer.py::should_wait_for_better_price`
+  - `src/price_window_analyzer.py::_should_wait_for_better_price`
+  Guard clauses now return safe results without raising `ZeroDivisionError`.
+
 ### **Battery Energy Selling (NEW)**
 - **Conservative Safety**: 80% min SOC, 50% safety margin for battery protection
 - **Revenue Generation**: ~260 PLN/year additional revenue from energy selling
