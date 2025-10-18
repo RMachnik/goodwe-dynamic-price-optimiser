@@ -643,7 +643,7 @@ class MasterCoordinator:
             
             if should_charge:
                 # Calculate energy needed based on battery capacity and current SOC
-                battery_capacity = self.config.get('battery', {}).get('capacity_kwh', 10.0)
+                battery_capacity = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)
                 current_soc = self.current_data.get('battery', {}).get('soc_percent', 0)
                 target_soc = 80.0  # Target 80% SOC
                 energy_needed = battery_capacity * (target_soc - current_soc) / 100.0

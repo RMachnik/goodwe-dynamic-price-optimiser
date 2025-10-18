@@ -82,8 +82,8 @@ class BatterySellingEngine:
         self.grid_export_limit_w = config.get('grid_export_limit_w', 5000)  # 5kW max export
         self.battery_dod_limit = config.get('battery_dod_limit', 50)  # 50% max discharge
         
-        # Battery specifications (GoodWe Lynx-D 10kWh)
-        self.battery_capacity_kwh = 10.0
+        # Battery specifications - read from config
+        self.battery_capacity_kwh = config.get('battery_management', {}).get('capacity_kwh', 20.0)
         self.discharge_efficiency = 0.95  # 95% efficiency
         self.usable_energy_per_cycle = self.battery_capacity_kwh * (self.min_selling_soc - self.safety_margin_soc) / 100
         self.net_sellable_energy = round(self.usable_energy_per_cycle * self.discharge_efficiency, 2)

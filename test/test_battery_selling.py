@@ -58,9 +58,9 @@ class TestBatterySellingEngine:
         assert engine.safety_margin_soc == 50.0
         assert engine.min_selling_price_pln == 0.50
         assert engine.max_daily_cycles == 2
-        assert engine.battery_capacity_kwh == 10.0
-        assert engine.usable_energy_per_cycle == 3.0  # 30% of 10kWh
-        assert engine.net_sellable_energy == 2.85  # 3.0 * 0.95 efficiency
+        assert engine.battery_capacity_kwh == 20.0
+        assert engine.usable_energy_per_cycle == 6.0  # 30% of 20kWh
+        assert engine.net_sellable_energy == 5.7  # 6.0 * 0.95 efficiency
     
     def test_safety_conditions_check(self, engine):
         """Test safety conditions checking"""
