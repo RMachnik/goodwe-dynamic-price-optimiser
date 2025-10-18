@@ -383,6 +383,34 @@ battery_selling:
   grid_export_limit_w: 5000        # Max export power (5kW)
   battery_dod_limit: 50            # Max discharge depth (50% = 50% SOC min)
   
+  # Smart Timing Configuration (Avoid Selling Too Early)
+  smart_timing:
+    enabled: true                          # Enable smart timing logic
+    forecast_lookahead_hours: 6            # Look ahead 6 hours for better prices
+    near_peak_threshold_percent: 95        # Sell if within 95% of forecasted peak
+    min_peak_difference_percent: 15        # Wait only if peak is 15%+ higher
+    max_wait_time_hours: 4                 # Maximum 4 hours to wait for better price
+    min_forecast_confidence: 0.6           # Minimum forecast confidence to trust
+    
+    # Opportunity cost thresholds
+    opportunity_cost:
+      significant_savings_percent: 20      # 20%+ revenue gain = significant (definitely wait)
+      marginal_savings_percent: 5          # 5%+ revenue gain = marginal (consider waiting)
+      
+    # Trend analysis configuration
+    trend_analysis:
+      enabled: true                        # Enable price trend analysis
+      trend_window_hours: 2                # Analyze 2-hour price trends
+      rising_threshold: 0.02               # 2% increase = rising trend
+      falling_threshold: -0.02             # 2% decrease = falling trend
+      
+    # Multi-session selling configuration
+    multi_session:
+      enabled: true                        # Enable multiple selling sessions per day
+      max_sessions_per_day: 3              # Maximum 3 selling sessions
+      min_session_gap_hours: 1             # Minimum 1 hour between sessions
+      reserve_battery_percent: 20          # Reserve 20% battery for house usage
+  
   # Revenue estimation (conservative, based on 20 kWh capacity)
   expected_daily_revenue_pln: 1.43  # ~1.43 PLN/day (5.7 kWh × 0.25 PLN/kWh)
   expected_monthly_revenue_pln: 43  # ~43 PLN/month
