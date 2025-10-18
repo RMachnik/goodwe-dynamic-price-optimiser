@@ -272,9 +272,44 @@ logging:
   verbose_logging: true
 ```
 
-### **Manual Override**
+### **Manual Selling Script**
 
-For testing or emergency situations:
+For manual control of battery selling, use the `sell_battery_now.py` script:
+
+```bash
+# Start selling until battery reaches 45% SOC (with automatic monitoring)
+python src/sell_battery_now.py --start --target-soc 45 --monitor
+
+# Start selling with custom power limit
+python src/sell_battery_now.py --start --target-soc 30 --power 3000 --monitor
+
+# Start selling without monitoring (manual stop required)
+python src/sell_battery_now.py --start --target-soc 45
+
+# Stop current selling session
+python src/sell_battery_now.py --stop
+
+# Check selling status
+python src/sell_battery_now.py --status
+```
+
+**Key Features:**
+- **Manual Override**: Bypass automatic battery selling logic for direct control
+- **Configurable Target SOC**: Set any target SOC between 10% and 95%
+- **Power Control**: Adjust selling power from 100W to 15000W
+- **Safety Checks**: Enforces critical safety conditions (temperature, voltage)
+- **Real-time Monitoring**: Automatic monitoring and stop at target SOC (with `--monitor` flag)
+- **Status Reporting**: Detailed status including SOC, power, duration, and energy sold
+
+**Safety Notes:**
+- Absolute minimum SOC is 10% (cannot sell below this)
+- Safety checks still enforced (temperature, voltage, battery health)
+- Automatically stops on critical safety conditions
+- Gracefully restores inverter to normal operation mode
+
+### **Manual Override (Programmatic)**
+
+For testing or emergency situations using Python API:
 
 ```python
 # Force start selling (bypass safety checks)

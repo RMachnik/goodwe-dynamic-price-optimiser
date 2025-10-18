@@ -138,6 +138,7 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - **Safety Monitoring**: Real-time safety checks and emergency stop capabilities
 - **GoodWe Integration**: Uses standard `eco_discharge` mode and grid export controls
 - **Performance Analytics**: Comprehensive revenue tracking and efficiency metrics
+- **Manual Control**: `sell_battery_now.py` script for manual selling with configurable target SOC
 
 ### **Implementation Status**
 - **Overall Progress**: ~98% complete
@@ -230,6 +231,7 @@ goodwe-dynamic-price-optimiser/
 │   ├── master_coordinator.py              # 🎯 Master Coordinator (Main Service)
 │   ├── enhanced_data_collector.py         # Enhanced data collection system
 │   ├── fast_charge.py                     # Core inverter control library
+│   ├── sell_battery_now.py                # 🔋 Manual battery selling script
 │   ├── polish_electricity_analyzer.py     # Core price analysis library
 │   └── automated_price_charging.py        # Core automated charging application
 ├── config/                                 # Configuration files
@@ -543,6 +545,21 @@ python src/master_coordinator.py --status
 
 # Start the coordinator
 python src/master_coordinator.py
+```
+
+### **Manual Battery Selling**
+```bash
+# Start selling until battery reaches 45% SOC (with monitoring)
+python src/sell_battery_now.py --start --target-soc 45 --monitor
+
+# Start selling with custom power limit
+python src/sell_battery_now.py --start --target-soc 30 --power 3000 --monitor
+
+# Stop current selling session
+python src/sell_battery_now.py --stop
+
+# Check selling status
+python src/sell_battery_now.py --status
 ```
 
 ### **Individual Component Testing**

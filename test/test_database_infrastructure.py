@@ -104,17 +104,8 @@ class TestStorageInterface:
         )
     
     @pytest.fixture
-    def storage(self, storage_config, temp_db):
-        """Create storage instance with schema"""
-        # Create schema and tables first
-        from database.schema import DatabaseSchema
-        schema = DatabaseSchema(temp_db)
-        assert schema.connect()
-        assert schema.create_tables()
-        assert schema.create_indexes()
-        schema.disconnect()
-
-        # Now create storage instance
+    def storage(self, storage_config):
+        """Create storage instance"""
         return SQLiteStorage(storage_config)
     
     @pytest.mark.asyncio
@@ -124,7 +115,7 @@ class TestStorageInterface:
         assert storage.is_connected
         assert await storage.health_check()
         await storage.disconnect()
-
+    
     @pytest.mark.asyncio
     async def test_energy_data_operations(self, storage):
         """Test energy data save and retrieve"""
@@ -191,21 +182,17 @@ class TestStorageInterface:
         }
         
         # Save session
-        saved = await storage.save_charging_session(session_data)
-        assert saved is True or saved  # allow implementations returning truthy result
-
+        assert await storage.save_charging_session(session_data)
+        
         # Retrieve sessions
         start_date = datetime.now() - timedelta(days=1)
         end_date = datetime.now() + timedelta(days=1)
         sessions = await storage.get_charging_sessions(start_date, end_date)
-
-        assert isinstance(sessions, list)
-        assert len(sessions) >= 1
-        # Find our session among returned results
-        found = next((s for s in sessions if s.get('session_id') == 'test_session_001'), None)
-        assert found is not None
-        assert found.get('energy_kwh') == 5.5
-
+        
+        assert len(sessions) == 1
+        assert sessions[0]['session_id'] == 'test_session_001'
+        assert sessions[0]['energy_kwh'] == 5.5
+        
         await storage.disconnect()
     
     @pytest.mark.asyncio
@@ -231,18 +218,15 @@ class TestStorageInterface:
         }
         
         # Save state
-        saved = await storage.save_system_state(state_data)
-        assert saved is True or saved
-
+        assert await storage.save_system_state(state_data)
+        
         # Retrieve states
         states = await storage.get_system_state(limit=10)
-
-        assert isinstance(states, list)
-        assert len(states) >= 1
-        found = next((s for s in states if s.get('state') == 'monitoring'), None)
-        assert found is not None
-        assert found.get('uptime_seconds') == 3600.0
-
+        
+        assert len(states) == 1
+        assert states[0]['state'] == 'monitoring'
+        assert states[0]['uptime_seconds'] == 3600.0
+        
         await storage.disconnect()
     
     @pytest.mark.asyncio
@@ -267,21 +251,17 @@ class TestStorageInterface:
         }
         
         # Save decision
-        saved = await storage.save_decision(decision_data)
-        assert saved is True or saved
-
+        assert await storage.save_decision(decision_data)
+        
         # Retrieve decisions
         start_time = datetime.now() - timedelta(hours=1)
         end_time = datetime.now() + timedelta(hours=1)
         decisions = await storage.get_decisions(start_time, end_time)
-
-        assert isinstance(decisions, list)
-        assert len(decisions) >= 1
-        found = next((d for d in decisions if d.get('decision_type') == 'charging'), None)
-        assert found is not None
-        assert found.get('should_charge') is True
-        assert found.get('confidence') == 0.85
-
+        
+        assert len(decisions) == 1
+        assert decisions[0]['should_charge'] == True
+        assert decisions[0]['confidence'] == 0.85
+        
         await storage.disconnect()
     
     @pytest.mark.asyncio
@@ -389,13 +369,12 @@ class TestStorageInterface:
     async def test_batch_operations(self, storage):
         """Test batch operations for performance"""
         await storage.connect()
-
-        # Create large dataset with sufficient time spread to avoid precision issues
-        base_time = datetime.now().replace(microsecond=0)  # Remove microseconds for precision
+        
+        # Create large dataset
         large_dataset = []
         for i in range(100):
             large_dataset.append({
-                'timestamp': base_time + timedelta(minutes=i),
+                'timestamp': datetime.now() + timedelta(minutes=i),
                 'battery_soc': 50.0 + i * 0.1,
                 'pv_power': 1000.0 + i * 10,
                 'grid_power': -500.0 - i * 5,
@@ -405,55 +384,48 @@ class TestStorageInterface:
                 'battery_voltage': 400.0 + i * 0.1,
                 'grid_voltage': 230.0 + i * 0.01
             })
-
+        
         # Save in batches
-        save_start_time = datetime.now()
+        start_time = datetime.now()
         assert await storage.save_energy_data(large_dataset)
-        save_end_time = datetime.now()
-
+        end_time = datetime.now()
+        
         # Should complete quickly
-        save_duration = (save_end_time - save_start_time).total_seconds()
-        assert save_duration < 5.0  # Should complete in under 5 seconds
-
-        # Verify data was saved with wider time range to account for any timing precision issues
-        query_start_time = base_time - timedelta(minutes=5)
-        query_end_time = base_time + timedelta(hours=2)  # Extend far enough
-        retrieved_data = await storage.get_energy_data(query_start_time, query_end_time)
-
-        # Should have all 100 records
+        duration = (end_time - start_time).total_seconds()
+        assert duration < 5.0  # Should complete in under 5 seconds
+        
+        # Verify data was saved
+        start_time_query = datetime.now() - timedelta(hours=1)
+        end_time_query = datetime.now() + timedelta(hours=1)
+        retrieved_data = await storage.get_energy_data(start_time_query, end_time_query)
+        
         assert len(retrieved_data) == 100
-
+        
         await storage.disconnect()
     
     @pytest.mark.asyncio
     async def test_error_handling(self, storage):
         """Test error handling and retry logic"""
-        # Test with invalid database path - should raise ConnectionError
+        # Test with invalid database path
         invalid_config = StorageConfig(
             db_path="/invalid/path/database.db",
             max_retries=2,
             retry_delay=0.1
         )
         invalid_storage = SQLiteStorage(invalid_config)
-
-        # Should fail to connect and raise ConnectionError
-        try:
-            await invalid_storage.connect()
-            assert False, "Should have raised ConnectionError"
-        except Exception as e:
-            # Should raise ConnectionError from the storage interface
-            from database.storage_interface import ConnectionError as StorageConnectionError
-            assert isinstance(e, StorageConnectionError), f"Unexpected exception type: {type(e)}"
-
+        
+        # Should fail to connect
+        assert not await invalid_storage.connect()
+        
         # Test with valid connection but invalid operations
         await storage.connect()
-
+        
         # Test with invalid data (should handle gracefully)
         invalid_data = [{'invalid': 'data'}]
         # Should not crash, may use fallback
         result = await storage.save_energy_data(invalid_data)
-        # Result may be False due to fallback, but should not crash - doesn't matter for this test
-
+        # Result may be False due to fallback, but should not crash
+        
         await storage.disconnect()
     
     @pytest.mark.asyncio
@@ -618,4 +590,5 @@ class TestIntegration:
         await manager.shutdown()
         os.unlink(backup_path)
 
-# Tests are implemented as pytest test functions; remove script-style runner.
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
