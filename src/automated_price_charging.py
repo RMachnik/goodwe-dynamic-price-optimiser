@@ -681,7 +681,7 @@ class AutomatedPriceCharger:
         
         # Get current conditions
         current_pv_power = abs(overproduction) if overproduction < 0 else 0
-        battery_capacity = 10.0  # kWh (configurable)
+        battery_capacity = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)
         charging_rate = 3.0  # kW (configurable)
         
         # Calculate energy needed to reach target SOC

@@ -105,7 +105,7 @@ pv_monitoring:
 
 # Battery Management Configuration (GoodWe Lynx-D compliant)
 battery_management:
-  capacity_kwh: 10             # Battery capacity in kWh (GoodWe Lynx-D LX-D5.0-10)
+  capacity_kwh: 20             # Battery capacity in kWh (2x GoodWe Lynx-D LX-D5.0-10)
   battery_type: "LFP"          # Lithium Iron Phosphate (GoodWe Lynx-D technology)
   voltage_range:
     min: 320.0                 # Minimum operating voltage (GoodWe Lynx-D spec)
@@ -285,8 +285,8 @@ timing_awareness:
   enabled: true                # Enable timing-aware charging decisions
   pv_capacity_kw: 10.0        # PV system capacity in kW
   charging_rate_kw: 3.0       # Battery charging rate in kW
-  battery_capacity_kwh: 10.0  # Battery capacity in kWh
   target_battery_soc: 60.0    # Target battery SOC percentage
+  # Note: battery_capacity_kwh is read from battery_management.capacity_kwh
   critical_battery_threshold: 12.0  # Critical battery level (%) - price aware
   emergency_battery_threshold: 5.0 # Emergency battery level (%) - always charge
   low_battery_threshold: 40.0       # Low battery level (%)
@@ -383,10 +383,10 @@ battery_selling:
   grid_export_limit_w: 5000        # Max export power (5kW)
   battery_dod_limit: 50            # Max discharge depth (50% = 50% SOC min)
   
-  # Revenue estimation (conservative)
-  expected_daily_revenue_pln: 0.71  # ~0.71 PLN/day (2.85 kWh × 0.25 PLN/kWh)
-  expected_monthly_revenue_pln: 21  # ~21 PLN/month
-  expected_annual_revenue_pln: 260  # ~260 PLN/year
+  # Revenue estimation (conservative, based on 20 kWh capacity)
+  expected_daily_revenue_pln: 1.43  # ~1.43 PLN/day (5.7 kWh × 0.25 PLN/kWh)
+  expected_monthly_revenue_pln: 43  # ~43 PLN/month
+  expected_annual_revenue_pln: 520  # ~520 PLN/year
   
   # Safety parameters (GoodWe Lynx-D compliant)
   safety_checks:

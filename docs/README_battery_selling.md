@@ -44,7 +44,7 @@ battery_selling:
   battery_dod_limit: 50            # Max discharge depth (50% = 50% SOC min)
   
   # Revenue estimation (conservative)
-  expected_daily_revenue_pln: 0.71  # ~0.71 PLN/day (2.85 kWh × 0.25 PLN/kWh)
+  expected_daily_revenue_pln: 1.43  # ~1.43 PLN/day (5.7 kWh × 0.25 PLN/kWh)
   expected_monthly_revenue_pln: 21  # ~21 PLN/month
   expected_annual_revenue_pln: 260  # ~260 PLN/year
   
@@ -100,14 +100,14 @@ Uses standard GoodWe inverter features:
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| **Battery Capacity** | 10 kWh | GoodWe Lynx-D 10kWh |
-| **Usable Energy** | 3.0 kWh | 80% - 50% = 30% usable |
-| **Net Sellable** | 2.85 kWh | 3.0 kWh × 95% efficiency |
+| **Battery Capacity** | 20 kWh | 2x GoodWe Lynx-D 10kWh |
+| **Usable Energy** | 6.0 kWh | 80% - 50% = 30% usable |
+| **Net Sellable** | 5.7 kWh | 6.0 kWh × 95% efficiency |
 | **Daily Cycles** | 1-2 | Conservative with 50% safety margin |
 | **Price Spread** | 0.20-0.30 PLN/kWh | Average price difference |
-| **Daily Revenue** | 0.71 PLN | 2.85 kWh × 0.25 PLN/kWh |
-| **Monthly Revenue** | ~21 PLN | 0.71 PLN × 30 days |
-| **Annual Revenue** | ~260 PLN | Conservative estimate |
+| **Daily Revenue** | ~1.43 PLN | 5.7 kWh × 0.25 PLN/kWh |
+| **Monthly Revenue** | ~43 PLN | 1.43 PLN × 30 days |
+| **Annual Revenue** | ~520 PLN | Conservative estimate |
 
 ### **Risk Assessment**
 

@@ -50,7 +50,7 @@ class PVConsumptionAnalyzer:
         self.config = config
         
         # System configuration
-        self.battery_capacity_kwh = config.get('timing_awareness', {}).get('battery_capacity_kwh', 10.0)
+        self.battery_capacity_kwh = config.get('battery_management', {}).get('capacity_kwh', 20.0)
         self.charging_rate_kw = config.get('timing_awareness', {}).get('charging_rate_kw', 3.0)
         self.pv_capacity_kw = config.get('timing_awareness', {}).get('pv_capacity_kw', 10.0)
         

@@ -91,12 +91,16 @@ def test_optimization_rule_1():
             if 'pv production improving soon' in reason_lower:
                 assert decision['should_charge'] == False, f"Expected to wait due to PV improvement but got: {decision}"
             else:
-                # With 60% savings at 9% SOC, expect wait if within max_wait_hours (6h), else charge
-                expect_wait = hours_to_wait <= 6
+                # With 60% savings at 9% SOC, calculate dynamic max wait hours
+                # battery_multiplier for 9% SOC = 0.7 (critical, <= 10)
+                # savings_multiplier for 60% savings = 1.2 (high savings, >= 60)
+                # dynamic_max_wait = 6 * 1.2 * 0.7 = 5.04 hours
+                dynamic_max_wait = 5.04
+                expect_wait = hours_to_wait <= dynamic_max_wait
                 if expect_wait:
-                    assert decision['should_charge'] == False, f"Expected to wait (cheaper price in {hours_to_wait}h) but got: {decision}"
+                    assert decision['should_charge'] == False, f"Expected to wait (cheaper price in {hours_to_wait}h within dynamic max {dynamic_max_wait}h) but got: {decision}"
                 else:
-                    assert decision['should_charge'] == True, f"Expected to charge (wait {hours_to_wait}h too long) but got: {decision}"
+                    assert decision['should_charge'] == True, f"Expected to charge (wait {hours_to_wait}h exceeds dynamic max {dynamic_max_wait}h) but got: {decision}"
         else:
             if scenario['expected_action'] == 'charge':
                 assert decision['should_charge'] == True, f"Expected to charge but got: {decision}"
@@ -116,7 +120,9 @@ def test_optimization_rule_1():
                 assert dynamic_expected in reason or 'pv production improving soon' in reason, f"Expected reason to include dynamic savings or PV improvement, got '{reason}'"
             else:
                 # 9% case: accept PV improvement reason as well
-                expect_wait = hours_to_wait <= 6
+                # Use dynamic max wait hours: 6 * 1.2 * 0.7 = 5.04 hours
+                dynamic_max_wait = 5.04
+                expect_wait = hours_to_wait <= dynamic_max_wait
                 if 'pv production improving soon' in reason:
                     pass
                 else:

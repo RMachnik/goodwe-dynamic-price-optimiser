@@ -3,7 +3,7 @@
 
 **Project Goal**: Create an intelligent energy management system that optimizes battery charging based on electricity prices, PV production, house consumption, and battery state.
 
-**System Components**: GoodWe Inverter (10 kWh battery) + Photovoltaic System + Grid Connection (14 kWh max) + House Consumption (30-40 kWh daily)
+**System Components**: GoodWe Inverter (20 kWh battery) + Photovoltaic System + Grid Connection (14 kWh max) + House Consumption (30-40 kWh daily)
 
 **G12 Distribution Tariff**: Fixed rate (0.3508 zł/kWh) - same all day, no impact on charging decisions
 
@@ -400,7 +400,7 @@ Replaced inefficient monitoring with smart scheduling:
 
 ### **🔍 Key Discoveries from Your System:**
 - **PV System**: 10 kW capacity, 2-string setup producing peak power
-- **Battery**: 10 kWh capacity, currently 91% SoC, temperature 47-50°C
+- **Battery**: 20 kWh capacity, currently 91% SoC, temperature 47-50°C
 - **Grid**: 3-phase system, net exporter (2406 kWh exported, 221 kWh imported)
 - **House Consumption**: 0.6-4.7 kW range, daily total 9.4 kWh
 - **Inverter**: GW10KN-ET, 10 kW rated power, excellent connectivity
@@ -640,8 +640,8 @@ This is a **critical optimization scenario** that the current system doesn't han
 - **Current Time**: 11:00 AM
 - **Low Price Window**: 11:00-15:00 (4 hours of cheap electricity)
 - **Current PV**: 2 kW (insufficient for fast charging)
-- **Battery Capacity**: 10 kWh
-- **Battery Current**: 30% (3 kWh needed to reach 60%)
+- **Battery Capacity**: 20 kWh
+- **Battery Current**: 30% (6 kWh needed to reach 60%)
 - **Charging Rate**: 3 kW (from inverter)
 - **Time to Charge**: 3 kWh ÷ 3 kW = 1 hour
 - **PV Forecast**: PV will increase to 5 kW at 13:00 (2 hours from now)
@@ -1889,15 +1889,15 @@ await inverter.set_ongrid_battery_dod(dod_percentage)  # 0-99%
 ### **Revenue Analysis with Conservative Parameters**
 
 **Available Energy per Cycle:**
-- **Battery Capacity**: 10 kWh
-- **Usable Energy**: 10 kWh × (80% - 50%) = **3.0 kWh per cycle**
+- **Battery Capacity**: 20 kWh
+- **Usable Energy**: 20 kWh × (80% - 50%) = **6.0 kWh per cycle**
 - **Discharge Efficiency**: ~95%
-- **Net Sellable Energy**: 3.0 kWh × 0.95 = **2.85 kWh per cycle**
+- **Net Sellable Energy**: 6.0 kWh × 0.95 = **5.7 kWh per cycle**
 
 **Revenue Potential:**
 - **Daily Cycles**: 1-2 cycles (conservative with 50% safety margin)
 - **Average Price Spread**: 0.20-0.30 PLN/kWh
-- **Daily Revenue**: 2.85 kWh × 0.25 PLN/kWh = **0.71 PLN/day**
+- **Daily Revenue**: 5.7 kWh × 0.25 PLN/kWh = **1.43 PLN/day**
 - **Monthly Revenue**: ~**21 PLN/month**
 - **Annual Revenue**: ~**260 PLN/year**
 

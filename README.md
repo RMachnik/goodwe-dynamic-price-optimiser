@@ -157,7 +157,7 @@ The system currently uses file-based JSON storage with in-memory data limited to
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   GoodWe        │    │   Master        │    │   Multi-Factor  │
 │   Inverter      │◄──►│   Coordinator   │◄──►│   Decision      │
-│   (10 kWh)      │    │   (Central      │    │   Engine        │
+│   (20 kWh)      │    │   (Central      │    │   Engine        │
 │                 │    │   Orchestrator) │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
@@ -292,7 +292,7 @@ docker compose -f docker-compose.simple.yml up --build
 ### **Prerequisites**
 - Python 3.8+
 - GoodWe inverter (tested with GW10KN-ET)
-- GoodWe Lynx-D battery system (LX-D5.0-10) - **Safety compliant**
+- GoodWe Lynx-D battery system (2x LX-D5.0-10 = 20 kWh) - **Safety compliant**
 - Network access to inverter (UDP port 8899 or TCP port 502)
 
 ### **Safety Compliance**

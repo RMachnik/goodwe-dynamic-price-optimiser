@@ -64,7 +64,7 @@ class HybridChargingLogic:
         
         # Charging parameters
         self.charging_rate_kw = self.config.get('charging_rate_kw', 3.0)  # Default 3kW charging
-        self.battery_capacity_kwh = self.config.get('battery_capacity_kwh', 10.0)  # Default 10kWh battery
+        self.battery_capacity_kwh = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)
         self.min_charging_duration_hours = self.config.get('min_charging_duration_hours', 0.25)  # 15 minutes
         self.max_charging_duration_hours = self.config.get('max_charging_duration_hours', 4.0)   # 4 hours
         
@@ -86,7 +86,7 @@ class HybridChargingLogic:
         """Get default configuration when config file is missing or invalid"""
         return {
             'charging_rate_kw': 3.0,
-            'battery_capacity_kwh': 10.0,
+            'battery_management': {'capacity_kwh': 20.0},
             'min_charging_duration_hours': 0.25,
             'max_charging_duration_hours': 4.0,
             'min_savings_threshold_pln': 50.0,
