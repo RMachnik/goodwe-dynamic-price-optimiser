@@ -29,6 +29,26 @@ except ImportError:
     print("Error: goodwe library not found. Install with: pip install goodwe")
     raise
 
+# Import smart timing module
+try:
+    from battery_selling_timing import (
+        BatterySellingTiming, 
+        TimingDecision, 
+        TimingRecommendation
+    )
+    TIMING_AVAILABLE = True
+except ImportError:
+    TIMING_AVAILABLE = False
+    logging.warning("Battery selling timing module not available - using basic logic")
+
+# Import price forecast collector
+try:
+    from pse_price_forecast_collector import PSEPriceForecastCollector
+    FORECAST_AVAILABLE = True
+except ImportError:
+    FORECAST_AVAILABLE = False
+    logging.warning("PSE price forecast collector not available - timing features limited")
+
 
 class SellingDecision(Enum):
     """Battery selling decision types"""
@@ -49,6 +69,12 @@ class SellingOpportunity:
     reasoning: str
     safety_checks_passed: bool
     risk_level: str  # "low", "medium", "high"
+    # Smart timing fields
+    timing_recommendation: Optional[Any] = None  # TimingRecommendation
+    should_wait_for_peak: bool = False
+    optimal_sell_time: Optional[datetime] = None
+    peak_price: Optional[float] = None
+    opportunity_cost_pln: float = 0.0
 
 
 @dataclass
@@ -73,14 +99,17 @@ class BatterySellingEngine:
         self.config = config
         self.logger = logging.getLogger(__name__)
         
+        # Extract battery selling configuration
+        selling_config = config.get('battery_selling', {})
+        
         # Conservative safety parameters (from project plan analysis)
-        self.min_selling_soc = config.get('min_battery_soc', 80.0)  # 80% minimum SOC
-        self.safety_margin_soc = config.get('safety_margin_soc', 50.0)  # 50% safety margin
-        self.min_selling_price_pln = config.get('min_selling_price_pln', 0.50)  # 0.50 PLN/kWh
-        self.max_daily_cycles = config.get('max_daily_cycles', 2)  # Max 2 cycles per day
-        self.peak_hours = config.get('peak_hours', [17, 18, 19, 20, 21])  # 5-9 PM
-        self.grid_export_limit_w = config.get('grid_export_limit_w', 5000)  # 5kW max export
-        self.battery_dod_limit = config.get('battery_dod_limit', 50)  # 50% max discharge
+        self.min_selling_soc = selling_config.get('min_battery_soc', 80.0)  # 80% minimum SOC
+        self.safety_margin_soc = selling_config.get('safety_margin_soc', 50.0)  # 50% safety margin
+        self.min_selling_price_pln = selling_config.get('min_selling_price_pln', 0.50)  # 0.50 PLN/kWh
+        self.max_daily_cycles = selling_config.get('max_daily_cycles', 2)  # Max 2 cycles per day
+        self.peak_hours = selling_config.get('peak_hours', [17, 18, 19, 20, 21])  # 5-9 PM
+        self.grid_export_limit_w = selling_config.get('grid_export_limit_w', 5000)  # 5kW max export
+        self.battery_dod_limit = selling_config.get('battery_dod_limit', 50)  # 50% max discharge
         
         # Battery specifications - read from config
         self.battery_capacity_kwh = config.get('battery_management', {}).get('capacity_kwh', 20.0)
@@ -93,12 +122,31 @@ class BatterySellingEngine:
         self.daily_cycles = 0
         self.last_cycle_reset = datetime.now().date()
         
+        # Smart timing engine (if available)
+        self.timing_engine = None
+        self.forecast_collector = None
+        if TIMING_AVAILABLE:
+            try:
+                self.timing_engine = BatterySellingTiming(config)
+                self.logger.info("Smart timing engine initialized")
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize timing engine: {e}")
+        
+        # Price forecast collector (if available)
+        if FORECAST_AVAILABLE:
+            try:
+                self.forecast_collector = PSEPriceForecastCollector(config)
+                self.logger.info("Price forecast collector initialized")
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize forecast collector: {e}")
+        
         self.logger.info(f"Battery Selling Engine initialized with conservative parameters:")
         self.logger.info(f"  - Min selling SOC: {self.min_selling_soc}%")
         self.logger.info(f"  - Safety margin SOC: {self.safety_margin_soc}%")
         self.logger.info(f"  - Min selling price: {self.min_selling_price_pln} PLN/kWh")
         self.logger.info(f"  - Usable energy per cycle: {self.usable_energy_per_cycle:.2f} kWh")
         self.logger.info(f"  - Net sellable energy: {self.net_sellable_energy:.2f} kWh")
+        self.logger.info(f"  - Smart timing: {'Enabled' if self.timing_engine else 'Disabled'}")
     
     def _reset_daily_cycles(self):
         """Reset daily cycle counter if new day"""
@@ -332,8 +380,133 @@ class BatterySellingEngine:
             return "high"
     
     async def analyze_selling_opportunity(self, current_data: Dict[str, Any], price_data: Dict[str, Any]) -> SellingOpportunity:
-        """Main method to analyze selling opportunity"""
-        return self._analyze_selling_opportunity(current_data, price_data)
+        """Main method to analyze selling opportunity with smart timing"""
+        # Run basic analysis
+        basic_opportunity = self._analyze_selling_opportunity(current_data, price_data)
+        
+        # If timing engine not available or basic analysis says WAIT, return immediately
+        if not self.timing_engine or basic_opportunity.decision == SellingDecision.WAIT:
+            return basic_opportunity
+        
+        # If basic analysis says START_SELLING, check if we should wait for better price
+        if basic_opportunity.decision == SellingDecision.START_SELLING:
+            try:
+                # Get price forecast
+                price_forecast = await self._get_price_forecast()
+                
+                if price_forecast:
+                    # Get current price in PLN/kWh
+                    current_price_pln = price_data.get('current_price_pln', 0)
+                    if not current_price_pln:
+                        # Try to extract from price_data
+                        current_price_pln = self._extract_current_price(price_data)
+                    
+                    # Get forecast confidence
+                    forecast_confidence = self.forecast_collector.get_forecast_confidence() if self.forecast_collector else 0.8
+                    
+                    # Analyze timing
+                    timing_rec = self.timing_engine.analyze_selling_timing(
+                        current_price=current_price_pln,
+                        price_forecast=price_forecast,
+                        current_data=current_data,
+                        forecast_confidence=forecast_confidence
+                    )
+                    
+                    # Update opportunity with timing recommendation
+                    basic_opportunity.timing_recommendation = timing_rec
+                    basic_opportunity.opportunity_cost_pln = timing_rec.opportunity_cost_pln
+                    
+                    # If timing says WAIT, update decision
+                    if timing_rec.decision in [TimingDecision.WAIT_FOR_PEAK, TimingDecision.WAIT_FOR_HIGHER]:
+                        basic_opportunity.decision = SellingDecision.WAIT
+                        basic_opportunity.reasoning = f"Smart timing: {timing_rec.reasoning}"
+                        basic_opportunity.should_wait_for_peak = True
+                        basic_opportunity.optimal_sell_time = timing_rec.sell_time
+                        basic_opportunity.peak_price = timing_rec.peak_info.peak_price if timing_rec.peak_info else None
+                        basic_opportunity.confidence = timing_rec.confidence
+                        
+                        self.logger.info(f"Smart timing: Waiting for better price. {timing_rec.reasoning}")
+                    
+                    # If timing says NO_OPPORTUNITY, update decision
+                    elif timing_rec.decision == TimingDecision.NO_OPPORTUNITY:
+                        basic_opportunity.decision = SellingDecision.WAIT
+                        basic_opportunity.reasoning = f"Smart timing: {timing_rec.reasoning}"
+                        basic_opportunity.confidence = timing_rec.confidence
+                        
+                        self.logger.info(f"Smart timing: No good opportunity. {timing_rec.reasoning}")
+                    
+                    # If timing says SELL_NOW, keep the START_SELLING decision
+                    else:
+                        basic_opportunity.reasoning += f" | Smart timing: {timing_rec.reasoning}"
+                        basic_opportunity.confidence = max(basic_opportunity.confidence, timing_rec.confidence)
+                        
+                        self.logger.info(f"Smart timing: Confirmed sell now. {timing_rec.reasoning}")
+                        
+            except Exception as e:
+                self.logger.error(f"Error in smart timing analysis: {e}")
+                # Fall back to basic analysis
+        
+        return basic_opportunity
+    
+    async def _get_price_forecast(self) -> List[Dict[str, Any]]:
+        """Get price forecast data"""
+        if not self.forecast_collector:
+            return []
+        
+        try:
+            # Fetch forecast
+            forecast_points = self.forecast_collector.fetch_price_forecast()
+            
+            # Convert to format expected by timing engine
+            forecast_data = []
+            for point in forecast_points:
+                forecast_data.append({
+                    'time': point.time.isoformat(),
+                    'price': point.forecasted_price_pln / 1000,  # Convert PLN/MWh to PLN/kWh
+                    'forecasted_price_pln': point.forecasted_price_pln,
+                    'confidence': point.confidence
+                })
+            
+            return forecast_data
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching price forecast: {e}")
+            return []
+    
+    def _extract_current_price(self, price_data: Dict[str, Any]) -> float:
+        """Extract current price from price_data"""
+        try:
+            # Try different price data formats
+            if 'current_price_pln' in price_data:
+                return price_data['current_price_pln']
+            
+            if 'value' in price_data:
+                # CSDAC format - find current time period
+                current_time = datetime.now()
+                for item in price_data['value']:
+                    item_time_str = item.get('dtime', '')
+                    if not item_time_str:
+                        continue
+                    
+                    try:
+                        if ':' in item_time_str and item_time_str.count(':') == 2:
+                            item_time = datetime.strptime(item_time_str, '%Y-%m-%d %H:%M:%S')
+                        else:
+                            item_time = datetime.strptime(item_time_str, '%Y-%m-%d %H:%M')
+                    except ValueError:
+                        continue
+                    
+                    if item_time <= current_time < item_time + timedelta(minutes=15):
+                        market_price = float(item.get('csdac_pln', 0))
+                        # Add SC component (89.2 PLN/MWh = 0.0892 PLN/kWh)
+                        return (market_price + 89.2) / 1000  # Convert to PLN/kWh
+            
+            # Default fallback
+            return self.min_selling_price_pln
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting current price: {e}")
+            return self.min_selling_price_pln
     
     async def start_selling_session(self, inverter: Inverter, opportunity: SellingOpportunity) -> bool:
         """Start a battery selling session using GoodWe inverter"""

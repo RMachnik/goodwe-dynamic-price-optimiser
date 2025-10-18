@@ -131,20 +131,23 @@ The system currently uses file-based JSON storage with in-memory data limited to
   - `src/price_window_analyzer.py::_should_wait_for_better_price`
   Guard clauses now return safe results without raising `ZeroDivisionError`.
 
-### **Battery Energy Selling (NEW)**
-- **Conservative Safety**: 80% min SOC, 50% safety margin for battery protection
-- **Revenue Generation**: ~260 PLN/year additional revenue from energy selling
-- **Smart Logic**: Price-aware selling during high-price periods (5-9 PM)
-- **Safety Monitoring**: Real-time safety checks and emergency stop capabilities
-- **GoodWe Integration**: Uses standard `eco_discharge` mode and grid export controls
-- **Performance Analytics**: Comprehensive revenue tracking and efficiency metrics
-- **Manual Control**: `sell_battery_now.py` script for manual selling with configurable target SOC
+### **Battery Energy Selling (NEW - Enhanced with Smart Timing)**
+- **🎯 Smart Timing**: Avoid selling too early - wait for peak prices using forecast analysis
+- **📈 Peak Detection**: Automatically identifies and waits for optimal selling times
+- **📊 Trend Analysis**: Detects rising/falling price trends for better decisions
+- **💰 Revenue Generation**: ~520 PLN/year additional revenue (improved with smart timing)
+- **⚡ Opportunity Cost**: Calculates revenue gains from waiting vs selling immediately
+- **🔒 Conservative Safety**: 80% min SOC, 50% safety margin for battery protection
+- **🔄 Multi-Session**: Plans multiple selling sessions throughout the day
+- **🛡️ Safety Monitoring**: Real-time safety checks and emergency stop capabilities
+- **🔌 GoodWe Integration**: Uses standard `eco_discharge` mode and grid export controls
+- **📊 Performance Analytics**: Comprehensive revenue tracking and efficiency metrics
 
 ### **Implementation Status**
 - **Overall Progress**: ~98% complete
 - **Advanced Optimization Rules**: ✅ Fully implemented and tested
 - **Smart Critical Charging**: ✅ Emergency (5% SOC) vs Critical (10% SOC) with price awareness
-- **Battery Energy Selling**: ✅ Fully implemented with conservative safety parameters
+- **Battery Energy Selling**: ✅ Fully implemented with smart timing to avoid selling too early
 - **Proactive Charging**: ✅ PV poor + battery <80% + low price + weather poor = charge
 - **Cost Optimization**: ✅ Real-world tested rules save up to 70% on charging costs
 - **Test Coverage**: ✅ 227/234 tests passing (97.0% pass rate)
