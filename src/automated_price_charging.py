@@ -25,6 +25,7 @@ sys.path.insert(0, str(current_dir))
 
 from fast_charge import GoodWeFastCharger
 from enhanced_data_collector import EnhancedDataCollector
+from enhanced_aggressive_charging import EnhancedAggressiveCharging
 
 # Logging configuration handled by main application
 logger = logging.getLogger(__name__)
@@ -96,8 +97,16 @@ class AutomatedPriceCharger:
         # Load electricity pricing configuration
         self._load_pricing_config()
         
-        # Load aggressive cheapest price charging configuration
+        # Load aggressive cheapest price charging configuration (legacy)
         self._load_aggressive_cheapest_config()
+        
+        # Initialize enhanced aggressive charging module
+        try:
+            self.enhanced_aggressive = EnhancedAggressiveCharging(self.config)
+            logger.info("Enhanced aggressive charging module initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize enhanced aggressive charging: {e}")
+            self.enhanced_aggressive = None
     
     def _load_config(self):
         """Load configuration from config file"""
@@ -320,7 +329,8 @@ class AutomatedPriceCharger:
                 grid_direction=grid_direction,
                 current_price=current_price,
                 cheapest_price=cheapest_price,
-                cheapest_hour=cheapest_hour
+                cheapest_hour=cheapest_hour,
+                price_data=price_data  # Pass full price data for enhanced logic
             )
             
             # Store decision in history
@@ -785,7 +795,8 @@ class AutomatedPriceCharger:
 
     def _make_charging_decision(self, battery_soc: int, overproduction: int, grid_power: int,
                               grid_direction: str, current_price: Optional[float],
-                              cheapest_price: Optional[float], cheapest_hour: Optional[int]) -> Dict[str, any]:
+                              cheapest_price: Optional[float], cheapest_hour: Optional[int],
+                              price_data: Optional[Dict] = None) -> Dict[str, any]:
         """Make the final charging decision based on all factors"""
         
         # EMERGENCY: Battery below emergency threshold - always charge regardless of price
@@ -803,7 +814,43 @@ class AutomatedPriceCharger:
                 battery_soc, current_price, cheapest_price, cheapest_hour
             )
         
-        # AGGRESSIVE CHEAPEST PRICE CHARGING: Charge aggressively during cheapest price periods
+        # ENHANCED AGGRESSIVE CHEAPEST PRICE CHARGING: Use new smart logic
+        if self.enhanced_aggressive:
+            try:
+                # Get price forecast if available
+                forecast_data = None
+                try:
+                    from pse_price_forecast_collector import PSEPriceForecastCollector
+                    forecast_collector = PSEPriceForecastCollector(self.config)
+                    forecast_points = forecast_collector.fetch_price_forecast()
+                    if forecast_points:
+                        forecast_data = [{'price': p.forecasted_price_pln, 'time': p.time, 'confidence': p.confidence} 
+                                       for p in forecast_points]
+                except Exception as e:
+                    logger.debug(f"Could not fetch forecast data: {e}")
+                
+                # Make enhanced aggressive charging decision
+                decision = self.enhanced_aggressive.should_charge_aggressively(
+                    battery_soc=battery_soc,
+                    price_data=price_data if price_data else {'value': []},  # Pass actual price data
+                    forecast_data=forecast_data,
+                    current_data={'battery': {'soc_percent': battery_soc}}
+                )
+                
+                if decision.should_charge:
+                    return {
+                        'should_charge': True,
+                        'reason': decision.reason,
+                        'priority': decision.priority,
+                        'confidence': decision.confidence,
+                        'target_soc': decision.target_soc,
+                        'price_category': decision.price_category.value
+                    }
+                
+            except Exception as e:
+                logger.error(f"Error in enhanced aggressive charging: {e}")
+        
+        # FALLBACK: Legacy aggressive charging logic
         if self._check_aggressive_cheapest_price_conditions(battery_soc, current_price, cheapest_price, cheapest_hour):
             return {
                 'should_charge': True,

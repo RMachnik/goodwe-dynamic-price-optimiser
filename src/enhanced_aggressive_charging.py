@@ -19,8 +19,6 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
-from tariff_pricing import TariffPricingCalculator, PriceComponents
-
 logger = logging.getLogger(__name__)
 
 
@@ -123,14 +121,6 @@ class EnhancedAggressiveCharging:
         battery_selling_config = config.get('battery_selling', {})
         self.battery_selling_enabled = battery_selling_config.get('enabled', False)
         self.min_selling_soc = battery_selling_config.get('min_battery_soc', 80)
-        
-        # Initialize tariff pricing calculator
-        try:
-            self.tariff_calculator = TariffPricingCalculator(config)
-            self.logger.info("Tariff pricing calculator initialized for enhanced aggressive charging")
-        except Exception as e:
-            self.logger.error(f"Failed to initialize tariff calculator: {e}")
-            self.tariff_calculator = None
         
         self.logger.info(f"Enhanced Aggressive Charging initialized (enabled: {self.enabled})")
         self.logger.info(f"  - Price threshold: {self.price_threshold_percent}% of cheapest")
@@ -509,8 +499,8 @@ class EnhancedAggressiveCharging:
         
         return max(0.25, charging_time_hours)  # Minimum 15 minutes
     
-    def _extract_current_price(self, price_data: Dict, kompas_status: Optional[str] = None) -> Optional[float]:
-        """Extract current price from price data with tariff-aware pricing"""
+    def _extract_current_price(self, price_data: Dict) -> Optional[float]:
+        """Extract current price from price data"""
         try:
             if 'value' in price_data:
                 current_time = datetime.now()
@@ -529,25 +519,16 @@ class EnhancedAggressiveCharging:
                     
                     if item_time <= current_time < item_time + timedelta(minutes=15):
                         market_price = float(item.get('csdac_pln', 0))
-                        
-                        if self.tariff_calculator:
-                            # Use tariff-aware pricing
-                            market_price_kwh = market_price / 1000
-                            components = self.tariff_calculator.calculate_final_price(
-                                market_price_kwh, item_time, kompas_status
-                            )
-                            return components.final_price
-                        else:
-                            # Fallback: SC component only
-                            return (market_price + 89.2) / 1000  # Convert to PLN/kWh
+                        # Add SC component (89.2 PLN/MWh)
+                        return (market_price + 89.2) / 1000  # Convert to PLN/kWh
             
             return None
         except Exception as e:
             self.logger.error(f"Error extracting current price: {e}")
             return None
     
-    def _extract_cheapest_price(self, price_data: Dict, kompas_status: Optional[str] = None) -> Tuple[Optional[float], Optional[int]]:
-        """Extract cheapest price and hour with tariff-aware pricing"""
+    def _extract_cheapest_price(self, price_data: Dict) -> Tuple[Optional[float], Optional[int]]:
+        """Extract cheapest price and hour"""
         try:
             if 'value' in price_data:
                 prices = []
@@ -565,18 +546,7 @@ class EnhancedAggressiveCharging:
                         continue
                     
                     market_price = float(item.get('csdac_pln', 0))
-                    
-                    if self.tariff_calculator:
-                        # Use tariff-aware pricing
-                        market_price_kwh = market_price / 1000
-                        components = self.tariff_calculator.calculate_final_price(
-                            market_price_kwh, item_time, kompas_status
-                        )
-                        final_price = components.final_price
-                    else:
-                        # Fallback: SC component only
-                        final_price = (market_price + 89.2) / 1000  # PLN/kWh
-                    
+                    final_price = (market_price + 89.2) / 1000  # PLN/kWh
                     prices.append((final_price, item_time.hour))
                 
                 if prices:
@@ -588,34 +558,14 @@ class EnhancedAggressiveCharging:
             self.logger.error(f"Error extracting cheapest price: {e}")
             return None, None
     
-    def _extract_all_prices(self, price_data: Dict, kompas_status: Optional[str] = None) -> List[float]:
-        """Extract all prices for statistical analysis with tariff-aware pricing"""
+    def _extract_all_prices(self, price_data: Dict) -> List[float]:
+        """Extract all prices for statistical analysis"""
         try:
             prices = []
             if 'value' in price_data:
                 for item in price_data['value']:
                     market_price = float(item.get('csdac_pln', 0))
-                    item_time_str = item.get('dtime', '')
-                    
-                    if self.tariff_calculator and item_time_str:
-                        try:
-                            if ':' in item_time_str and item_time_str.count(':') == 2:
-                                item_time = datetime.strptime(item_time_str, '%Y-%m-%d %H:%M:%S')
-                            else:
-                                item_time = datetime.strptime(item_time_str, '%Y-%m-%d %H:%M')
-                            
-                            market_price_kwh = market_price / 1000
-                            components = self.tariff_calculator.calculate_final_price(
-                                market_price_kwh, item_time, kompas_status
-                            )
-                            final_price = components.final_price
-                        except (ValueError, Exception) as e:
-                            # Fallback if datetime parsing fails
-                            final_price = (market_price + 89.2) / 1000
-                    else:
-                        # Fallback: SC component only
-                        final_price = (market_price + 89.2) / 1000  # PLN/kWh
-                    
+                    final_price = (market_price + 89.2) / 1000  # PLN/kWh
                     prices.append(final_price)
             return prices
         except Exception as e:
