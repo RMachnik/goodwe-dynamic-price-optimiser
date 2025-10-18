@@ -75,14 +75,45 @@ coordinator:
     continue_charging_min: 30   # Continue charging if score >= this
     continue_charging_max: 70   # Continue charging if score <= this
   
-  # Aggressive charging during cheapest price periods
+  # Enhanced Aggressive Charging (Revised for Better Price Detection)
   cheapest_price_aggressive_charging:
     enabled: true                    # Enable aggressive charging during cheapest periods
-    max_price_difference_pln: 0.05   # Charge if current price within 0.05 PLN/kWh of cheapest
-    min_battery_soc_for_aggressive: 30  # Minimum SOC to trigger aggressive charging
-    max_battery_soc_for_aggressive: 85  # Maximum SOC to trigger aggressive charging
-    override_pv_overproduction: true    # Override PV overproduction check during cheapest periods
-    min_charging_duration_minutes: 15   # Minimum charging duration during cheapest periods
+    
+    # PERCENTAGE-BASED THRESHOLDS (not fixed PLN amounts)
+    price_threshold_percent: 10      # Within 10% of cheapest price (adapts to market)
+    
+    # PRICE CATEGORIES (PLN/kWh) - based on Polish market
+    super_cheap_threshold: 0.20      # < 0.20 = super cheap (rare, charge to 100%)
+    very_cheap_threshold: 0.30       # 0.20-0.30 = very cheap (charge to 90%)
+    cheap_threshold: 0.40            # 0.30-0.40 = cheap (charge to 80%)
+    moderate_threshold: 0.60         # 0.40-0.60 = moderate (normal logic)
+    expensive_threshold: 0.80        # 0.60-0.80 = expensive (don't charge)
+    
+    # TARGET SOC BY PRICE CATEGORY
+    super_cheap_target_soc: 100      # Charge to 100% when super cheap
+    very_cheap_target_soc: 90        # Charge to 90% when very cheap
+    cheap_target_soc: 80             # Charge to 80% when cheap
+    
+    # BATTERY SELLING COORDINATION
+    coordinate_with_selling: true    # Reserve capacity for selling opportunities
+    min_selling_reserve_percent: 5   # Keep 5% margin for selling
+    
+    # HISTORICAL PRICE ANALYSIS (compare to median/percentiles)
+    use_percentile_analysis: true    # Only charge at historically cheap prices
+    percentile_threshold: 25         # Bottom 25% of prices = historically cheap
+    
+    # FORECAST INTEGRATION (check tomorrow's prices)
+    use_d1_forecast: true            # Check PSE D+1 forecast before charging
+    min_tomorrow_price_diff_percent: 30  # Wait if tomorrow 30%+ cheaper
+    
+    # SOC RANGES (when to apply aggressive charging)
+    min_battery_soc_for_aggressive: 30  # Minimum SOC to trigger
+    max_battery_soc_for_aggressive: 85  # Maximum SOC to trigger
+    
+    # LEGACY PARAMETERS (kept for compatibility)
+    override_pv_overproduction: true    # Override PV overproduction check
+    min_charging_duration_minutes: 15   # Minimum charging duration
+    max_price_difference_pln: 0.05      # DEPRECATED: use price_threshold_percent
 
 # Price Analysis Configuration
 price_analysis:

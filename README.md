@@ -107,6 +107,17 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - [Enhanced Dashboard Documentation](docs/ENHANCED_DASHBOARD.md)
 - [Battery Energy Selling Guide](docs/README_battery_selling.md)
 
+### **Enhanced Aggressive Charging (REVISED - NEW)**
+- **🎯 Smart Price Detection**: Compares to median/percentiles (not just cheapest price)
+- **📊 Price Categories**: Super cheap (<0.20), Very cheap (0.20-0.30), Cheap (0.30-0.40)
+- **📈 Percentage-Based**: Uses 10% threshold that adapts to market (not fixed 0.05 PLN)
+- **⏰ Period Detection**: Detects multi-hour cheap periods (not just ±1 hour window)
+- **🔮 D+1 Forecast**: Checks tomorrow's prices before charging (avoids missing better opportunities)
+- **🤝 Selling Coordination**: Reserves capacity for high-price battery selling
+- **✅ Verified**: Validated against [Gadek.pl API](https://www.gadek.pl/api) - [See Validation Report](docs/GADEK_VALIDATION_SUMMARY.md)
+- **💰 Impact**: 62.5% cost reduction + better selling revenue
+- **See**: [Enhanced Aggressive Charging Documentation](docs/ENHANCED_AGGRESSIVE_CHARGING.md)
+
 ### **PSE Price Forecasts (NEW)**
 - **Early Planning**: Price forecasts available before 12:42 CSDAC publication
 - **Enhanced Decisions**: Better timing with 24-hour price predictions
