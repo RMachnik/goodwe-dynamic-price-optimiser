@@ -49,6 +49,14 @@ except ImportError:
     FORECAST_AVAILABLE = False
     logging.warning("PSE price forecast collector not available - timing features limited")
 
+# Import tariff pricing
+try:
+    from tariff_pricing import TariffPricingCalculator, PriceComponents
+    TARIFF_PRICING_AVAILABLE = True
+except ImportError:
+    TARIFF_PRICING_AVAILABLE = False
+    logging.warning("Tariff pricing module not available - using SC-only pricing")
+
 
 class SellingDecision(Enum):
     """Battery selling decision types"""
@@ -140,6 +148,15 @@ class BatterySellingEngine:
             except Exception as e:
                 self.logger.warning(f"Failed to initialize forecast collector: {e}")
         
+        # Tariff pricing calculator (if available)
+        self.tariff_calculator = None
+        if TARIFF_PRICING_AVAILABLE:
+            try:
+                self.tariff_calculator = TariffPricingCalculator(config)
+                self.logger.info("Tariff pricing calculator initialized for battery selling")
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize tariff calculator: {e}")
+        
         self.logger.info(f"Battery Selling Engine initialized with conservative parameters:")
         self.logger.info(f"  - Min selling SOC: {self.min_selling_soc}%")
         self.logger.info(f"  - Safety margin SOC: {self.safety_margin_soc}%")
@@ -147,6 +164,7 @@ class BatterySellingEngine:
         self.logger.info(f"  - Usable energy per cycle: {self.usable_energy_per_cycle:.2f} kWh")
         self.logger.info(f"  - Net sellable energy: {self.net_sellable_energy:.2f} kWh")
         self.logger.info(f"  - Smart timing: {'Enabled' if self.timing_engine else 'Disabled'}")
+        self.logger.info(f"  - Tariff pricing: {'Enabled' if self.tariff_calculator else 'SC-only'}")
     
     def _reset_daily_cycles(self):
         """Reset daily cycle counter if new day"""
@@ -473,8 +491,8 @@ class BatterySellingEngine:
             self.logger.error(f"Error fetching price forecast: {e}")
             return []
     
-    def _extract_current_price(self, price_data: Dict[str, Any]) -> float:
-        """Extract current price from price_data"""
+    def _extract_current_price(self, price_data: Dict[str, Any], kompas_status: Optional[str] = None) -> float:
+        """Extract current price from price_data with tariff-aware pricing"""
         try:
             # Try different price data formats
             if 'current_price_pln' in price_data:
@@ -498,8 +516,17 @@ class BatterySellingEngine:
                     
                     if item_time <= current_time < item_time + timedelta(minutes=15):
                         market_price = float(item.get('csdac_pln', 0))
-                        # Add SC component (89.2 PLN/MWh = 0.0892 PLN/kWh)
-                        return (market_price + 89.2) / 1000  # Convert to PLN/kWh
+                        
+                        if self.tariff_calculator:
+                            # Use tariff-aware pricing
+                            market_price_kwh = market_price / 1000
+                            components = self.tariff_calculator.calculate_final_price(
+                                market_price_kwh, item_time, kompas_status
+                            )
+                            return components.final_price
+                        else:
+                            # Fallback: SC component only
+                            return (market_price + 89.2) / 1000  # Convert to PLN/kWh
             
             # Default fallback
             return self.min_selling_price_pln

@@ -16,6 +16,13 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 
+try:
+    from tariff_pricing import TariffPricingCalculator, PriceComponents
+    TARIFF_PRICING_AVAILABLE = True
+except ImportError:
+    TARIFF_PRICING_AVAILABLE = False
+    logging.warning("Tariff pricing module not available - using SC-only pricing")
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -70,6 +77,15 @@ class PVConsumptionAnalyzer:
         # Historical data for consumption forecasting
         self.consumption_history = []
         self.max_history_days = 7
+        
+        # Tariff pricing calculator (if available)
+        self.tariff_calculator = None
+        if TARIFF_PRICING_AVAILABLE:
+            try:
+                self.tariff_calculator = TariffPricingCalculator(config)
+                logger.info("Tariff pricing calculator initialized for PV consumption analyzer")
+            except Exception as e:
+                logger.warning(f"Failed to initialize tariff calculator: {e}")
     
     def analyze_power_balance(self, current_data: Dict[str, Any]) -> PowerBalance:
         """Analyze current power balance between PV, consumption, and battery"""
@@ -301,6 +317,17 @@ class PVConsumptionAnalyzer:
         except Exception as e:
             logger.error(f"Failed to update consumption history: {e}")
     
+    def _calculate_final_price(self, market_price_mwh: float, timestamp: datetime, kompas_status: Optional[str] = None) -> float:
+        """Calculate final price using tariff calculator or fallback to SC-only"""
+        if self.tariff_calculator:
+            market_price_kwh = market_price_mwh / 1000
+            components = self.tariff_calculator.calculate_final_price(market_price_kwh, timestamp, kompas_status)
+            return components.final_price * 1000  # Convert back to PLN/MWh
+        else:
+            # Fallback: SC component only
+            sc_component = self.config.get('electricity_pricing', {}).get('sc_component_pln_kwh', 0.0892)
+            return market_price_mwh + (sc_component * 1000)
+    
     def _calculate_data_confidence(self, current_data: Dict[str, Any]) -> float:
         """Calculate confidence in current data quality"""
         confidence = 0.0
@@ -338,13 +365,14 @@ class PVConsumptionAnalyzer:
             for price_point in price_data['value']:
                 price_time = datetime.strptime(price_point['dtime'], '%Y-%m-%d %H:%M')
                 if price_time.hour == current_hour and abs(price_time.minute - current_minute) <= 15:
-                    # Calculate final price (market + SC component)
+                    # Calculate final price with tariff-aware pricing
                     market_price = float(price_point['csdac_pln'])
-                    sc_component = self.config.get('electricity_pricing', {}).get('sc_component_pln_kwh', 0.0892)
-                    final_price = market_price + (sc_component * 1000)  # Convert to PLN/MWh
+                    final_price = self._calculate_final_price(market_price, price_time)
                     
                     # Check if price is low (below 25th percentile)
-                    all_prices = [float(p['csdac_pln']) + (sc_component * 1000) for p in price_data['value']]
+                    all_prices = [self._calculate_final_price(float(p['csdac_pln']), 
+                                                             datetime.strptime(p['dtime'], '%Y-%m-%d %H:%M'))
+                                for p in price_data['value']]
                     threshold = sorted(all_prices)[int(len(all_prices) * 0.25)]
                     
                     return final_price <= threshold
@@ -361,9 +389,10 @@ class PVConsumptionAnalyzer:
             if not price_data or 'value' not in price_data:
                 return 0.0
             
-            # Calculate threshold
-            sc_component = self.config.get('electricity_pricing', {}).get('sc_component_pln_kwh', 0.0892)
-            all_prices = [float(p['csdac_pln']) + (sc_component * 1000) for p in price_data['value']]
+            # Calculate threshold with tariff-aware pricing
+            all_prices = [self._calculate_final_price(float(p['csdac_pln']), 
+                                                      datetime.strptime(p['dtime'], '%Y-%m-%d %H:%M'))
+                         for p in price_data['value']]
             threshold = sorted(all_prices)[int(len(all_prices) * 0.25)]
             
             # Find current position and count consecutive low prices
@@ -377,7 +406,7 @@ class PVConsumptionAnalyzer:
                 price_time = datetime.strptime(price_point['dtime'], '%Y-%m-%d %H:%M')
                 if price_time.hour >= current_hour:
                     market_price = float(price_point['csdac_pln'])
-                    final_price = market_price + (sc_component * 1000)
+                    final_price = self._calculate_final_price(market_price, price_time)
                     
                     if final_price <= threshold:
                         duration_hours += 0.25  # 15-minute intervals
@@ -695,13 +724,14 @@ class PVConsumptionAnalyzer:
             for price_point in price_data['value']:
                 price_time = datetime.strptime(price_point['dtime'], '%Y-%m-%d %H:%M')
                 if price_time.hour == current_hour and abs(price_time.minute - current_minute) <= 15:
-                    # Calculate final price (market + SC component)
+                    # Calculate final price with tariff-aware pricing
                     market_price = float(price_point['csdac_pln'])
-                    sc_component = self.config.get('electricity_pricing', {}).get('sc_component_pln_kwh', 0.0892)
-                    final_price = market_price + (sc_component * 1000)  # Convert to PLN/MWh
+                    final_price = self._calculate_final_price(market_price, price_time)
                     
                     # Check if price is high (above 75th percentile)
-                    all_prices = [float(p['csdac_pln']) + (sc_component * 1000) for p in price_data['value']]
+                    all_prices = [self._calculate_final_price(float(p['csdac_pln']),
+                                                             datetime.strptime(p['dtime'], '%Y-%m-%d %H:%M'))
+                                for p in price_data['value']]
                     threshold = sorted(all_prices)[int(len(all_prices) * self.high_price_threshold_percentile)]
                     
                     return final_price >= threshold
@@ -822,9 +852,10 @@ class PVConsumptionAnalyzer:
                     'reason': 'No price data available'
                 }
             
-            # Calculate price threshold
-            sc_component = self.config.get('electricity_pricing', {}).get('sc_component_pln_kwh', 0.0892)
-            all_prices = [float(p['csdac_pln']) + (sc_component * 1000) for p in price_data['value']]
+            # Calculate price threshold with tariff-aware pricing
+            all_prices = [self._calculate_final_price(float(p['csdac_pln']),
+                                                      datetime.strptime(p['dtime'], '%Y-%m-%d %H:%M'))
+                         for p in price_data['value']]
             high_price_threshold = sorted(all_prices)[int(len(all_prices) * self.high_price_threshold_percentile)]
             
             # Count high price hours for tomorrow (assuming data covers next 24h)
@@ -840,7 +871,7 @@ class PVConsumptionAnalyzer:
                 # Check if this price point is for tomorrow
                 if price_time >= tomorrow_start and price_time < tomorrow_start + timedelta(days=1):
                     market_price = float(price_point['csdac_pln'])
-                    final_price = market_price + (sc_component * 1000)
+                    final_price = self._calculate_final_price(market_price, price_time)
                     
                     if final_price >= high_price_threshold:
                         high_price_hours += 1
@@ -902,11 +933,12 @@ class PVConsumptionAnalyzer:
                 price_time = datetime.strptime(price_point['dtime'], '%Y-%m-%d %H:%M')
                 if price_time.hour == current_hour and abs(price_time.minute - current_minute) <= 15:
                     market_price = float(price_point['csdac_pln'])
-                    sc_component = self.config.get('electricity_pricing', {}).get('sc_component_pln_kwh', 0.0892)
-                    current_price = market_price + (sc_component * 1000)
+                    current_price = self._calculate_final_price(market_price, price_time)
                     
-                    # Calculate average price for comparison
-                    all_prices = [float(p['csdac_pln']) + (sc_component * 1000) for p in price_data['value']]
+                    # Calculate average price for comparison with tariff-aware pricing
+                    all_prices = [self._calculate_final_price(float(p['csdac_pln']),
+                                                             datetime.strptime(p['dtime'], '%Y-%m-%d %H:%M'))
+                                for p in price_data['value']]
                     avg_price = sum(all_prices) / len(all_prices)
                     
                     # Calculate savings per kWh

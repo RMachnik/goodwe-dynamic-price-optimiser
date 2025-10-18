@@ -21,6 +21,67 @@ charging:
   safety_temp_max: 53.0      # Maximum safe battery temperature (GoodWe Lynx-D spec)
   safety_temp_min: 0.0       # Minimum safe battery temperature for charging (GoodWe Lynx-D spec)
 
+# Electricity Tariff Configuration
+electricity_tariff:
+  tariff_type: "g12"  # Options: g11, g12, g12as, g12w, g13, g14dynamic
+  
+  # SC Component (Składnik cenotwórczy) - same for all tariffs
+  sc_component_pln_kwh: 0.0892
+  
+  # Distribution prices by tariff type
+  distribution_pricing:
+    # G12w - Two-zone tariff (time-based)
+    g12w:
+      type: "time_based"
+      peak_hours:
+        start: 6
+        end: 22
+      prices:
+        peak: 0.3566      # Day/Peak (06:00-22:00)
+        off_peak: 0.0749  # Night/Off-peak (22:00-06:00)
+    
+    # G14dynamic - Dynamic tariff (kompas-based)
+    g14dynamic:
+      type: "kompas_based"
+      requires_pse_peak_hours: true
+      prices:
+        normal_usage: 0.0578      # S2 (usage_fcst=0)
+        recommended_usage: 0.0145  # S1 (usage_fcst=1)
+        recommended_saving: 0.4339 # S3 (usage_fcst=2)
+        required_reduction: 2.8931 # S4 (usage_fcst=3)
+      fallback_price: 0.0578  # Use normal_usage if kompas unavailable
+    
+    # G11 - Single-zone tariff (static)
+    g11:
+      type: "static"
+      price: 0.3125
+    
+    # G12 - Two-zone tariff
+    g12:
+      type: "time_based"
+      peak_hours:
+        start: 7
+        end: 22
+      prices:
+        peak: 0.3566
+        off_peak: 0.0749
+    
+    # G12as - Two-zone tariff with volume-based pricing
+    g12as:
+      type: "time_based"
+      peak_hours:
+        start: 7
+        end: 13
+      prices:
+        peak: 0.3125
+        off_peak: 0.0312
+    
+    # G13 - Three-zone tariff (placeholder for future)
+    g13:
+      type: "static"
+      price: 0.0  # Requires more complex implementation
+      note: "G13 has three zones - morning peak, day, night - needs detailed implementation"
+
 # Fast Charging Configuration (merged from fast_charge_config.yaml)
 fast_charging:
   enable: true                # Enable fast charging (true/false)

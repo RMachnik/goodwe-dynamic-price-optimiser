@@ -5,6 +5,8 @@
 **Date**: 2025-10-18  
 **API Endpoint**: [Gadek.pl g14d Tariff](https://www.gadek.pl/api?params%5BTaryfa%5D=g14d&params%5BRegion%5D=malopolskie&params%5BAzymut_PV%5D=0&params%5BNachylenie_PV%5D=30)
 
+**⚠️ Note**: This validation was performed BEFORE tariff-aware distribution pricing was implemented. The original validation used only SC component (0.0892 PLN/kWh) without distribution costs. For accurate G14d pricing, the system now includes dynamic distribution costs based on Kompas status (see [TARIFF_CONFIGURATION.md](TARIFF_CONFIGURATION.md)).
+
 ---
 
 ## Test Data

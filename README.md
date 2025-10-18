@@ -594,6 +594,57 @@ python src/fast_charge.py --status
 
 ## 🔧 **Configuration**
 
+### **Electricity Tariff Configuration**
+
+The system supports multiple Polish electricity tariffs with accurate distribution pricing:
+
+#### **Available Tariffs:**
+- **G11**: Single-zone (static distribution)
+- **G12**: Two-zone (time-based distribution, 07:00-22:00 peak)
+- **G12w**: Two-zone with wider night hours (time-based, 06:00-22:00 peak)
+- **G12as**: Two-zone with volume-based pricing (time-based, 07:00-13:00 peak)
+- **G14dynamic**: Dynamic tariff based on grid load (kompas-based)
+
+#### **Price Calculation Formula:**
+```
+Final Price = Market Price (CSDAC) + SC Component + Distribution Price
+```
+
+- **Market Price**: Variable (from PSE CSDAC API)
+- **SC Component**: Fixed at 0.0892 PLN/kWh for all tariffs
+- **Distribution Price**: Variable by tariff type
+
+#### **Configure Your Tariff:**
+
+Edit `config/master_coordinator_config.yaml`:
+
+```yaml
+electricity_tariff:
+  tariff_type: "g12w"  # Options: g11, g12, g12as, g12w, g13, g14dynamic
+  sc_component_pln_kwh: 0.0892
+```
+
+#### **G14dynamic Special Requirements:**
+
+**⚠️ G14dynamic requires PSE Peak Hours (Kompas Energetyczny) to be enabled:**
+
+```yaml
+pse_peak_hours:
+  enabled: true  # REQUIRED for G14dynamic
+```
+
+Without PSE Peak Hours, the system cannot determine the dynamic distribution price and will fail to start.
+
+#### **Distribution Prices by Tariff:**
+
+| Tariff | Type | Distribution Price | Notes |
+|--------|------|-------------------|-------|
+| **G12w** | Time-based | 0.3566 PLN/kWh (peak)<br>0.0749 PLN/kWh (off-peak) | Peak: 06:00-22:00<br>Off-peak: 22:00-06:00 |
+| **G14dynamic** | Kompas-based | 0.0145 PLN/kWh (green)<br>0.0578 PLN/kWh (yellow)<br>0.4339 PLN/kWh (orange)<br>2.8931 PLN/kWh (red) | Varies by grid load status |
+| **G11** | Static | 0.3125 PLN/kWh | Same price 24/7 |
+
+See [TARIFF_CONFIGURATION.md](docs/TARIFF_CONFIGURATION.md) for detailed documentation.
+
 ### **Master Coordinator Configuration**
 The main configuration file is `config/master_coordinator_config.yaml`:
 
@@ -664,9 +715,10 @@ coordinator:
 - **☀️ Weather Integration**: Real-time weather data for accurate PV forecasting
 - **🛡️ Safety Compliant**: Full GoodWe Lynx-D safety monitoring
 - **🧠 Enhanced Scoring**: PV vs consumption analysis for intelligent decisions
-- **📊 227/234 Tests Passing**: Comprehensive test coverage with 97.0% success rate
+- **📊 392/393 Tests Passing**: Comprehensive test coverage with 99.7% success rate (isolated from production config)
 - **🔧 Configuration System**: Fixed critical config loading bug (December 2024)
 - **🛠️ Recent Fixes**: Price window analyzer timing, critical battery thresholds, test data formats
+- **✅ Test Isolation**: All tests use isolated configs - change your tariff without breaking tests!
 
 ## 🚀 **Getting Started**
 
@@ -713,5 +765,6 @@ python src/automated_price_charging.py --schedule-today
 - **[Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md)** - Complete roadmap and progress
 - **[Automated Charging Guide](docs/README_automated_charging.md)** - Smart charging setup
 - **[Fast Charging Guide](docs/README_fast_charge.md)** - Basic inverter control
+- **[Test Configuration Isolation](docs/TEST_CONFIGURATION_ISOLATION.md)** - How tests are isolated from production config
 
 🚀⚡🔋 **Validated, efficient, and ready to save you money!**

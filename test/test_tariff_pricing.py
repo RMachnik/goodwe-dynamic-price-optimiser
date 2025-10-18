@@ -154,54 +154,54 @@ class TestG12wTimeBasedPricing:
 class TestG14dynamicKompasBased:
     """Test G14dynamic kompas-based pricing"""
     
-    def test_normalne_uzytkowanie_pricing(self):
-        """Test pricing for NORMALNE UŻYTKOWANIE kompas status"""
+    def test_normal_usage_pricing(self):
+        """Test pricing for NORMAL USAGE kompas status"""
         config = create_test_config('g14dynamic')
         calc = TariffPricingCalculator(config)
         
         market_price = 0.5
         timestamp = datetime(2025, 10, 18, 14, 0)
         
-        components = calc.calculate_final_price(market_price, timestamp, 'NORMALNE UŻYTKOWANIE')
+        components = calc.calculate_final_price(market_price, timestamp, 'NORMAL USAGE')
         
         assert components.distribution_price == 0.0578
         assert components.final_price == pytest.approx(0.5 + 0.0892 + 0.0578)
     
-    def test_zalecane_uzytkowanie_pricing(self):
-        """Test pricing for ZALECANE UŻYTKOWANIE (cheapest)"""
+    def test_recommended_usage_pricing(self):
+        """Test pricing for RECOMMENDED USAGE (cheapest)"""
         config = create_test_config('g14dynamic')
         calc = TariffPricingCalculator(config)
         
         market_price = 0.5
         timestamp = datetime(2025, 10, 18, 14, 0)
         
-        components = calc.calculate_final_price(market_price, timestamp, 'ZALECANE UŻYTKOWANIE')
+        components = calc.calculate_final_price(market_price, timestamp, 'RECOMMENDED USAGE')
         
         assert components.distribution_price == 0.0145
         assert components.final_price == pytest.approx(0.5 + 0.0892 + 0.0145)
     
-    def test_zalecane_oszczedzanie_pricing(self):
-        """Test pricing for ZALECANE OSZCZĘDZANIE"""
+    def test_recommended_saving_pricing(self):
+        """Test pricing for RECOMMENDED SAVING"""
         config = create_test_config('g14dynamic')
         calc = TariffPricingCalculator(config)
         
         market_price = 0.5
         timestamp = datetime(2025, 10, 18, 14, 0)
         
-        components = calc.calculate_final_price(market_price, timestamp, 'ZALECANE OSZCZĘDZANIE')
+        components = calc.calculate_final_price(market_price, timestamp, 'RECOMMENDED SAVING')
         
         assert components.distribution_price == 0.4339
         assert components.final_price == pytest.approx(0.5 + 0.0892 + 0.4339)
     
-    def test_wymagane_ograniczanie_pricing(self):
-        """Test pricing for WYMAGANE OGRANICZANIE (most expensive)"""
+    def test_required_reduction_pricing(self):
+        """Test pricing for REQUIRED REDUCTION (most expensive)"""
         config = create_test_config('g14dynamic')
         calc = TariffPricingCalculator(config)
         
         market_price = 0.5
         timestamp = datetime(2025, 10, 18, 14, 0)
         
-        components = calc.calculate_final_price(market_price, timestamp, 'WYMAGANE OGRANICZANIE')
+        components = calc.calculate_final_price(market_price, timestamp, 'REQUIRED REDUCTION')
         
         assert components.distribution_price == 2.8931
         assert components.final_price == pytest.approx(0.5 + 0.0892 + 2.8931)
@@ -296,7 +296,7 @@ class TestRealWorldScenarios:
         assert components.final_price == pytest.approx(0.4141)
     
     def test_g14dynamic_grid_overload(self):
-        """Test G14dynamic during grid overload (WYMAGANE OGRANICZANIE)"""
+        """Test G14dynamic during grid overload (REQUIRED REDUCTION)"""
         config = create_test_config('g14dynamic')
         calc = TariffPricingCalculator(config)
         
@@ -304,14 +304,14 @@ class TestRealWorldScenarios:
         market_price = 0.70  # 700 PLN/MWh
         timestamp = datetime(2025, 10, 18, 18, 0)  # Evening peak
         
-        components = calc.calculate_final_price(market_price, timestamp, 'WYMAGANE OGRANICZANIE')
+        components = calc.calculate_final_price(market_price, timestamp, 'REQUIRED REDUCTION')
         
         # Expected: 0.70 + 0.0892 + 2.8931 = 3.6823 PLN/kWh (very expensive!)
         assert components.final_price == pytest.approx(3.6823)
         assert components.final_price > 3.5  # Should discourage charging
     
     def test_g14dynamic_low_grid_load(self):
-        """Test G14dynamic during low grid load (ZALECANE UŻYTKOWANIE)"""
+        """Test G14dynamic during low grid load (RECOMMENDED USAGE)"""
         config = create_test_config('g14dynamic')
         calc = TariffPricingCalculator(config)
         
@@ -319,7 +319,7 @@ class TestRealWorldScenarios:
         market_price = 0.30  # 300 PLN/MWh
         timestamp = datetime(2025, 10, 18, 3, 0)  # Night
         
-        components = calc.calculate_final_price(market_price, timestamp, 'ZALECANE UŻYTKOWANIE')
+        components = calc.calculate_final_price(market_price, timestamp, 'RECOMMENDED USAGE')
         
         # Expected: 0.30 + 0.0892 + 0.0145 = 0.4037 PLN/kWh (cheap!)
         assert components.final_price == pytest.approx(0.4037)
