@@ -324,15 +324,6 @@ class LogWebServer:
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
         
-        @self.app.route('/battery-selling')
-        def get_battery_selling():
-            """Get battery selling decision history and analytics"""
-            try:
-                selling_data = self._get_battery_selling_data()
-                return jsonify(selling_data)
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
-        
         @self.app.route('/historical-data')
         def get_historical_data():
             """Get historical time series data for SOC and PV production"""
@@ -749,69 +740,6 @@ class LogWebServer:
                 'data_source': 'unknown'
             }
     
-    def _get_battery_selling_data(self) -> Dict[str, Any]:
-        """Get battery selling decision history and analytics"""
-        try:
-            # Check if there are any battery selling decision files
-            project_root = Path(__file__).parent.parent
-            selling_files = list((project_root / "out" / "energy_data").glob("battery_selling_decision_*.json"))
-            
-            selling_decisions = []
-            total_revenue = 0.0
-            total_energy_sold = 0.0
-            active_sessions = 0
-            
-            for file_path in sorted(selling_files, key=lambda x: x.stat().st_mtime, reverse=True)[:50]:  # Last 50 decisions
-                try:
-                    with open(file_path, 'r') as f:
-                        decision_data = json.load(f)
-                        selling_decisions.append(decision_data)
-                        
-                        # Calculate totals
-                        if decision_data.get('action') == 'battery_selling':
-                            total_revenue += decision_data.get('expected_revenue_pln', 0)
-                            total_energy_sold += decision_data.get('energy_sold_kwh', 0)
-                            if decision_data.get('decision') == 'start_selling':
-                                active_sessions += 1
-                                
-                except Exception as e:
-                    logger.warning(f"Failed to read battery selling file {file_path}: {e}")
-            
-            # Calculate analytics
-            avg_revenue_per_session = total_revenue / len(selling_decisions) if selling_decisions else 0
-            avg_energy_per_session = total_energy_sold / len(selling_decisions) if selling_decisions else 0
-            
-            # Get recent activity (last 24 hours)
-            recent_cutoff = datetime.now() - timedelta(hours=24)
-            recent_decisions = [
-                d for d in selling_decisions 
-                if datetime.fromisoformat(d['timestamp'].replace('Z', '+00:00')) > recent_cutoff
-            ]
-            
-            return {
-                'decisions': selling_decisions,
-                'analytics': {
-                    'total_sessions': len(selling_decisions),
-                    'total_revenue_pln': round(total_revenue, 2),
-                    'total_energy_sold_kwh': round(total_energy_sold, 2),
-                    'avg_revenue_per_session_pln': round(avg_revenue_per_session, 2),
-                    'avg_energy_per_session_kwh': round(avg_energy_per_session, 2),
-                    'active_sessions': active_sessions,
-                    'recent_24h_sessions': len(recent_decisions),
-                    'recent_24h_revenue_pln': round(sum(d.get('expected_revenue_pln', 0) for d in recent_decisions), 2)
-                },
-                'timestamp': datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to get battery selling data: {e}")
-            return {
-                'decisions': [],
-                'analytics': {},
-                'error': str(e),
-                'timestamp': datetime.now().isoformat()
-            }
-    
     def _get_dashboard_template(self) -> str:
         """Get HTML dashboard template"""
         return """
@@ -1221,9 +1149,7 @@ class LogWebServer:
         <div class="tabs">
             <div class="tab active" onclick="showTab('overview')">Overview</div>
             <div class="tab" onclick="showTab('decisions')">Decisions</div>
-            <div class="tab" onclick="showTab('battery-selling')">Battery Selling</div>
             <div class="tab" onclick="showTab('time-series')">Time Series</div>
-            <div class="tab" onclick="showTab('metrics')">Metrics</div>
             <div class="tab" onclick="showTab('logs')">Logs</div>
         </div>
         
@@ -1247,11 +1173,6 @@ class LogWebServer:
                 <div class="card">
                     <h3>Performance Metrics</h3>
                     <div id="performance-metrics">Loading...</div>
-                </div>
-                
-                <div class="card">
-                    <h3>Battery Selling Status</h3>
-                    <div id="battery-selling-status">Loading...</div>
                 </div>
                 
                 <div class="card">
@@ -1299,28 +1220,10 @@ class LogWebServer:
                             <span style="font-weight: 600;">Wait:</span>
                             <span id="wait-count" class="stat-value" style="background: #ffc107; color: black; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">0</span>
                         </div>
-                        <div class="stat-item" style="display: flex; align-items: center; gap: 8px;">
-                            <span style="font-weight: 600;">Battery Selling:</span>
-                            <span id="battery-selling-count" class="stat-value" style="background: #17a2b8; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">0</span>
-                        </div>
                     </div>
                 </div>
                 
                 <div id="decisions-list">Loading...</div>
-            </div>
-        </div>
-        
-        <!-- Battery Selling Tab -->
-        <div id="battery-selling" class="tab-content">
-            <div class="grid">
-                <div class="card">
-                    <h3>Battery Selling Analytics</h3>
-                    <div id="battery-selling-analytics">Loading...</div>
-                </div>
-                <div class="card">
-                    <h3>Recent Selling Decisions</h3>
-                    <div id="battery-selling-decisions">Loading...</div>
-                </div>
             </div>
         </div>
         
@@ -1368,24 +1271,6 @@ class LogWebServer:
                             <span class="metric-label">PV Peak</span>
                             <span class="metric-value" id="pv-peak">--</span>
                         </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Metrics Tab -->
-        <div id="metrics" class="tab-content">
-            <div class="grid">
-                <div class="card">
-                    <h3>Decision Analytics</h3>
-                    <div class="chart-container">
-                        <canvas id="decisionChart"></canvas>
-                    </div>
-                </div>
-                <div class="card">
-                    <h3>Cost Analysis</h3>
-                    <div class="chart-container">
-                        <canvas id="costChart"></canvas>
                     </div>
                 </div>
             </div>
@@ -1446,12 +1331,8 @@ class LogWebServer:
             // Load data for the tab
             if (tabName === 'decisions') {
                 loadDecisions();
-            } else if (tabName === 'battery-selling') {
-                loadBatterySelling();
             } else if (tabName === 'time-series') {
                 loadTimeSeries();
-            } else if (tabName === 'metrics') {
-                loadMetrics();
             }
         }
         
@@ -1542,10 +1423,6 @@ class LogWebServer:
                             <span class="metric-value">${(normalized.house_consumption && normalized.house_consumption.current_power_w != null) ? normalized.house_consumption.current_power_w : 'N/A'}W</span>
                         </div>
                         <div class="metric">
-                            <span class="metric-label">Grid Flow</span>
-                            <span class="metric-value">${(normalized.grid && normalized.grid.current_power_w != null) ? normalized.grid.current_power_w : 'N/A'}W (${normalized.grid && normalized.grid.flow_direction ? normalized.grid.flow_direction : 'N/A'})</span>
-                        </div>
-                        <div class="metric">
                             <span class="metric-label">L1 Current</span>
                             <span class="metric-value">${(normalized.grid && normalized.grid.l1_current_a != null ? normalized.grid.l1_current_a : 'N/A')} A</span>
                         </div>
@@ -1564,10 +1441,6 @@ class LogWebServer:
                         <div class="metric">
                             <span class="metric-label">Cheapest Price</span>
                             <span class="metric-value">${(normalized.pricing && normalized.pricing.cheapest_price_pln_kwh != null) ? normalized.pricing.cheapest_price_pln_kwh : 'N/A'} PLN/kWh (${normalized.pricing && normalized.pricing.cheapest_hour ? normalized.pricing.cheapest_hour : 'N/A'})</span>
-                        </div>
-                        <div class="system-health">
-                            <span class="health-indicator health-${(normalized.system_health && normalized.system_health.status) ? normalized.system_health.status : 'unknown'}">${(normalized.system_health && normalized.system_health.status ? String(normalized.system_health.status).toUpperCase() : 'UNKNOWN')}</span>
-                            <span>Uptime: ${(normalized.system_health && (normalized.system_health.uptime_human || normalized.system_health.uptime_hours != null)) ? (normalized.system_health.uptime_human || (normalized.system_health.uptime_hours + 'h')) : 'N/A'}</span>
                         </div>
                     `;
                     document.getElementById('current-state').innerHTML = stateHtml;
@@ -1849,7 +1722,6 @@ class LogWebServer:
                     document.getElementById('total-count').textContent = data.total_count || 0;
                     document.getElementById('charging-count').textContent = data.charging_count || 0;
                     document.getElementById('wait-count').textContent = data.wait_count || 0;
-                    document.getElementById('battery-selling-count').textContent = data.battery_selling_count || 0;
                     
                     // Group decisions by date
                     const groupedDecisions = groupDecisionsByDate(data.decisions);
@@ -2046,172 +1918,6 @@ class LogWebServer:
             if (confidence >= 0.6) return '#ffc107';
             if (confidence >= 0.4) return '#fd7e14';
             return '#dc3545';
-        }
-        
-        function loadBatterySelling() {
-            // Load analytics
-            fetch('/battery-selling')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        document.getElementById('battery-selling-analytics').innerHTML = `<p>Error: ${data.error}</p>`;
-                        document.getElementById('battery-selling-decisions').innerHTML = `<p>Error: ${data.error}</p>`;
-                        return;
-                    }
-                    
-                    // Display analytics
-                    const analytics = data.analytics;
-                    const analyticsHtml = `
-                        <div class="metrics-grid">
-                            <div class="metric">
-                                <span class="metric-label">Total Sessions:</span>
-                                <span class="metric-value">${analytics.total_sessions || 0}</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">Total Revenue:</span>
-                                <span class="metric-value">${analytics.total_revenue_pln || 0} PLN</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">Energy Sold:</span>
-                                <span class="metric-value">${analytics.total_energy_sold_kwh || 0} kWh</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">Avg Revenue/Session:</span>
-                                <span class="metric-value">${analytics.avg_revenue_per_session_pln || 0} PLN</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">Active Sessions:</span>
-                                <span class="metric-value">${analytics.active_sessions || 0}</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">24h Revenue:</span>
-                                <span class="metric-value">${analytics.recent_24h_revenue_pln || 0} PLN</span>
-                            </div>
-                        </div>
-                    `;
-                    document.getElementById('battery-selling-analytics').innerHTML = analyticsHtml;
-                    
-                    // Display recent decisions
-                    const decisionsHtml = data.decisions.map(decision => {
-                        const decisionClass = decision.decision === 'start_selling' ? 'selling' : 'wait';
-                        const confidencePercent = (decision.confidence * 100).toFixed(1);
-                        const revenue = decision.expected_revenue_pln || 0;
-                        const energy = decision.energy_sold_kwh || 0;
-                        const price = decision.current_price_pln || 0;
-                        
-                        // Determine execution status for battery selling with detailed reasons
-                        const getSellingExecutionStatus = (decision) => {
-                            if (decision.decision === 'wait') {
-                                return { 
-                                    status: 'N/A', 
-                                    color: '#6c757d', 
-                                    icon: '⏸️',
-                                    reason: 'Wait decision - no execution needed'
-                                };
-                            }
-                            
-                            // Check if selling was actually executed
-                            const revenue = decision.expected_revenue_pln || 0;
-                            const energy = decision.energy_sold_kwh || 0;
-                            
-                            // If values are 0, likely not executed - determine why
-                            if (revenue === 0 && energy === 0) {
-                                const reasoning = decision.reasoning || '';
-                                let blockReason = 'Unknown reason';
-                                
-                                // Check for specific blocking patterns in battery selling
-                                if (reasoning.includes('emergency') || reasoning.includes('safety')) {
-                                    blockReason = 'Emergency safety stop';
-                                } else if (reasoning.includes('battery') && reasoning.includes('SOC') && reasoning.includes('below')) {
-                                    blockReason = 'Battery SOC too low';
-                                } else if (reasoning.includes('price') && reasoning.includes('below')) {
-                                    blockReason = 'Price below selling threshold';
-                                } else if (reasoning.includes('grid voltage') && reasoning.includes('outside')) {
-                                    blockReason = 'Grid voltage out of range';
-                                } else if (reasoning.includes('communication') || reasoning.includes('connection')) {
-                                    blockReason = 'Communication error';
-                                } else if (reasoning.includes('inverter') && reasoning.includes('error')) {
-                                    blockReason = 'Inverter error';
-                                } else if (reasoning.includes('night') || reasoning.includes('preserve')) {
-                                    blockReason = 'Night hours - preserve charge';
-                                } else if (reasoning.includes('temperature') && reasoning.includes('exceed')) {
-                                    blockReason = 'Battery temperature too high';
-                                } else if (reasoning.includes('cycles') && reasoning.includes('limit')) {
-                                    blockReason = 'Daily cycle limit reached';
-                                } else {
-                                    blockReason = 'Selling blocked by safety system';
-                                }
-                                
-                                return { 
-                                    status: 'BLOCKED', 
-                                    color: '#dc3545', 
-                                    icon: '🚫',
-                                    reason: blockReason
-                                };
-                            }
-                            
-                            // If values are present, likely executed
-                            return { 
-                                status: 'EXECUTED', 
-                                color: '#28a745', 
-                                icon: '✅',
-                                reason: `Sold ${energy.toFixed(2)} kWh for ${revenue.toFixed(2)} PLN`
-                            };
-                        };
-                        
-                        const execution = getSellingExecutionStatus(decision);
-                        
-                        return `
-                            <div class="decision-item ${decisionClass}">
-                                <div class="decision-time">${new Date(decision.timestamp).toLocaleString()}</div>
-                                <div class="decision-action">${decision.decision.replace('_', ' ').toUpperCase()}</div>
-                                <div class="decision-reason">${decision.reasoning}</div>
-                                <div style="background: ${execution.color}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; display: inline-block; margin-top: 5px;">
-                                    ${execution.icon} ${execution.status}
-                                </div>
-                                <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
-                                    ${execution.reason}
-                                </div>
-                                ${decision.decision === 'start_selling' ? `
-                                    <div class="metric">
-                                        <span class="metric-label">Revenue:</span>
-                                        <span class="metric-value">${revenue.toFixed(2)} PLN</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Energy:</span>
-                                        <span class="metric-value">${energy.toFixed(2)} kWh</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Price:</span>
-                                        <span class="metric-value">${price.toFixed(3)} PLN/kWh</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Power:</span>
-                                        <span class="metric-value">${decision.selling_power_w || 0}W</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Duration:</span>
-                                        <span class="metric-value">${(decision.estimated_duration_hours || 0).toFixed(1)}h</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Confidence:</span>
-                                        <span class="metric-value">${confidencePercent}%</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Safety:</span>
-                                        <span class="metric-value">${decision.safety_checks_passed ? '✓' : '✗'}</span>
-                                    </div>
-                                ` : ''}
-                            </div>
-                        `;
-                    }).join('');
-                    
-                    document.getElementById('battery-selling-decisions').innerHTML = decisionsHtml || '<p>No battery selling decisions found</p>';
-                })
-                .catch(error => {
-                    document.getElementById('battery-selling-analytics').innerHTML = `<p>Error loading analytics: ${error.message}</p>`;
-                    document.getElementById('battery-selling-decisions').innerHTML = `<p>Error loading decisions: ${error.message}</p>`;
-                });
         }
         
         let timeSeriesChart = null;
@@ -2593,81 +2299,22 @@ class LogWebServer:
             return div.innerHTML;
         }
         
-        function loadBatterySellingStatus() {
-            fetch('/battery-selling')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        document.getElementById('battery-selling-status').innerHTML = `<p>Error: ${data.error}</p>`;
-                        return;
-                    }
-                    
-                    const analytics = data.analytics;
-                    const recentDecisions = data.decisions.slice(0, 3); // Last 3 decisions
-                    
-                    let statusHtml = `
-                        <div class="metrics-grid">
-                            <div class="metric">
-                                <span class="metric-label">Total Revenue:</span>
-                                <span class="metric-value">${analytics.total_revenue_pln || 0} PLN</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">Energy Sold:</span>
-                                <span class="metric-value">${analytics.total_energy_sold_kwh || 0} kWh</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">Active Sessions:</span>
-                                <span class="metric-value">${analytics.active_sessions || 0}</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">24h Revenue:</span>
-                                <span class="metric-value">${analytics.recent_24h_revenue_pln || 0} PLN</span>
-                            </div>
-                        </div>
-                    `;
-                    
-                    if (recentDecisions.length > 0) {
-                        statusHtml += '<h4>Recent Activity:</h4><div class="recent-activity">';
-                        recentDecisions.forEach(decision => {
-                            const time = new Date(decision.timestamp).toLocaleString();
-                            const action = decision.decision.replace('_', ' ').toUpperCase();
-                            const revenue = decision.expected_revenue_pln || 0;
-                            statusHtml += `
-                                <div class="activity-item">
-                                    <span class="activity-time">${time}</span>
-                                    <span class="activity-action">${action}</span>
-                                    ${revenue > 0 ? `<span class="activity-revenue">+${revenue.toFixed(2)} PLN</span>` : ''}
-                                </div>
-                            `;
-                        });
-                        statusHtml += '</div>';
-                    }
-                    
-                    document.getElementById('battery-selling-status').innerHTML = statusHtml;
-                })
-                .catch(error => {
-                    document.getElementById('battery-selling-status').innerHTML = `<p>Error loading status: ${error.message}</p>`;
-                });
-        }
-        
         // Initialize
         updateStatus();
         loadCurrentState();
         loadPerformanceMetrics();
         loadCostSavings();
-        loadBatterySellingStatus();
         loadLogs();
         setInterval(() => {
             updateStatus();
             loadCurrentState();
             loadPerformanceMetrics();
             loadCostSavings();
-            loadBatterySellingStatus();
             // Only refresh time series if the tab is active
             if (document.getElementById('time-series').classList.contains('active')) {
                 loadTimeSeries();
             }
-        }, 60000); // Update every 60 seconds (reduced frequency)
+        }, 120000); // Update every 120 seconds
 
         // Theme-aware chart colors
         function getChartColors() {
