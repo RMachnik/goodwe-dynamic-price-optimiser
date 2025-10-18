@@ -18,6 +18,14 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 
+
+try:
+    from tariff_pricing import TariffPricingCalculator, PriceComponents
+    TARIFF_PRICING_AVAILABLE = True
+except ImportError:
+    TARIFF_PRICING_AVAILABLE = False
+    logging.warning("Tariff pricing module not available - using SC-only pricing")
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -133,6 +141,15 @@ class PriceWindowAnalyzer:
         
         # Reference price for savings calculation (PLN/MWh)
         self.reference_price_pln = price_analysis_config.get('reference_price_pln', self.config.get('reference_price_pln', 400.0))  # Average market price in PLN/MWh
+        
+        # Tariff pricing calculator (if available)
+        self.tariff_calculator = None
+        if TARIFF_PRICING_AVAILABLE:
+            try:
+                self.tariff_calculator = TariffPricingCalculator(self.config)
+                logger.info("Tariff pricing calculator initialized for price window analyzer")
+            except Exception as e:
+                logger.warning(f"Failed to initialize tariff calculator: {e}")
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration when config file is missing or invalid"""
@@ -147,6 +164,16 @@ class PriceWindowAnalyzer:
             'min_savings_threshold_pln': 50.0,
             'reference_price_pln': 400.0
         }
+    
+    def _calculate_final_price_mwh(self, market_price_mwh: float, timestamp: datetime, kompas_status: Optional[str] = None) -> float:
+        """Calculate final price in PLN/MWh using tariff calculator or fallback to SC-only"""
+        if self.tariff_calculator:
+            market_price_kwh = market_price_mwh / 1000
+            components = self.tariff_calculator.calculate_final_price(market_price_kwh, timestamp, kompas_status)
+            return components.final_price * 1000  # Convert back to PLN/MWh
+        else:
+            # Fallback: SC component only (89.2 PLN/MWh)
+            return market_price_mwh + 89.2
     
     def analyze_price_windows(self, price_data: Dict[str, Any]) -> List[PriceWindow]:
         """
@@ -208,9 +235,15 @@ class PriceWindowAnalyzer:
                     # Check if current time falls within this 15-minute period
                     if item_time <= current_time < item_time + timedelta(minutes=15):
                         market_price = float(item['csdac_pln'])
-                        # Add SC component (89.2 PLN/kWh = 89.2 PLN/MWh)
-                        final_price = market_price + 89.2
-                        return final_price
+                        
+                        if self.tariff_calculator:
+                            # Use tariff-aware pricing
+                            market_price_kwh = market_price / 1000
+                            components = self.tariff_calculator.calculate_final_price(market_price_kwh, item_time, None)
+                            return components.final_price * 1000  # Convert back to PLN/MWh
+                        else:
+                            # Fallback: SC component only
+                            return market_price + 89.2
             elif 'prices' in price_data:
                 # Simple format with just prices array (for testing)
                 prices = price_data['prices']
@@ -240,7 +273,7 @@ class PriceWindowAnalyzer:
                 for item in price_data['value']:
                     item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
                     market_price = float(item['csdac_pln'])
-                    final_price = market_price + 89.2  # Add SC component (0.0892 PLN/kWh = 89.2 PLN/MWh)
+                    final_price = self._calculate_final_price_mwh(market_price, item_time)
                     price_points.append((item_time, final_price))
             elif 'prices' in price_data:
                 # Simple format with just prices array - create time points
@@ -250,7 +283,7 @@ class PriceWindowAnalyzer:
                 for i, price in enumerate(prices):
                     item_time = base_time + timedelta(minutes=15 * i)
                     # Add SC component for consistency
-                    final_price = price + 89.2  # Add SC component (0.0892 PLN/kWh = 89.2 PLN/MWh)
+                    final_price = price + 89.2  # Fallback: Add SC component for test data
                     price_points.append((item_time, final_price))
             
             # Sort by time
@@ -312,7 +345,7 @@ class PriceWindowAnalyzer:
                 for item in price_data['value']:
                     item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
                     market_price = float(item['csdac_pln'])
-                    final_price = market_price + 89.2  # Add SC component (0.0892 PLN/kWh = 89.2 PLN/MWh)
+                    final_price = self._calculate_final_price_mwh(market_price, item_time)
                     price_points.append((item_time, final_price))
             elif 'prices' in price_data:
                 # Simple format with just prices array - create time points
@@ -322,7 +355,7 @@ class PriceWindowAnalyzer:
                 for i, price in enumerate(prices):
                     item_time = base_time + timedelta(minutes=15 * i)
                     # Add SC component for consistency
-                    final_price = price + 89.2  # Add SC component (0.0892 PLN/kWh = 89.2 PLN/MWh)
+                    final_price = price + 89.2  # Fallback: Add SC component for test data
                     price_points.append((item_time, final_price))
             
             # Sort by time
@@ -903,7 +936,7 @@ class PriceWindowAnalyzer:
             if 'prices' in price_data:
                 prices = price_data['prices']
             else:
-                prices = [float(item['csdac_pln']) + 89.2 for item in price_data['value']]  # Add SC component (0.0892 PLN/kWh = 89.2 PLN/MWh)
+                prices = [self._calculate_final_price_mwh(float(item['csdac_pln']), datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')) for item in price_data['value']]  # Add SC component (0.0892 PLN/kWh = 89.2 PLN/MWh)
             
             if len(prices) < 2:
                 return {'trend': 'insufficient_data', 'trend_strength': 0.0, 'volatility': 0.0}

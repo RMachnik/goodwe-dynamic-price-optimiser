@@ -9,6 +9,8 @@ from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timedelta
 import sys
 import os
+import yaml
+import tempfile
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -32,6 +34,17 @@ class TestPricingConsistency(unittest.TestCase):
                 'sc_component_gross': 0.1097,
                 'minimum_price_floor': 0.0050
             },
+            'electricity_tariff': {
+                'tariff_type': 'g12w',
+                'sc_component_pln_kwh': 0.0892,
+                'distribution_pricing': {
+                    'g12w': {
+                        'type': 'time_based',
+                        'peak_hours': {'start': 7, 'end': 22},
+                        'prices': {'peak': 0.3566, 'off_peak': 0.0749}
+                    }
+                }
+            },
             'battery_management': {
                 'soc_thresholds': {
                     'critical': 12,
@@ -39,6 +52,11 @@ class TestPricingConsistency(unittest.TestCase):
                 }
             }
         }
+        
+        # Create a temporary config file for isolated testing
+        self.temp_config_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
+        yaml.dump(self.mock_config, self.temp_config_file)
+        self.temp_config_file.close()
         
         # Mock price data (PLN/MWh from PSE API)
         self.mock_price_data = {
@@ -67,20 +85,30 @@ class TestPricingConsistency(unittest.TestCase):
             ]
         }
     
+    def tearDown(self):
+        """Clean up test fixtures"""
+        # Remove temporary config file
+        if hasattr(self, 'temp_config_file') and os.path.exists(self.temp_config_file.name):
+            os.unlink(self.temp_config_file.name)
+    
     def test_automated_price_charger_sc_component(self):
         """Test AutomatedPriceCharger SC component calculation"""
-        charger = AutomatedPriceCharger()
+        charger = AutomatedPriceCharger(config_path=self.temp_config_file.name)
         
-        # Test SC component calculation
+        # Test SC component calculation with tariff-aware pricing
         market_price_pln_kwh = 0.300  # 300 PLN/MWh = 0.300 PLN/kWh
-        expected_final_price = 0.300 + 0.0892  # 0.3892 PLN/kWh
-        actual_final_price = charger.calculate_final_price(market_price_pln_kwh)
+        timestamp = datetime(2025, 9, 7, 8, 0)  # 08:00 - peak hour for G12w
         
-        self.assertAlmostEqual(actual_final_price, expected_final_price, places=4)
+        # Expected: (market + SC + distribution) * 1000 = PLN/MWh
+        # 0.300 + 0.0892 + 0.3566 = 0.7458 PLN/kWh = 745.8 PLN/MWh
+        expected_final_price = 745.8  # PLN/MWh
+        actual_final_price = charger.calculate_final_price(market_price_pln_kwh, timestamp)
+        
+        self.assertAlmostEqual(actual_final_price, expected_final_price, places=1)
     
     def test_automated_price_charger_get_current_price(self):
-        """Test AutomatedPriceCharger get_current_price method"""
-        charger = AutomatedPriceCharger()
+        """Test AutomatedPriceCharger get_current_price method with tariff-aware pricing"""
+        charger = AutomatedPriceCharger(config_path=self.temp_config_file.name)
         
         # Mock current time to 08:00
         with patch('automated_price_charging.datetime') as mock_datetime:
@@ -90,27 +118,31 @@ class TestPricingConsistency(unittest.TestCase):
             
             current_price = charger.get_current_price(self.mock_price_data)
             
-            # Should return final price (market + SC component) in PLN/MWh
-            # The get_current_price method returns the price in PLN/MWh, not PLN/kWh
-            expected_price = (300.0 + 89.2)  # 300 PLN/MWh + 89.2 PLN/MWh = 389.2 PLN/MWh
+            # Should return final price with G12w peak hour distribution in PLN/MWh
+            # 08:00 is peak hour (06:00-22:00) for G12w
+            # Market: 300 PLN/MWh, SC: 89.2 PLN/MWh, Distribution: 356.6 PLN/MWh
+            expected_price = 300.0 + 89.2 + 356.6  # 745.8 PLN/MWh
             self.assertAlmostEqual(current_price, expected_price, places=1)
     
     def test_automated_price_charger_analyze_prices(self):
-        """Test AutomatedPriceCharger _analyze_prices method"""
-        charger = AutomatedPriceCharger()
+        """Test AutomatedPriceCharger _analyze_prices method with tariff-aware pricing"""
+        charger = AutomatedPriceCharger(config_path=self.temp_config_file.name)
         
         # Mock current time to 08:00
         with patch('automated_price_charging.datetime') as mock_datetime:
             mock_datetime.now.return_value = datetime(2025, 9, 7, 8, 0)
+            mock_datetime.strptime = datetime.strptime
             
             current_price, cheapest_price, cheapest_hour = charger._analyze_prices(self.mock_price_data)
             
-            # Current price should be 08:00 price + SC component in PLN/kWh
-            expected_current = (300.0 / 1000) + 0.0892  # 0.3892 PLN/kWh
+            # Current price should include G12w peak distribution (08:00 is peak hour)
+            # Market: 0.300 PLN/kWh, SC: 0.0892, Distribution: 0.3566
+            expected_current = 0.300 + 0.0892 + 0.3566  # 0.7458 PLN/kWh
             self.assertAlmostEqual(current_price, expected_current, places=4)
             
-            # Cheapest price should be 13:00 price + SC component in PLN/kWh
-            expected_cheapest = (118.0 / 1000) + 0.0892  # 0.2072 PLN/kWh
+            # Cheapest price should also include distribution (13:00 is still peak hour)
+            # Market: 0.118 PLN/kWh, SC: 0.0892, Distribution: 0.3566
+            expected_cheapest = 0.118 + 0.0892 + 0.3566  # 0.5638 PLN/kWh
             self.assertAlmostEqual(cheapest_price, expected_cheapest, places=4)
             self.assertEqual(cheapest_hour, 13)
     
@@ -126,8 +158,9 @@ class TestPricingConsistency(unittest.TestCase):
             
             current_price = analyzer._get_current_price(self.mock_price_data, datetime(2025, 9, 7, 8, 0))
             
-            # Should return final price (market + SC component) in PLN/MWh
-            expected_price = 300.0 + 89.2  # 389.2 PLN/MWh
+            # Should return final price (market + SC + distribution) in PLN/MWh
+            # At 08:00, G12w peak hour: 300.0 + 89.2 + 356.6 = 745.8 PLN/MWh
+            expected_price = 745.8  # PLN/MWh
             self.assertAlmostEqual(current_price, expected_price, places=1)
     
     def test_master_coordinator_price_conversion(self):
@@ -208,29 +241,31 @@ class TestPricingConsistency(unittest.TestCase):
         self.assertTrue(hasattr(opportunity, 'expected_revenue_pln'))
     
     def test_pricing_consistency_across_components(self):
-        """Test that all components use the same pricing methodology"""
-        # Test data: 300 PLN/MWh market price
+        """Test that all components use the same tariff-aware pricing methodology"""
+        # Test data: 300 PLN/MWh market price at 08:00 (peak hour for G12w)
         market_price_pln_mwh = 300.0
         market_price_pln_kwh = 0.300
-        sc_component_pln_kwh = 0.0892
-        sc_component_pln_mwh = 89.2
-        expected_final_pln_kwh = 0.3892
-        expected_final_pln_mwh = 389.2
+        timestamp = datetime(2025, 9, 7, 8, 0)
         
-        # Test AutomatedPriceCharger
-        charger = AutomatedPriceCharger()
-        final_price_kwh = charger.calculate_final_price(market_price_pln_kwh)
-        self.assertAlmostEqual(final_price_kwh, expected_final_pln_kwh, places=4)
+        # Expected with G12w peak pricing
+        # Market: 0.300, SC: 0.0892, Distribution: 0.3566
+        expected_final_pln_kwh = 0.300 + 0.0892 + 0.3566  # 0.7458 PLN/kWh
+        expected_final_pln_mwh = expected_final_pln_kwh * 1000  # 745.8 PLN/MWh
+        
+        # Test AutomatedPriceCharger (returns PLN/MWh)
+        charger = AutomatedPriceCharger(config_path=self.temp_config_file.name)
+        final_price_mwh_from_charger = charger.calculate_final_price(market_price_pln_kwh, timestamp)
+        self.assertAlmostEqual(final_price_mwh_from_charger, expected_final_pln_mwh, places=1)
         
         # Test PriceWindowAnalyzer
         analyzer = PriceWindowAnalyzer(self.mock_config)
-        # PriceWindowAnalyzer works in PLN/MWh
-        final_price_mwh = market_price_pln_mwh + sc_component_pln_mwh
+        # Use the tariff calculator's method
+        final_price_mwh = analyzer._calculate_final_price_mwh(market_price_pln_mwh, timestamp)
         self.assertAlmostEqual(final_price_mwh, expected_final_pln_mwh, places=1)
         
         # Test conversion consistency
         # PLN/MWh to PLN/kWh conversion
-        converted_kwh = expected_final_pln_mwh / 1000
+        converted_kwh = final_price_mwh / 1000
         self.assertAlmostEqual(converted_kwh, expected_final_pln_kwh, places=4)
     
     def test_sc_component_value_consistency(self):
@@ -238,7 +273,7 @@ class TestPricingConsistency(unittest.TestCase):
         expected_sc_component = 0.0892  # PLN/kWh
         
         # Test AutomatedPriceCharger
-        charger = AutomatedPriceCharger()
+        charger = AutomatedPriceCharger(config_path=self.temp_config_file.name)
         self.assertEqual(charger.sc_component_net, expected_sc_component)
         
         # Test PriceWindowAnalyzer (converted to PLN/MWh)
@@ -273,24 +308,30 @@ class TestPricingConsistency(unittest.TestCase):
         self.assertEqual(sc_mwh, 89.2)
     
     def test_price_calculation_edge_cases(self):
-        """Test price calculation with edge cases"""
-        charger = AutomatedPriceCharger()
+        """Test price calculation with edge cases and tariff-aware pricing"""
+        charger = AutomatedPriceCharger(config_path=self.temp_config_file.name)
+        # Use off-peak hour (23:00) for G12w to simplify calculations
+        timestamp = datetime(2025, 9, 7, 23, 0)
+        # Off-peak distribution: 0.0749 PLN/kWh = 74.9 PLN/MWh
         
-        # Test with zero market price
-        final_price = charger.calculate_final_price(0.0)
-        self.assertEqual(final_price, 0.0892)  # Only SC component
+        # Test with zero market price (returns PLN/MWh)
+        final_price = charger.calculate_final_price(0.0, timestamp)
+        # (0.0 + 0.0892 + 0.0749) * 1000 = 164.1 PLN/MWh
+        self.assertAlmostEqual(final_price, 164.1, places=1)
         
-        # Test with negative market price (should not happen in practice)
-        final_price = charger.calculate_final_price(-0.1)
-        self.assertAlmostEqual(final_price, -0.0108, places=4)  # -0.1 + 0.0892
+        # Test with negative market price (can happen with negative electricity prices)
+        final_price = charger.calculate_final_price(-0.1, timestamp)
+        # (-0.1 + 0.0892 + 0.0749) * 1000 = 64.1 PLN/MWh
+        self.assertAlmostEqual(final_price, 64.1, places=1)
         
-        # Test with very high market price
-        final_price = charger.calculate_final_price(10.0)
-        self.assertEqual(final_price, 10.0892)
+        # Test with very high market price (>10, treated as PLN/MWh)
+        final_price = charger.calculate_final_price(10000.0, timestamp)
+        # 10000 / 1000 = 10.0 PLN/kWh, then (10.0 + 0.0892 + 0.0749) * 1000 = 10164.1 PLN/MWh
+        self.assertAlmostEqual(final_price, 10164.1, places=1)
     
     def test_minimum_price_floor(self):
         """Test minimum price floor application"""
-        charger = AutomatedPriceCharger()
+        charger = AutomatedPriceCharger(config_path=self.temp_config_file.name)
         
         # Test with price below floor
         price_below_floor = 0.001
@@ -313,6 +354,17 @@ class TestPricingIntegration(unittest.TestCase):
                 'sc_component_net': 0.0892,
                 'sc_component_gross': 0.1097,
                 'minimum_price_floor': 0.0050
+            },
+            'electricity_tariff': {
+                'tariff_type': 'g12w',
+                'sc_component_pln_kwh': 0.0892,
+                'distribution_pricing': {
+                    'g12w': {
+                        'type': 'time_based',
+                        'peak_hours': {'start': 7, 'end': 22},
+                        'prices': {'peak': 0.3566, 'off_peak': 0.0749}
+                    }
+                }
             },
             'battery_management': {
                 'soc_thresholds': {

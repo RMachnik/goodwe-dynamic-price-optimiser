@@ -1079,6 +1079,17 @@ class MultiFactorDecisionEngine:
         self.charging_controller = charging_controller
         self.coordinator_config = config.get('coordinator', {})
         
+        # Validate G14dynamic tariff configuration
+        tariff_config = config.get('electricity_tariff', {})
+        tariff_type = tariff_config.get('tariff_type', 'g12w')
+        if tariff_type == 'g14dynamic':
+            pse_enabled = config.get('pse_peak_hours', {}).get('enabled', False)
+            if not pse_enabled:
+                logger.error("G14dynamic tariff requires PSE Peak Hours (Kompas) to be enabled!")
+                logger.error("Please set pse_peak_hours.enabled = true in configuration")
+                raise ValueError("G14dynamic tariff requires pse_peak_hours.enabled = true")
+            logger.info("G14dynamic tariff detected - PSE Peak Hours integration enabled")
+        
         # Decision weights (from project plan)
         self.weights = {
             'price': 0.40,      # 40% weight
