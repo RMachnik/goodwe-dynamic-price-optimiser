@@ -651,9 +651,10 @@ class MasterCoordinator:
                 
                 # Calculate cost based on current price
                 if current_price > 0:
-                    estimated_cost_pln = energy_kwh * (current_price / 1000.0)  # Convert from PLN/MWh to PLN/kWh
+                    # current_price is already in PLN/kWh (converted on line 623)
+                    estimated_cost_pln = energy_kwh * current_price
                     
-                    # Calculate savings compared to reference price (400 PLN/MWh)
+                    # Calculate savings compared to reference price (400 PLN/MWh = 0.4 PLN/kWh)
                     reference_price = 400.0 / 1000.0  # 0.4 PLN/kWh
                     reference_cost = energy_kwh * reference_price
                     estimated_savings_pln = max(0, reference_cost - estimated_cost_pln)
