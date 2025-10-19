@@ -2826,19 +2826,17 @@ class LogWebServer:
                     decision_data_type == 'battery_selling' or 
                     is_battery_selling_file):
                     battery_selling_decisions.append(decision)
+                # Wait decisions - check action first to avoid misclassification
+                elif action == 'wait':
+                    wait_decisions.append(decision)
                 # Charging decisions - look for actual charging intent in both action and reason
-                # Only categorize as charging if it's from a charging_decision file AND has charging intent
                 elif (action in ['charge', 'charging', 'start_pv_charging', 'start_grid_charging'] or
                       'start charging' in reason_lower or
                       'charging from' in reason_lower or
                       'pv charging' in reason_lower or
                       'grid charging' in reason_lower or
-                      'charging started' in reason_lower or
-                      ('charging_decision' in filename and 'wait' not in filename)):
+                      'charging started' in reason_lower):
                     charging_decisions.append(decision)
-                # Wait decisions - any decision that's not charging or battery selling
-                elif action == 'wait':
-                    wait_decisions.append(decision)
                 # Default to wait for any unclassified decisions
                 else:
                     wait_decisions.append(decision)
