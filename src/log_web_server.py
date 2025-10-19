@@ -3002,7 +3002,7 @@ class LogWebServer:
                 'savings_percentage': monthly_summary.get('savings_percentage', 0),
                 'avg_cost_per_kwh_pln': monthly_summary.get('avg_cost_per_kwh', 0),
                 # Performance metrics (from recent data)
-                'avg_confidence': round(avg_confidence * 100, 1) if avg_confidence < 2 else round(avg_confidence, 1),
+                'avg_confidence': round(avg_confidence * 100, 1),
                 'avg_energy_per_charge_kwh': round(monthly_summary.get('total_energy_kwh', 0) / monthly_summary.get('charging_count', 1), 2) if monthly_summary.get('charging_count', 0) > 0 else 0,
                 'decision_breakdown': decision_breakdown,
                 'source_breakdown': monthly_summary.get('source_breakdown', {}),
