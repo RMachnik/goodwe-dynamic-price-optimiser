@@ -122,7 +122,7 @@ class GoodWeFastCharger:
                     retries=inverter_config['retries']
                 )
                 
-                self.logger.info(
+                self.logger.debug(
                     f"Connected to inverter: {self.inverter.model_name} "
                     f"(Serial: {self.inverter.serial_number})"
                 )
