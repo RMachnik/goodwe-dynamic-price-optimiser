@@ -1547,7 +1547,7 @@ class LogWebServer:
                                 </div>
                                 <div class="metric" title="Average confidence level of all decisions made">
                                     <span class="metric-label">Avg Confidence</span>
-                                    <span class="metric-value">${(data.avg_confidence * 100).toFixed(1)}%</span>
+                                    <span class="metric-value">${data.avg_confidence.toFixed(1)}%</span>
                                 </div>
                                 <div class="monitoring-note">
                                     <small>System is actively monitoring conditions for optimal charging opportunities</small>
@@ -1577,7 +1577,7 @@ class LogWebServer:
                         </div>
                         <div class="metric" title="Average confidence level of all decisions made">
                             <span class="metric-label">Avg Confidence</span>
-                            <span class="metric-value">${(data.avg_confidence * 100).toFixed(1)}%</span>
+                            <span class="metric-value">${data.avg_confidence.toFixed(1)}%</span>
                         </div>
                     `;
                     document.getElementById('performance-metrics').innerHTML = metricsHtml;
