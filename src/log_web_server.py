@@ -96,6 +96,11 @@ class LogWebServer:
         self.data_log = self.log_dir / "enhanced_data_collector.log"
         self.fast_charge_log = self.log_dir / "fast_charge.log"
         
+        # Initialize daily snapshot manager for efficient monthly reporting
+        from daily_snapshot_manager import DailySnapshotManager
+        project_root = Path(__file__).parent.parent
+        self.snapshot_manager = DailySnapshotManager(project_root)
+        
         # Setup routes
         self._setup_routes()
         
@@ -331,6 +336,49 @@ class LogWebServer:
                 historical_data = self._get_historical_time_series_data()
                 return jsonify(historical_data)
             except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/monthly-summary')
+        def get_monthly_summary():
+            """Get monthly summary statistics"""
+            try:
+                # Get year and month from query params (default to current month)
+                year = request.args.get('year', type=int)
+                month = request.args.get('month', type=int)
+                
+                if year is None or month is None:
+                    now = datetime.now()
+                    year = year or now.year
+                    month = month or now.month
+                
+                # Check cache first (60s TTL for monthly data)
+                cache_key = f'monthly_summary_{year}_{month}'
+                cached_data = self._get_cached_data(cache_key, ttl=60)
+                if cached_data:
+                    return jsonify(cached_data)
+                
+                # Get monthly summary
+                summary = self._get_monthly_summary(year, month)
+                self._set_cached_data(cache_key, summary)
+                return jsonify(summary)
+            except Exception as e:
+                logger.error(f"Error getting monthly summary: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/monthly-comparison')
+        def get_monthly_comparison():
+            """Get current month vs previous month comparison"""
+            try:
+                # Check cache first (60s TTL)
+                cached_data = self._get_cached_data('monthly_comparison', ttl=60)
+                if cached_data:
+                    return jsonify(cached_data)
+                
+                comparison = self._get_monthly_comparison()
+                self._set_cached_data('monthly_comparison', comparison)
+                return jsonify(comparison)
+            except Exception as e:
+                logger.error(f"Error getting monthly comparison: {e}")
                 return jsonify({'error': str(e)}), 500
     
     def _get_log_file(self, log_name: str) -> Optional[Path]:
@@ -1176,7 +1224,7 @@ class LogWebServer:
                 </div>
                 
                 <div class="card">
-                    <h3>Cost & Savings</h3>
+                    <h3>Cost & Savings <span style="font-size: 0.8em; color: #888;">(Current Month)</span></h3>
                     <div id="cost-savings">Loading...</div>
                 </div>
             </div>
@@ -2871,81 +2919,97 @@ class LogWebServer:
     def _get_system_metrics(self) -> Dict[str, Any]:
         """Get system performance metrics including historical data"""
         try:
-            # Get decision history for the same time range as the decisions endpoint (7 days by default for metrics)
-            # This ensures consistency between /decisions and /metrics endpoints
-            decision_data = self._get_decision_history(time_range='7d')
+            # Use monthly snapshot data for Cost & Savings (much faster than reading all files)
+            now = datetime.now()
+            monthly_summary = self.snapshot_manager.get_monthly_summary(now.year, now.month)
+            
+            # Get recent decisions for Performance Metrics (last 24h only)
+            decision_data = self._get_decision_history(time_range='24h')
             all_decisions = decision_data.get('decisions', [])
             
             if not all_decisions:
-                return {'error': 'No decision data available'}
+                # If no recent decisions, use monthly data for everything
+                return {
+                    'timestamp': datetime.now().isoformat(),
+                    'total_decisions': monthly_summary.get('total_decisions', 0),
+                    'total_count': monthly_summary.get('total_decisions', 0),
+                    'charging_decisions': monthly_summary.get('charging_count', 0),
+                    'wait_decisions': monthly_summary.get('wait_count', 0),
+                    'battery_selling_decisions': 0,
+                    'charging_count': monthly_summary.get('charging_count', 0),
+                    'wait_count': monthly_summary.get('wait_count', 0),
+                    'battery_selling_count': 0,
+                    'total_energy_charged_kwh': monthly_summary.get('total_energy_kwh', 0),
+                    'total_cost_pln': monthly_summary.get('total_cost_pln', 0),
+                    'total_savings_pln': monthly_summary.get('total_savings_pln', 0),
+                    'savings_percentage': monthly_summary.get('savings_percentage', 0),
+                    'avg_confidence': round(monthly_summary.get('avg_confidence', 0) * 100, 2),
+                    'avg_energy_per_charge_kwh': round(monthly_summary.get('total_energy_kwh', 0) / monthly_summary.get('charging_count', 1), 2) if monthly_summary.get('charging_count', 0) > 0 else 0,
+                    'avg_cost_per_kwh_pln': monthly_summary.get('avg_cost_per_kwh', 0),
+                    'decision_breakdown': {},
+                    'source_breakdown': monthly_summary.get('source_breakdown', {}),
+                    'efficiency_score': 50.0,  # Default mid-range
+                    'time_range': 'current_month'
+                }
             
-            # Calculate metrics using the same categorization logic as the decisions endpoint
+            # Calculate recent decision metrics for efficiency score
             total_decisions = len(all_decisions)
             
-            # Categorize decisions using the same logic as _get_decision_history
+            # Categorize recent decisions
             charging_decisions = []
             wait_decisions = []
             battery_selling_decisions = []
             
             for decision in all_decisions:
                 action = decision.get('action', '')
-                decision_data_type = decision.get('decision', '')  # For battery selling decisions
+                decision_data_type = decision.get('decision', '')
                 
-                # Battery selling decisions
                 if action == 'battery_selling' or decision_data_type == 'battery_selling':
                     battery_selling_decisions.append(decision)
-                # Charging decisions - look for actual charging intent
                 elif action in ['charge', 'charging', 'start_pv_charging', 'start_grid_charging']:
                     charging_decisions.append(decision)
-                # Wait decisions - any decision that's not charging or battery selling
                 elif action == 'wait':
                     wait_decisions.append(decision)
-                # Default to wait for any unclassified decisions
                 else:
                     wait_decisions.append(decision)
             
-            total_energy_charged = sum(d.get('energy_kwh', 0) for d in charging_decisions)
-            total_cost = sum(d.get('estimated_cost_pln', 0) for d in charging_decisions)
-            total_savings = sum(d.get('estimated_savings_pln', 0) for d in charging_decisions)
+            # Calculate averages from recent decisions (for efficiency score)
+            avg_confidence = sum(d.get('confidence', 0) for d in all_decisions) / total_decisions if total_decisions > 0 else monthly_summary.get('avg_confidence', 0)
             
-            # Calculate averages
-            avg_confidence = sum(d.get('confidence', 0) for d in all_decisions) / total_decisions if total_decisions > 0 else 0
-            avg_energy_per_charge = total_energy_charged / len(charging_decisions) if charging_decisions else 0
-            avg_cost_per_kwh = total_cost / total_energy_charged if total_energy_charged > 0 else 0
-            
-            # Decision type breakdown
+            # Decision type breakdown (recent decisions only)
             decision_breakdown = {}
             for decision in all_decisions:
                 action = decision.get('action', 'unknown')
                 decision_breakdown[action] = decision_breakdown.get(action, 0) + 1
             
-            # Source breakdown
-            source_breakdown = {}
-            for decision in charging_decisions:
-                source = decision.get('charging_source', 'unknown')
-                source_breakdown[source] = source_breakdown.get(source, 0) + 1
+            # Calculate efficiency score based on recent decisions
+            efficiency_score = self._calculate_efficiency_score(all_decisions) if all_decisions else 50.0
             
+            # Return combined data: Monthly Cost & Savings + Recent Performance Metrics
             return {
                 'timestamp': datetime.now().isoformat(),
-                'total_decisions': total_decisions,
-                'total_count': total_decisions,
-                'charging_decisions': len(charging_decisions),
-                'wait_decisions': len(wait_decisions),
-                'battery_selling_decisions': len(battery_selling_decisions),
+                'total_decisions': monthly_summary.get('total_decisions', 0),
+                'total_count': monthly_summary.get('total_decisions', 0),
+                'charging_decisions': monthly_summary.get('charging_count', 0),
+                'wait_decisions': monthly_summary.get('wait_count', 0),
+                'battery_selling_decisions': 0,
                 # Also provide the field names expected by the frontend
-                'charging_count': len(charging_decisions),
-                'wait_count': len(wait_decisions),
-                'battery_selling_count': len(battery_selling_decisions),
-                'total_energy_charged_kwh': round(total_energy_charged, 2),
-                'total_cost_pln': round(total_cost, 2),
-                'total_savings_pln': round(total_savings, 2),
-                'savings_percentage': round((total_savings / (total_cost + total_savings)) * 100, 1) if (total_cost + total_savings) > 0 else 0,
-                'avg_confidence': round(avg_confidence, 2),
-                'avg_energy_per_charge_kwh': round(avg_energy_per_charge, 2),
-                'avg_cost_per_kwh_pln': round(avg_cost_per_kwh, 3),
+                'charging_count': monthly_summary.get('charging_count', 0),
+                'wait_count': monthly_summary.get('wait_count', 0),
+                'battery_selling_count': 0,
+                # Monthly Cost & Savings data (from snapshots - fast!)
+                'total_energy_charged_kwh': monthly_summary.get('total_energy_kwh', 0),
+                'total_cost_pln': monthly_summary.get('total_cost_pln', 0),
+                'total_savings_pln': monthly_summary.get('total_savings_pln', 0),
+                'savings_percentage': monthly_summary.get('savings_percentage', 0),
+                'avg_cost_per_kwh_pln': monthly_summary.get('avg_cost_per_kwh', 0),
+                # Performance metrics (from recent data)
+                'avg_confidence': round(avg_confidence * 100, 1) if avg_confidence < 2 else round(avg_confidence, 1),
+                'avg_energy_per_charge_kwh': round(monthly_summary.get('total_energy_kwh', 0) / monthly_summary.get('charging_count', 1), 2) if monthly_summary.get('charging_count', 0) > 0 else 0,
                 'decision_breakdown': decision_breakdown,
-                'source_breakdown': source_breakdown,
-                'efficiency_score': self._calculate_efficiency_score(all_decisions)
+                'source_breakdown': monthly_summary.get('source_breakdown', {}),
+                'efficiency_score': efficiency_score,
+                'time_range': 'current_month'
             }
         except Exception as e:
             logger.error(f"Error getting system metrics: {e}")
@@ -3746,6 +3810,95 @@ class LogWebServer:
             
         except Exception as e:
             logger.error(f"Error generating mock historical data: {e}")
+            return {'error': str(e)}
+    
+    def _get_monthly_summary(self, year: int, month: int) -> Dict[str, Any]:
+        """Get monthly summary using daily snapshots for efficiency
+        
+        Args:
+            year: Year (e.g., 2025)
+            month: Month (1-12)
+            
+        Returns:
+            Monthly summary dictionary
+        """
+        try:
+            return self.snapshot_manager.get_monthly_summary(year, month)
+        except Exception as e:
+            logger.error(f"Error getting monthly summary for {year}-{month}: {e}")
+            return {'error': str(e)}
+    
+    def _get_monthly_comparison(self) -> Dict[str, Any]:
+        """Get current month vs previous month comparison
+        
+        Returns:
+            Comparison dictionary with current and previous month data
+        """
+        try:
+            now = datetime.now()
+            current_year = now.year
+            current_month = now.month
+            
+            # Calculate previous month
+            if current_month == 1:
+                prev_year = current_year - 1
+                prev_month = 12
+            else:
+                prev_year = current_year
+                prev_month = current_month - 1
+            
+            # Get both months' summaries
+            current_summary = self.snapshot_manager.get_monthly_summary(current_year, current_month)
+            previous_summary = self.snapshot_manager.get_monthly_summary(prev_year, prev_month)
+            
+            # Calculate changes
+            def calculate_change(current, previous):
+                if previous == 0:
+                    return 0 if current == 0 else 100
+                return round(((current - previous) / previous) * 100, 1)
+            
+            current_cost = current_summary.get('total_cost_pln', 0)
+            previous_cost = previous_summary.get('total_cost_pln', 0)
+            current_energy = current_summary.get('total_energy_kwh', 0)
+            previous_energy = previous_summary.get('total_energy_kwh', 0)
+            current_savings = current_summary.get('total_savings_pln', 0)
+            previous_savings = previous_summary.get('total_savings_pln', 0)
+            
+            return {
+                'current_month': {
+                    'year': current_year,
+                    'month': current_month,
+                    'month_name': current_summary.get('month_name', ''),
+                    'total_cost_pln': current_cost,
+                    'total_energy_kwh': current_energy,
+                    'total_savings_pln': current_savings,
+                    'avg_cost_per_kwh': current_summary.get('avg_cost_per_kwh', 0),
+                    'days_with_data': current_summary.get('days_with_data', 0),
+                    'charging_count': current_summary.get('charging_count', 0)
+                },
+                'previous_month': {
+                    'year': prev_year,
+                    'month': prev_month,
+                    'month_name': previous_summary.get('month_name', ''),
+                    'total_cost_pln': previous_cost,
+                    'total_energy_kwh': previous_energy,
+                    'total_savings_pln': previous_savings,
+                    'avg_cost_per_kwh': previous_summary.get('avg_cost_per_kwh', 0),
+                    'days_with_data': previous_summary.get('days_with_data', 0),
+                    'charging_count': previous_summary.get('charging_count', 0)
+                },
+                'changes': {
+                    'cost_change_pct': calculate_change(current_cost, previous_cost),
+                    'energy_change_pct': calculate_change(current_energy, previous_energy),
+                    'savings_change_pct': calculate_change(current_savings, previous_savings),
+                    'cost_diff_pln': round(current_cost - previous_cost, 2),
+                    'energy_diff_kwh': round(current_energy - previous_energy, 2),
+                    'savings_diff_pln': round(current_savings - previous_savings, 2)
+                },
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error getting monthly comparison: {e}")
             return {'error': str(e)}
 
 
