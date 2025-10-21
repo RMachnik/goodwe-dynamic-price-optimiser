@@ -1027,28 +1027,36 @@ class AutomatedPriceCharger:
     async def start_price_based_charging(self, price_data: Dict, force_start: bool = False) -> bool:
         """Start charging based on current electricity price or force start"""
         
+        # Get current battery SOC for logging
+        try:
+            battery_data = await self.goodwe_charger.get_battery_data()
+            battery_soc = battery_data.get('soc_percent', 'Unknown')
+        except Exception:
+            battery_soc = 'Unknown'
+        
         if self.is_charging:
-            logger.info("Already charging, skipping start request")
+            logger.info(f"Already charging at SOC {battery_soc}%, skipping start request")
             return True
         
         # Check price only if not forced to start (e.g., by master coordinator for critical battery)
         if not force_start and not self.should_start_charging(price_data):
-            logger.info("Current price is not optimal for charging")
+            logger.info(f"🚫 Charging blocked: Current price is not optimal (SOC: {battery_soc}%)")
+            logger.info(f"   Reason: Price threshold not met - waiting for better pricing conditions")
             return False
         
         if force_start:
-            logger.info("Starting charging due to emergency battery level (overriding price check)")
+            logger.info(f"⚡ Starting charging due to validated decision (SOC: {battery_soc}%, overriding price check)")
         else:
-            logger.info("Starting price-based charging...")
+            logger.info(f"⚡ Starting price-based charging at SOC {battery_soc}%...")
         
         # Start fast charging
         if await self.goodwe_charger.start_fast_charging():
             self.is_charging = True
             self.charging_start_time = datetime.now()
-            logger.info("Charging started successfully")
+            logger.info(f"✅ Charging started successfully at SOC {battery_soc}%")
             return True
         else:
-            logger.error("Failed to start charging")
+            logger.error(f"❌ Failed to start charging at SOC {battery_soc}%")
             return False
     
     async def stop_price_based_charging(self) -> bool:

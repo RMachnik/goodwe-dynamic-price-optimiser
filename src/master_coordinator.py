@@ -880,24 +880,26 @@ class MasterCoordinator:
         reason = decision.get('reason', 'Unknown')
         priority = decision.get('priority', 'low')
         
+        # Get SOC for logging
+        battery_data = self.current_data.get('battery', {})
+        battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
+        
         if should_charge:
-            logger.info(f"Executing decision: Start charging - {reason}")
+            logger.info(f"Executing decision: Start charging at SOC {battery_soc}% - {reason}")
             # Check if this is a critical battery situation (force start)
-            battery_data = self.current_data.get('battery', {})
-            battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
             force_start = battery_soc <= 20 or priority == 'critical'
             
             # Always force start if decision was made to charge (decision engine already validated)
             if not force_start:
                 force_start = True
-                logger.info("Decision was made to charge - forcing start (decision engine already validated conditions)")
+                logger.info(f"Decision to charge validated by engine (SOC: {battery_soc}%, Priority: {priority})")
             
             await self.charging_controller.start_price_based_charging(
                 decision.get('price_data', {}), 
                 force_start=force_start
             )
         else:
-            logger.info(f"Executing decision: No action needed - {reason}")
+            logger.info(f"Executing decision: No action needed at SOC {battery_soc}% - {reason}")
             # Stop charging if currently charging
             if self.charging_controller.is_charging:
                 await self.charging_controller.stop_price_based_charging()
@@ -906,42 +908,46 @@ class MasterCoordinator:
         """Execute the charging decision"""
         action = decision.get('action', 'none')
         
+        # Get SOC for logging
+        battery_data = self.current_data.get('battery', {})
+        battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
+        
         if action == 'start_charging':
-            logger.info("Executing decision: Start charging")
-            # Check if this is a critical battery situation (force start)
-            battery_data = self.current_data.get('battery', {})
-            battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
+            logger.info(f"Executing decision: Start charging at SOC {battery_soc}%")
             force_start = battery_soc <= 5  # Emergency battery level only
             
             # If decision was made by smart charging system, trust it and force start
             # This prevents re-checking price when decision was already made with proper analysis
             if decision.get('priority') in ['medium', 'high', 'critical', 'emergency']:
                 force_start = True
-                logger.info(f"Trusting smart charging decision (priority: {decision.get('priority')}) - forcing start")
+                logger.info(f"Trusting smart charging decision (SOC: {battery_soc}%, Priority: {decision.get('priority')})")
             
             # Always force start if decision was made to charge (decision engine already validated)
             if not force_start:
                 force_start = True
-                logger.info("Decision was made to charge - forcing start (decision engine already validated conditions)")
+                logger.info(f"Decision validated by engine (SOC: {battery_soc}%)")
             
-            await self.charging_controller.start_price_based_charging(
+            result = await self.charging_controller.start_price_based_charging(
                 decision.get('price_data', {}), 
                 force_start=force_start
             )
             
+            if not result:
+                logger.warning(f"Charging execution blocked at SOC {battery_soc}% - See charging controller logs for details")
+            
         elif action == 'stop_charging':
-            logger.info("Executing decision: Stop charging")
+            logger.info(f"Executing decision: Stop charging at SOC {battery_soc}%")
             await self.charging_controller.stop_price_based_charging()
             
         elif action == 'continue_charging':
-            logger.info("Executing decision: Continue charging")
+            logger.info(f"Executing decision: Continue charging at SOC {battery_soc}%")
             # No action needed, charging continues
             
         elif action == 'none':
-            logger.info("Executing decision: No action needed")
+            logger.info(f"Executing decision: No action needed at SOC {battery_soc}%")
             
         else:
-            logger.warning(f"Unknown decision action: {action}")
+            logger.warning(f"Unknown decision action: {action} at SOC {battery_soc}%")
     
     async def _update_system_state(self):
         """Update system state based on current conditions"""
@@ -1374,6 +1380,13 @@ class MultiFactorDecisionEngine:
         try:
             if not getattr(self, 'peak_hours_collector', None):
                 return action
+            
+            # Get SOC for logging (if available)
+            battery_soc = None
+            if hasattr(self, 'current_data') and self.current_data:
+                battery_data = self.current_data.get('battery', {})
+                battery_soc = battery_data.get('soc_percent', battery_data.get('soc', None))
+            
             # Determine current hour status
             status = self.peak_hours_collector.get_status_for_time(datetime.now())
             if not status:
@@ -1381,11 +1394,15 @@ class MultiFactorDecisionEngine:
 
             if status.code == 3:  # REQUIRED REDUCTION
                 if action.startswith('start'):
-                    logger.warning("Kompas REQUIRED REDUCTION: blocking grid charging in this hour")
+                    soc_info = f" (SOC: {battery_soc}%)" if battery_soc is not None else ""
+                    logger.warning(f"🚫 Kompas REQUIRED REDUCTION: Blocking grid charging{soc_info}, Peak hours code 3")
+                    logger.warning(f"   Reason: Required reduction period - grid charging not allowed regardless of price or battery level")
                     return 'none'
             elif status.code == 2:  # RECOMMENDED SAVING
                 if action.startswith('start'):
-                    logger.info("Kompas RECOMMENDED SAVING: deferring start to reduce load")
+                    soc_info = f" (SOC: {battery_soc}%)" if battery_soc is not None else ""
+                    logger.info(f"⚠️  Kompas RECOMMENDED SAVING: Deferring charging start{soc_info}, Peak hours code 2")
+                    logger.info(f"   Reason: Recommended to save energy and reduce grid load during this period")
                     return 'none'
             # code 1 (RECOMMENDED USAGE) and 0 (NORMAL) -> no strict change
             return action

@@ -1797,14 +1797,25 @@ class LogWebServer:
                                         const decisionClass = getDecisionClass(decision.action);
                                         const confidencePercent = (decision.confidence * 100).toFixed(1);
                                         
+                                        // Get SOC color based on battery level
+                                        const getSocColor = (soc) => {
+                                            if (soc < 20) return '#dc3545'; // Red
+                                            if (soc < 50) return '#ffc107'; // Yellow
+                                            return '#28a745'; // Green
+                                        };
+                                        
                                         // Determine execution status with detailed reasons
                                         const getExecutionStatus = (decision) => {
+                                            const batterySoc = decision.battery_soc || 0;
+                                            const socText = `SOC: ${batterySoc}%`;
+                                            
                                             if (decision.action === 'wait') {
                                                 return { 
                                                     status: 'N/A', 
                                                     color: '#6c757d', 
                                                     icon: '⏸️',
-                                                    reason: 'Wait decision - no execution needed'
+                                                    reason: 'Wait decision - no execution needed',
+                                                    soc: batterySoc
                                                 };
                                             }
                                             
@@ -1817,40 +1828,50 @@ class LogWebServer:
                                             if (energy === 0 && cost === 0 && savings === 0) {
                                                 // Analyze the reason to determine blocking cause
                                                 const reason = decision.reason || '';
+                                                const reasonLower = reason.toLowerCase();
                                                 let blockReason = 'Unknown reason';
                                                 
-                                                // Check for specific blocking patterns
-                                                if (reason.includes('emergency') || reason.includes('safety')) {
-                                                    blockReason = 'Emergency safety stop';
-                                                } else if (reason.includes('price') && reason.includes('not optimal')) {
-                                                    blockReason = 'Price threshold not met';
-                                                } else if (reason.includes('Could not determine current price')) {
-                                                    blockReason = 'Price data unavailable';
-                                                } else if (reason.includes('battery') && reason.includes('safety margin')) {
-                                                    blockReason = 'Battery safety margin exceeded';
-                                                } else if (reason.includes('grid voltage') && reason.includes('outside safe range')) {
-                                                    blockReason = 'Grid voltage out of range';
-                                                } else if (reason.includes('communication') || reason.includes('connection')) {
-                                                    blockReason = 'Communication error';
-                                                } else if (reason.includes('inverter') && reason.includes('error')) {
-                                                    blockReason = 'Inverter error';
-                                                } else if (reason.includes('timeout') || reason.includes('retry')) {
-                                                    blockReason = 'Communication timeout';
-                                                } else if (reason.includes('charging') && reason.includes('already')) {
-                                                    blockReason = 'Already charging';
-                                                } else if (reason.includes('PV') && reason.includes('overproduction')) {
-                                                    blockReason = 'PV overproduction detected';
-                                                } else if (reason.includes('consumption') && reason.includes('high')) {
-                                                    blockReason = 'High consumption detected';
+                                                // Check for specific blocking patterns with more detail
+                                                if (reasonLower.includes('kompas') && reasonLower.includes('required reduction')) {
+                                                    blockReason = `Kompas REQUIRED REDUCTION - Grid charging blocked during peak hours (${socText})`;
+                                                } else if (reasonLower.includes('kompas') && reasonLower.includes('recommended saving')) {
+                                                    blockReason = `Kompas RECOMMENDED SAVING - Deferred to reduce load (${socText})`;
+                                                } else if (reasonLower.includes('peak hours') || reasonLower.includes('peak period')) {
+                                                    blockReason = `Peak hours restriction - Charging blocked (${socText})`;
+                                                } else if (reasonLower.includes('emergency') || reasonLower.includes('safety')) {
+                                                    blockReason = `Emergency safety stop at ${socText}`;
+                                                } else if (reasonLower.includes('price') && reasonLower.includes('not optimal')) {
+                                                    blockReason = `Price threshold not met at ${socText}`;
+                                                } else if (reasonLower.includes('could not determine current price')) {
+                                                    blockReason = `Price data unavailable (${socText})`;
+                                                } else if (reasonLower.includes('battery') && reasonLower.includes('safety margin')) {
+                                                    blockReason = `Battery safety margin exceeded (${socText})`;
+                                                } else if (reasonLower.includes('grid voltage') && reasonLower.includes('outside safe range')) {
+                                                    blockReason = `Grid voltage out of range at ${socText}`;
+                                                } else if (reasonLower.includes('communication') || reasonLower.includes('connection')) {
+                                                    blockReason = `Communication error (${socText})`;
+                                                } else if (reasonLower.includes('inverter') && reasonLower.includes('error')) {
+                                                    blockReason = `Inverter error at ${socText}`;
+                                                } else if (reasonLower.includes('timeout') || reasonLower.includes('retry')) {
+                                                    blockReason = `Communication timeout (${socText})`;
+                                                } else if (reasonLower.includes('charging') && reasonLower.includes('already')) {
+                                                    blockReason = `Already charging at ${socText}`;
+                                                } else if (reasonLower.includes('pv') && reasonLower.includes('overproduction')) {
+                                                    blockReason = `PV overproduction detected (${socText})`;
+                                                } else if (reasonLower.includes('consumption') && reasonLower.includes('high')) {
+                                                    blockReason = `High consumption detected (${socText})`;
+                                                } else if (reasonLower.includes('no suitable price window') || reasonLower.includes('not cheap enough')) {
+                                                    blockReason = `Price conditions not met (${socText})`;
                                                 } else {
-                                                    blockReason = 'Execution blocked by safety system';
+                                                    blockReason = `Execution blocked - ${socText}`;
                                                 }
                                                 
                                                 return { 
                                                     status: 'BLOCKED', 
                                                     color: '#dc3545', 
                                                     icon: '🚫',
-                                                    reason: blockReason
+                                                    reason: blockReason,
+                                                    soc: batterySoc
                                                 };
                                             }
                                             
@@ -1859,7 +1880,8 @@ class LogWebServer:
                                                 status: 'EXECUTED', 
                                                 color: '#28a745', 
                                                 icon: '✅',
-                                                reason: `Charged ${energy.toFixed(2)} kWh for ${cost.toFixed(2)} PLN`
+                                                reason: `Charged ${energy.toFixed(2)} kWh for ${cost.toFixed(2)} PLN`,
+                                                soc: batterySoc
                                             };
                                         };
                                         
@@ -1872,6 +1894,11 @@ class LogWebServer:
                                                         <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 5px;">${new Date(decision.timestamp).toLocaleTimeString()}</div>
                                                         <div style="font-weight: 600; font-size: 16px; margin-bottom: 5px; text-transform: capitalize;">${decision.action.replace('_', ' ')}</div>
                                                         <div style="color: var(--text-muted); font-size: 14px;">${decision.reason}</div>
+                                                        ${execution.soc ? `
+                                                            <div style="margin-top: 8px; display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; background: ${getSocColor(execution.soc)}22; border: 1px solid ${getSocColor(execution.soc)}; border-radius: 8px;">
+                                                                <span style="font-size: 13px; font-weight: 600; color: ${getSocColor(execution.soc)};">${execution.status === 'EXECUTED' ? '⚡' : '🔋'} ${execution.soc}%</span>
+                                                            </div>
+                                                        ` : ''}
                                                     </div>
                                                     <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
                                                         <div style="background: ${getDecisionColor(decision.action)}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">
@@ -1880,9 +1907,11 @@ class LogWebServer:
                                                         <div style="background: ${execution.color}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">
                                                             ${execution.icon} ${execution.status}
                                                         </div>
-                                                        <div style="font-size: 11px; color: var(--text-muted); text-align: right; max-width: 150px;">
-                                                            ${execution.reason}
-                                                        </div>
+                                                        ${execution.status === 'BLOCKED' ? `
+                                                            <div style="font-size: 11px; color: ${execution.color}; text-align: right; max-width: 200px; font-weight: 500;">
+                                                                ${execution.reason}
+                                                            </div>
+                                                        ` : ''}
                                                         <div style="font-size: 12px; color: var(--text-muted);">
                                                             Confidence: ${confidencePercent}%
                                                         </div>
@@ -2005,7 +2034,7 @@ class LogWebServer:
             const pvPeak = pvData.length > 0 ? Math.max(...pvData).toFixed(2) : '--';
             
             document.getElementById('data-points').textContent = data.data_points || '--';
-            document.getElementById('data-source').textContent = data.data_source === 'real_data' ? 'Real Data' : 'Mock Data';
+            document.getElementById('data-source').textContent = data.data_source === 'real_inverter' ? 'Real Data' : 'Mock Data';
             document.getElementById('soc-range').textContent = `${socMin}% - ${socMax}%`;
             document.getElementById('pv-peak').textContent = `${pvPeak} kW`;
         }

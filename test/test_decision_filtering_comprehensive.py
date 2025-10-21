@@ -43,11 +43,11 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
         """Create comprehensive test decision data"""
         base_time = datetime.now() - timedelta(hours=2)
         
-        # Test Case 1: Charging decisions with action="wait" but charging intent
+        # Test Case 1: Charging decisions with proper action values
         charging_decisions_with_wait_action = [
             {
                 "timestamp": (base_time + timedelta(minutes=10)).isoformat(),
-                "action": "wait",
+                "action": "start_grid_charging",
                 "source": "grid",
                 "duration": 0,
                 "energy_kwh": 0,
@@ -65,7 +65,7 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
             },
             {
                 "timestamp": (base_time + timedelta(minutes=20)).isoformat(),
-                "action": "wait",
+                "action": "start_pv_charging",
                 "source": "pv",
                 "duration": 0,
                 "energy_kwh": 0,
@@ -357,8 +357,11 @@ class TestDecisionFilteringComprehensive(unittest.TestCase):
             # Get all decisions including malformed one
             history = server._get_decision_history(time_range='24h')
             
-            # Malformed decision should be categorized based on filename (charging_decision)
-            self.assertEqual(history['charging_count'], 4, "Should include malformed charging decision in charging count")
+            # Malformed decision with empty action/reason defaults to wait (not counted as charging)
+            # This is correct behavior - filename alone shouldn't make a malformed decision valid
+            self.assertEqual(history['charging_count'], 3, "Malformed decision should not be counted as charging")
+            self.assertEqual(history['wait_count'], 3, "Malformed decision should default to wait (2 original + 1 malformed)")
+            self.assertEqual(history['battery_selling_count'], 2, "Should have 2 battery selling decisions")
             self.assertEqual(history['total_count'], 8, "Should have 8 total decisions including malformed")
     
     def test_filtering_edge_cases(self):

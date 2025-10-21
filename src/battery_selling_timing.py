@@ -297,36 +297,47 @@ class BatterySellingTiming:
         """Detect upcoming price peak in forecast"""
         try:
             current_time = datetime.now()
-            max_wait_time = current_time + timedelta(hours=self.max_wait_time_hours)
             
-            # Find peak price within wait window
+            # Find peak price across all forecast points
+            # (assuming forecast data is already limited to relevant time window)
             peak_price = current_price
             peak_time = current_time
+            peak_index = -1
             
-            for forecast_point in price_forecast:
+            for i, forecast_point in enumerate(price_forecast):
                 point_time = forecast_point.get('time')
                 if isinstance(point_time, str):
                     point_time = datetime.fromisoformat(point_time.replace('Z', '+00:00'))
                 
-                if not point_time or point_time > max_wait_time:
+                if not point_time:
                     continue
                 
                 price = forecast_point.get('price', forecast_point.get('forecasted_price_pln', 0))
                 if price > peak_price:
                     peak_price = price
                     peak_time = point_time
+                    peak_index = i
             
             # If peak is same as current, no peak detected
-            if peak_price <= current_price:
+            if peak_price <= current_price or peak_index < 0:
                 return None
             
             # Calculate peak information
             time_to_peak = (peak_time - current_time).total_seconds() / 3600
+            
+            # If peak time is negative (in the past), try to calculate relative to first forecast point
+            if time_to_peak < 0:
+                # Use forecast ordering: peak is at index peak_index (hours from now approximately)
+                time_to_peak = peak_index + 1  # Approximate: each forecast point is ~1 hour apart
+            
             price_increase_percent = ((peak_price - current_price) / current_price) * 100
             
             # Calculate confidence based on peak magnitude and timing
             confidence = min(1.0, price_increase_percent / 30.0)  # 30% increase = 100% confidence
-            if time_to_peak > self.max_wait_time_hours * 0.75:
+            # Reduce confidence for peaks beyond max_wait_time
+            if time_to_peak > self.max_wait_time_hours:
+                confidence *= 0.7
+            elif time_to_peak > self.max_wait_time_hours * 0.75:
                 confidence *= 0.8  # Reduce confidence for distant peaks
             
             return PeakInfo(
@@ -556,6 +567,14 @@ class BatterySellingTiming:
             
             # Rule 3: Significant opportunity cost - wait for peak
             if peak_info and peak_info.price_increase_percent >= self.significant_savings_percent:
+                # Determine risk level based on time to peak
+                if peak_info.time_to_peak_hours <= self.max_wait_time_hours * 0.5:
+                    risk_level = "low"
+                elif peak_info.time_to_peak_hours <= self.max_wait_time_hours:
+                    risk_level = "medium"
+                else:
+                    risk_level = "medium"  # Peak beyond max_wait but still significant
+                
                 return TimingRecommendation(
                     decision=TimingDecision.WAIT_FOR_PEAK,
                     confidence=peak_info.confidence * forecast_confidence,
@@ -566,7 +585,7 @@ class BatterySellingTiming:
                     peak_info=peak_info,
                     selling_windows=selling_windows,
                     wait_hours=peak_info.time_to_peak_hours,
-                    risk_level="low" if peak_info.time_to_peak_hours < 2 else "medium"
+                    risk_level=risk_level
                 )
             
             # Rule 4: Current price is high and near peak threshold
@@ -586,21 +605,20 @@ class BatterySellingTiming:
                         risk_level="low"
                     )
             
-            # Rule 5: Moderate opportunity - wait if peak nearby
+            # Rule 5: Moderate opportunity - wait for peak
             if peak_info and peak_info.price_increase_percent >= self.marginal_savings_percent:
-                if peak_info.time_to_peak_hours <= self.max_wait_time_hours:
-                    return TimingRecommendation(
-                        decision=TimingDecision.WAIT_FOR_HIGHER,
-                        confidence=peak_info.confidence * forecast_confidence * 0.8,
-                        reasoning=f"Moderate price improvement expected in {peak_info.time_to_peak_hours:.1f}h (+{peak_info.price_increase_percent:.1f}%)",
-                        sell_time=peak_info.peak_time,
-                        expected_price=peak_info.peak_price,
-                        opportunity_cost_pln=opportunity_cost,
-                        peak_info=peak_info,
-                        selling_windows=selling_windows,
-                        wait_hours=peak_info.time_to_peak_hours,
-                        risk_level="medium"
-                    )
+                return TimingRecommendation(
+                    decision=TimingDecision.WAIT_FOR_HIGHER,
+                    confidence=peak_info.confidence * forecast_confidence * 0.8,
+                    reasoning=f"Moderate price improvement expected in {peak_info.time_to_peak_hours:.1f}h (+{peak_info.price_increase_percent:.1f}%)",
+                    sell_time=peak_info.peak_time,
+                    expected_price=peak_info.peak_price,
+                    opportunity_cost_pln=opportunity_cost,
+                    peak_info=peak_info,
+                    selling_windows=selling_windows,
+                    wait_hours=peak_info.time_to_peak_hours,
+                    risk_level="medium" if peak_info.time_to_peak_hours <= self.max_wait_time_hours else "high"
+                )
             
             # Rule 6: Price is not high enough - no good opportunity
             if not price_analysis.is_high_price:
