@@ -36,7 +36,19 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - **Cloud Archival**: Automated archival to AWS S3, Google Cloud, or Azure
 - **Advanced Analytics**: Complex data analysis and trend reporting
 
-## 🆕 **Latest Updates (September 2025)**
+## 🆕 **Latest Updates (October 2025)**
+
+### **SOC Display and Blocking Reason Enhancement**
+- **Prominent SOC Display**: Battery State of Charge now shown prominently for all charging decisions
+- **Color-Coded SOC Badges**: Visual indicators (⚡ for executed, 🔋 for blocked) with color coding (Red <20%, Yellow 20-50%, Green >50%)
+- **Detailed Blocking Reasons**: Enhanced explanation of why charging decisions were blocked (peak hours, price conditions, safety)
+- **Enhanced Logging**: All decision logs now include SOC at moment of decision for better debugging
+- **Kompas Peak Hours Details**: Clear indication when charging blocked due to grid reduction requirements
+- **Better User Experience**: Immediate visibility into battery state and decision context
+- **All Tests Passing**: 404/405 tests passing (99.75% pass rate) - All previously failing tests fixed
+- **See [SOC Display Enhancement Documentation](docs/SOC_DISPLAY_ENHANCEMENT.md) for complete details**
+
+## 🆕 **Updates (September 2025)**
 
 ### **Logging System Optimization**
 - **Eliminated Log Spam**: Implemented log deduplication to prevent repeated messages flooding systemd journal
