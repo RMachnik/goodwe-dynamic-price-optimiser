@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
+import sys
+from pathlib import Path
 import json
 from datetime import datetime
 
-from src.pse_peak_hours_collector import PSEPeakHoursCollector, USAGE_CODE_TO_LABEL
+# Add src directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+
+from pse_peak_hours_collector import PSEPeakHoursCollector, USAGE_CODE_TO_LABEL
 
 
 def test_usage_code_mapping_complete():

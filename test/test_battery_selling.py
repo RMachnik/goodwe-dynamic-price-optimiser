@@ -178,7 +178,8 @@ class TestBatterySellingEngine:
             opportunity = await engine.analyze_selling_opportunity(current_data, price_data)
             
             assert opportunity.decision == SellingDecision.WAIT
-            assert "below minimum selling threshold" in opportunity.reasoning
+            # Phase 2: Updated to match new dynamic threshold messaging
+            assert "below" in opportunity.reasoning and "threshold" in opportunity.reasoning
         
         # Poor selling opportunity (low price)
         current_data['battery']['soc_percent'] = 85

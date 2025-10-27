@@ -1,0 +1,81 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.7, pytest-8.4.2, pluggy-1.6.0 -- /Users/rafalmachnik/sources/goodwe-dynamic-price-optimiser/venv/bin/python3.13
+cachedir: .pytest_cache
+rootdir: /Users/rafalmachnik/sources/goodwe-dynamic-price-optimiser
+configfile: pytest.ini
+plugins: asyncio-1.1.0
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 56 items
+
+test/test_battery_selling.py::TestBatterySellingEngine::test_initialization PASSED [  1%]
+test/test_battery_selling.py::TestBatterySellingEngine::test_safety_conditions_check PASSED [  3%]
+test/test_battery_selling.py::TestBatterySellingEngine::test_night_time_check PASSED [  5%]
+test/test_battery_selling.py::TestBatterySellingEngine::test_peak_hour_check PASSED [  7%]
+test/test_battery_selling.py::TestBatterySellingEngine::test_revenue_calculation PASSED [  8%]
+test/test_battery_selling.py::TestBatterySellingEngine::test_confidence_calculation PASSED [ 10%]
+test/test_battery_selling.py::TestBatterySellingEngine::test_risk_assessment PASSED [ 12%]
+test/test_battery_selling.py::TestBatterySellingEngine::test_selling_opportunity_analysis PASSED [ 14%]
+test/test_battery_selling.py::TestBatterySellingEngine::test_daily_cycle_reset PASSED [ 16%]
+test/test_battery_selling.py::TestBatterySellingEngine::test_selling_status PASSED [ 17%]
+test/test_battery_selling.py::TestBatterySellingEngine::test_revenue_estimate PASSED [ 19%]
+test/test_battery_selling.py::TestBatterySellingMonitor::test_initialization PASSED [ 21%]
+test/test_battery_selling.py::TestBatterySellingMonitor::test_battery_temperature_check PASSED [ 23%]
+test/test_battery_selling.py::TestBatterySellingMonitor::test_battery_soc_check PASSED [ 25%]
+test/test_battery_selling.py::TestBatterySellingMonitor::test_grid_voltage_check PASSED [ 26%]
+test/test_battery_selling.py::TestBatterySellingMonitor::test_night_time_check PASSED [ 28%]
+test/test_battery_selling.py::TestBatterySellingMonitor::test_inverter_errors_check PASSED [ 30%]
+test/test_battery_selling.py::TestBatterySellingMonitor::test_battery_health_check PASSED [ 32%]
+test/test_battery_selling.py::TestBatterySellingMonitor::test_safety_conditions_check PASSED [ 33%]
+test/test_battery_selling.py::TestBatterySellingMonitor::test_safety_status PASSED [ 35%]
+test/test_battery_selling.py::TestBatterySellingAnalytics::test_initialization PASSED [ 37%]
+test/test_battery_selling.py::TestBatterySellingAnalytics::test_record_session PASSED [ 39%]
+test/test_battery_selling.py::TestBatterySellingAnalytics::test_revenue_summary PASSED [ 41%]
+test/test_battery_selling.py::TestBatterySellingAnalytics::test_performance_metrics PASSED [ 42%]
+test/test_battery_selling.py::TestBatterySellingAnalytics::test_daily_breakdown PASSED [ 44%]
+test/test_battery_selling.py::TestBatterySellingAnalytics::test_export_data PASSED [ 46%]
+test/test_battery_selling.py::TestIntegration::test_complete_selling_workflow PASSED [ 48%]
+test/test_battery_selling.py::TestIntegration::test_configuration_validation PASSED [ 50%]
+test/test_battery_selling_end_to_end.py::TestBatterySellingEndToEnd::test_complete_battery_selling_workflow PASSED [ 51%]
+test/test_battery_selling_end_to_end.py::TestBatterySellingEndToEnd::test_battery_selling_with_real_inverter_data SKIPPED [ 53%]
+test/test_battery_selling_end_to_end.py::TestBatterySellingEndToEnd::test_data_format_compatibility PASSED [ 55%]
+test/test_battery_selling_end_to_end.py::TestBatterySellingEndToEnd::test_error_handling_and_recovery PASSED [ 57%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_initialization PASSED [ 58%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_price_context_analysis_basic PASSED [ 60%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_price_context_analysis_high_price PASSED [ 62%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_peak_detection_with_peak PASSED [ 64%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_peak_detection_no_peak PASSED [ 66%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_price_trend_rising PASSED [ 67%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_price_trend_falling PASSED [ 69%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_price_trend_stable PASSED [ 71%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_opportunity_cost_calculation PASSED [ 73%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_selling_windows_identification PASSED [ 75%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_timing_decision_sell_at_peak PASSED [ 76%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_timing_decision_wait_for_peak PASSED [ 78%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_timing_decision_falling_trend_sell_now PASSED [ 80%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_timing_decision_no_opportunity_low_price FAILED [ 82%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_cancel_waiting_low_soc PASSED [ 83%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_cancel_waiting_max_time PASSED [ 85%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_cancel_waiting_high_consumption PASSED [ 87%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_timing_disabled PASSED [ 89%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_low_forecast_confidence PASSED [ 91%]
+test/test_battery_selling_timing.py::TestBatterySellingTiming::test_get_timing_status PASSED [ 92%]
+test/test_battery_selling_timing.py::TestTimingIntegrationScenarios::test_scenario_early_afternoon_with_evening_peak PASSED [ 94%]
+test/test_battery_selling_timing.py::TestTimingIntegrationScenarios::test_scenario_already_at_peak PASSED [ 96%]
+test/test_battery_selling_timing.py::TestTimingIntegrationScenarios::test_scenario_moderate_price_small_peak_ahead PASSED [ 98%]
+test/test_battery_selling_timing.py::TestTimingIntegrationScenarios::test_scenario_multiple_peaks PASSED [100%]
+
+=================================== FAILURES ===================================
+____ TestBatterySellingTiming.test_timing_decision_no_opportunity_low_price ____
+test/test_battery_selling_timing.py:321: in test_timing_decision_no_opportunity_low_price
+    assert recommendation.decision in [TimingDecision.NO_OPPORTUNITY, TimingDecision.WAIT_FOR_HIGHER]
+E   AssertionError: assert <TimingDecision.WAIT_FOR_PEAK: 'wait_for_peak'> in [<TimingDecision.NO_OPPORTUNITY: 'no_opportunity'>, <TimingDecision.WAIT_FOR_HIGHER: 'wait_for_higher'>]
+E    +  where <TimingDecision.WAIT_FOR_PEAK: 'wait_for_peak'> = TimingRecommendation(decision=<TimingDecision.WAIT_FOR_PEAK: 'wait_for_peak'>, confidence=0.44999999999999996, reasoning='Medium opportunity: Peak in 1.0h at 0.350 PLN/kWh (+16.7%, 0.35 PLN gain)', sell_time=datetime.datetime(2025, 10, 26, 0, 14, 14, 373044), expected_price=0.35, opportunity_cost_pln=0.34999999999999964, peak_info=PeakInfo(peak_time=datetime.datetime(2025, 10, 26, 0, 14, 14, 373044), peak_price=0.35, time_to_peak_hours=0.9999999913888888, price_increase_percent=16.666666666666664, confidence=0.5555555555555555), selling_windows=[], wait_hours=0.9999999913888888, risk_level='low').decision
+------------------------------ Captured log setup ------------------------------
+INFO     battery_selling_timing:battery_selling_timing.py:155 Battery Selling Timing Engine initialized (enabled: True)
+INFO     battery_selling_timing:battery_selling_timing.py:156   - Forecast lookahead: 6h
+INFO     battery_selling_timing:battery_selling_timing.py:157   - Near peak threshold: 95%
+INFO     battery_selling_timing:battery_selling_timing.py:158   - Min peak difference: 15%
+INFO     battery_selling_timing:battery_selling_timing.py:159   - Max wait time: 4h
+=========================== short test summary info ============================
+FAILED test/test_battery_selling_timing.py::TestBatterySellingTiming::test_timing_decision_no_opportunity_low_price
+=================== 1 failed, 54 passed, 1 skipped in 19.08s ===================

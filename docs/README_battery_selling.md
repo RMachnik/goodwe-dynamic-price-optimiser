@@ -18,11 +18,19 @@ The Battery Energy Selling functionality enables your GoodWe inverter to sell ex
 - **Peak Hours**: Optimizes for high-price periods (5-9 PM)
 - **Night Preservation**: Never sells during night hours (10 PM - 6 AM)
 
-### 🎯 **Smart Timing (NEW - Avoid Selling Too Early)**
-- **Price Forecast Analysis**: Analyzes upcoming 6 hours for better prices
+### 🎯 **Smart Timing (ENHANCED - Phase 1)**
+- **Extended Forecast Analysis**: Analyzes upcoming **12 hours** for better prices (upgraded from 6h)
 - **Peak Detection**: Identifies peak prices and waits to sell at optimal times
+- **Enhanced Percentile Thresholds**: 
+  - Top 5% prices: Aggressive immediate selling
+  - Top 15% prices: Standard selling if no better peak within 2h
+  - Top 25% prices: Conditional selling with opportunity cost check
+- **Improved Opportunity Cost**:
+  - 30%+ gain: Definitely wait (high confidence)
+  - 15-30% gain: Wait if low risk and <3h to peak
+  - 10-15% gain: Consider waiting if <1h away
+  - <10% gain: Sell now
 - **Trend Analysis**: Detects rising/falling price trends for better decisions
-- **Opportunity Cost**: Calculates revenue gains from waiting vs selling now
 - **Multi-Session Support**: Plans multiple selling sessions throughout the day
 - **Confidence-Based**: Adjusts decisions based on forecast reliability
 
