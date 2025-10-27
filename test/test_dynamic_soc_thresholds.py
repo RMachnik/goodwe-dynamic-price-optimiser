@@ -35,11 +35,9 @@ class TestDynamicSOCThresholds:
                     'dynamic_soc_thresholds': {
                         'enabled': True,
                         'super_premium_price_threshold': 1.2,
-                        'super_premium_min_soc': 50,
+                        'super_premium_min_soc': 70,
                         'premium_price_threshold': 0.9,
-                        'premium_min_soc': 60,
-                        'very_high_price_threshold': 0.8,
-                        'very_high_min_soc': 70,
+                        'premium_min_soc': 75,
                         'high_price_threshold': 0.7,
                         'high_min_soc': 80,
                         'require_peak_hours': True,
@@ -82,11 +80,9 @@ class TestDynamicSOCThresholds:
         """Test that dynamic SOC is properly initialized"""
         assert engine_dynamic.dynamic_soc_enabled is True
         assert engine_dynamic.super_premium_price_threshold == 1.2
-        assert engine_dynamic.super_premium_min_soc == 50
+        assert engine_dynamic.super_premium_min_soc == 70
         assert engine_dynamic.premium_price_threshold == 0.9
-        assert engine_dynamic.premium_min_soc == 60
-        assert engine_dynamic.very_high_price_threshold == 0.8
-        assert engine_dynamic.very_high_min_soc == 70
+        assert engine_dynamic.premium_min_soc == 75
         assert engine_dynamic.high_price_threshold == 0.7
         assert engine_dynamic.high_min_soc == 80
         assert engine_dynamic.require_peak_hours is True
@@ -97,7 +93,7 @@ class TestDynamicSOCThresholds:
         assert engine_static.dynamic_soc_enabled is False
     
     def test_super_premium_price_70_soc(self, engine_dynamic):
-        """Test super premium prices (>1.2 PLN/kWh) allow 50% SOC"""
+        """Test super premium prices (>1.2 PLN/kWh) allow 70% SOC"""
         with patch('battery_selling_engine.datetime') as mock_datetime:
             # Mock now() to return a specific time
             mock_now = datetime(2025, 10, 26, 19, 0, 0)  # 7 PM (peak hour)
@@ -112,10 +108,10 @@ class TestDynamicSOCThresholds:
             ]
             
             min_soc = engine_dynamic._get_dynamic_min_soc(1.3, price_forecast)
-            assert min_soc == 50
+            assert min_soc == 70
     
     def test_premium_price_75_soc(self, engine_dynamic):
-        """Test premium prices (0.9-1.2 PLN/kWh) allow 60% SOC"""
+        """Test premium prices (0.9-1.2 PLN/kWh) allow 75% SOC"""
         with patch('battery_selling_engine.datetime') as mock_datetime:
             # Mock now() to return a specific time
             mock_now = datetime(2025, 10, 26, 18, 0, 0)  # 6 PM (peak hour)
@@ -130,27 +126,18 @@ class TestDynamicSOCThresholds:
             ]
             
             min_soc = engine_dynamic._get_dynamic_min_soc(1.0, price_forecast)
-            assert min_soc == 60
+            assert min_soc == 75
     
     def test_high_price_80_soc(self, engine_dynamic):
-        """Test very high prices (0.8-0.9 PLN/kWh) use 70% SOC, high prices (0.7-0.8) use 80%"""
+        """Test high prices (0.7-0.9 PLN/kWh) use standard 80% SOC"""
+        price_forecast = [
+            {'price': 0.40, 'time': (datetime.now() + timedelta(hours=2)).isoformat()}
+        ]
+        
         with patch('battery_selling_engine.datetime') as mock_datetime:
-            mock_now = datetime(2025, 10, 26, 20, 0, 0)  # 8 PM (peak hour)
-            mock_datetime.now.return_value = mock_now
-            mock_datetime.fromisoformat = datetime.fromisoformat
-            mock_datetime.side_effect = None
+            mock_datetime.now.return_value.hour = 20  # Peak hour
             
-            future_time = mock_now + timedelta(hours=2)
-            price_forecast = [
-                {'price': 0.40, 'time': future_time.isoformat()}  # Recharge opportunity
-            ]
-            
-            # Very high price (0.8-0.9) should use 70% SOC
-            min_soc = engine_dynamic._get_dynamic_min_soc(0.85, price_forecast)
-            assert min_soc == 70
-            
-            # High price (0.7-0.8) should use 80% SOC
-            min_soc = engine_dynamic._get_dynamic_min_soc(0.75, price_forecast)
+            min_soc = engine_dynamic._get_dynamic_min_soc(0.8, price_forecast)
             assert min_soc == 80
     
     def test_normal_price_80_soc(self, engine_dynamic):
@@ -177,7 +164,7 @@ class TestDynamicSOCThresholds:
             assert min_soc == 80
     
     def test_no_recharge_opportunity_uses_default(self, engine_dynamic):
-        """Test that without recharge opportunity: premium prices allow dynamic SOC, lower prices use default"""
+        """Test that without recharge opportunity, default SOC is used"""
         # No low prices in forecast = no recharge opportunity
         price_forecast = [
             {'price': 1.0, 'time': (datetime.now() + timedelta(hours=2)).isoformat()},
@@ -187,13 +174,9 @@ class TestDynamicSOCThresholds:
         with patch('battery_selling_engine.datetime') as mock_datetime:
             mock_datetime.now.return_value.hour = 19  # Peak hour
             
-            # Premium price (1.3 >= 1.2) - allows dynamic SOC even without recharge opportunity
+            # No recharge opportunity, should use default
             min_soc = engine_dynamic._get_dynamic_min_soc(1.3, price_forecast)
-            assert min_soc == 50  # Super premium threshold
-            
-            # Lower price (< 0.9) - requires recharge opportunity, uses default without it
-            min_soc = engine_dynamic._get_dynamic_min_soc(0.75, price_forecast)
-            assert min_soc == 80  # Default (no recharge opportunity for lower prices)
+            assert min_soc == 80
     
     def test_recharge_opportunity_detection(self, engine_dynamic):
         """Test recharge opportunity detection (30% lower price)"""
@@ -260,9 +243,9 @@ class TestDynamicSOCThresholds:
     
     @pytest.mark.asyncio
     async def test_selling_allowed_at_72_soc_super_premium(self, engine_dynamic):
-        """Test selling allowed at 52% SOC with super premium price (50% threshold)"""
+        """Test selling allowed at 72% SOC with super premium price"""
         current_data = {
-            'battery': {'soc_percent': 52, 'temperature': 25, 'charging_status': False},
+            'battery': {'soc_percent': 72, 'temperature': 25, 'charging_status': False},
             'pv': {'power_w': 100},
             'consumption': {'power_w': 2000},
             'grid': {'power': 1800, 'voltage': 230}
@@ -286,7 +269,7 @@ class TestDynamicSOCThresholds:
                 
                 opportunity = await engine_dynamic.analyze_selling_opportunity(current_data, price_data)
                 
-                # Should NOT be blocked (52% > 50% threshold for super premium)
+                # Should NOT be blocked (72% > 70% threshold for super premium)
                 assert opportunity.decision != SellingDecision.WAIT or "below" not in opportunity.reasoning.lower()
     
     @pytest.mark.asyncio
@@ -334,11 +317,9 @@ class TestDynamicSOCIntegration:
                     'dynamic_soc_thresholds': {
                         'enabled': True,
                         'super_premium_price_threshold': 1.2,
-                        'super_premium_min_soc': 50,
+                        'super_premium_min_soc': 70,
                         'premium_price_threshold': 0.9,
-                        'premium_min_soc': 60,
-                        'very_high_price_threshold': 0.8,
-                        'very_high_min_soc': 70,
+                        'premium_min_soc': 75,
                         'high_price_threshold': 0.7,
                         'high_min_soc': 80,
                         'require_peak_hours': True,
@@ -358,7 +339,7 @@ class TestDynamicSOCIntegration:
     async def test_scenario_evening_peak_spike(self, engine_integrated):
         """Test scenario: Evening price spike to 1.5 PLN/kWh during peak hours"""
         current_data = {
-            'battery': {'soc_percent': 53, 'temperature': 25, 'charging_status': False},
+            'battery': {'soc_percent': 73, 'temperature': 25, 'charging_status': False},
             'pv': {'power_w': 0},  # Evening, no PV
             'consumption': {'power_w': 2500},
             'grid': {'power': 2500, 'voltage': 230}
@@ -379,24 +360,23 @@ class TestDynamicSOCIntegration:
                 
                 opportunity = await engine_integrated.analyze_selling_opportunity(current_data, price_data)
                 
-                # Should allow selling from 53% SOC (above 50% threshold for super premium)
+                # Should allow selling from 73% SOC (above 70% threshold for super premium)
                 # Should have good revenue due to high price
                 assert opportunity.safety_checks_passed is True
                 if opportunity.decision == SellingDecision.START_SELLING:
-                    assert opportunity.expected_revenue_pln > 0  # Revenue should be positive
-                    assert opportunity.selling_power_w > 0  # Should have selling power
+                    assert opportunity.expected_revenue_pln > 5.0  # High revenue expected
     
     @pytest.mark.asyncio
     async def test_scenario_premium_price_no_recharge(self, engine_integrated):
-        """Test scenario: Premium price allows selling even without recharge opportunity"""
+        """Test scenario: Premium price but no recharge opportunity"""
         current_data = {
-            'battery': {'soc_percent': 65, 'temperature': 25, 'charging_status': False},
+            'battery': {'soc_percent': 76, 'temperature': 25, 'charging_status': False},
             'pv': {'power_w': 0},
             'consumption': {'power_w': 2000},
             'grid': {'power': 2000, 'voltage': 230}
         }
         
-        price_data = {'current_price_pln': 1.0}  # Premium price (>= 0.9)
+        price_data = {'current_price_pln': 1.0}  # Premium price
         
         # Mock forecast with NO recharge opportunity (all prices high)
         with patch.object(engine_integrated, '_get_price_forecast', new_callable=AsyncMock) as mock_forecast:
@@ -411,12 +391,10 @@ class TestDynamicSOCIntegration:
                 
                 opportunity = await engine_integrated.analyze_selling_opportunity(current_data, price_data)
                 
-                # Premium price allows dynamic SOC (60%) even without recharge opportunity
-                # 65% >= 60%, so should allow selling (if other conditions met)
-                # If blocked, it's due to other reasons (confidence, revenue, etc.), not SOC threshold
-                if opportunity.decision == SellingDecision.WAIT:
-                    # If waiting, it should NOT be due to SOC threshold (65% >= 60%)
-                    assert "below" not in opportunity.reasoning.lower() or "60" not in opportunity.reasoning
+                # Should NOT allow selling from 76% (below 80% default)
+                # because no recharge opportunity detected
+                assert opportunity.decision == SellingDecision.WAIT
+                assert "below" in opportunity.reasoning.lower()
     
     @pytest.mark.asyncio
     async def test_scenario_outside_peak_hours_blocks_low_soc(self, engine_integrated):
@@ -461,13 +439,9 @@ class TestDynamicSOCEdgeCases:
                     'dynamic_soc_thresholds': {
                         'enabled': True,
                         'super_premium_price_threshold': 1.2,
-                        'super_premium_min_soc': 50,
+                        'super_premium_min_soc': 70,
                         'premium_price_threshold': 0.9,
-                        'premium_min_soc': 60,
-                        'very_high_price_threshold': 0.8,
-                        'very_high_min_soc': 70,
-                        'high_price_threshold': 0.7,
-                        'high_min_soc': 80,
+                        'premium_min_soc': 75,
                         'require_peak_hours': True,
                         'require_recharge_forecast': True
                     }
@@ -478,30 +452,22 @@ class TestDynamicSOCEdgeCases:
         return BatterySellingEngine(config)
     
     def test_empty_forecast_returns_default(self, engine):
-        """Test empty forecast: premium prices allow dynamic SOC, lower prices use default"""
+        """Test empty forecast returns default SOC (no recharge opportunity detected)"""
         with patch('battery_selling_engine.datetime') as mock_datetime:
             mock_datetime.now.return_value.hour = 19
             
-            # Premium price (1.5 PLN/kWh >= 0.9) - allows dynamic SOC even without recharge opportunity
+            # Empty forecast means no recharge opportunity, so use default
             min_soc = engine._get_dynamic_min_soc(1.5, [])
-            assert min_soc == 50  # Super premium threshold (1.5 >= 1.2)
-            
-            # Lower price (< 0.9) - requires recharge opportunity, uses default without it
-            min_soc = engine._get_dynamic_min_soc(0.75, [])
-            assert min_soc == 80  # Default (no recharge opportunity for lower prices)
+            assert min_soc == 80  # Default (correct - no recharge opportunity)
     
     def test_none_forecast_returns_default(self, engine):
-        """Test None forecast: premium prices allow dynamic SOC, lower prices use default"""
+        """Test None forecast returns default SOC (no recharge opportunity)"""
         with patch('battery_selling_engine.datetime') as mock_datetime:
             mock_datetime.now.return_value.hour = 19
             
-            # Premium price (1.5 PLN/kWh >= 0.9) - allows dynamic SOC even without forecast
+            # Without forecast, can't check recharge opportunity, so returns default
             min_soc = engine._get_dynamic_min_soc(1.5, None)
-            assert min_soc == 50  # Super premium threshold (1.5 >= 1.2)
-            
-            # Lower price (< 0.9) - requires forecast, uses default without it
-            min_soc = engine._get_dynamic_min_soc(0.75, None)
-            assert min_soc == 80  # Default (no forecast for lower prices)
+            assert min_soc == 80  # Default (correct - no recharge opportunity)
     
     def test_malformed_forecast_data(self, engine):
         """Test malformed forecast data doesn't crash"""
@@ -531,7 +497,7 @@ class TestDynamicSOCEdgeCases:
             
             # Extreme high price (10.0 PLN/kWh) - super premium with recharge opportunity
             min_soc = engine._get_dynamic_min_soc(10.0, price_forecast_with_recharge)
-            assert min_soc == 50  # Super premium threshold (50%)
+            assert min_soc == 70  # Super premium threshold (0.01 is WAY below 10.0 * 0.7 = 7.0)
             
             # Extreme low price - no SOC reduction needed
             min_soc = engine._get_dynamic_min_soc(0.01, price_forecast_with_recharge)
@@ -552,7 +518,6 @@ class TestDynamicSOCEdgeCases:
             # Need recharge opportunities (30% lower than current prices being tested)
             # For 1.2 PLN/kWh test, need forecast price <= 0.84 (1.2 * 0.7)
             # For 0.9 PLN/kWh test, need forecast price <= 0.63 (0.9 * 0.7)
-            # For 0.8 PLN/kWh test, need forecast price <= 0.56 (0.8 * 0.7)
             future_time = mock_now + timedelta(hours=2)
             price_forecast_for_1_2 = [
                 {'price': 0.35, 'time': future_time.isoformat()}  # Way below 0.84
@@ -562,33 +527,19 @@ class TestDynamicSOCEdgeCases:
                 {'price': 0.30, 'time': future_time.isoformat()}  # Way below 0.63
             ]
             
-            price_forecast_for_0_8 = [
-                {'price': 0.25, 'time': future_time.isoformat()}  # Way below 0.56
-            ]
-            
             # Exactly at 1.2 threshold with recharge opportunity
             min_soc = engine._get_dynamic_min_soc(1.2, price_forecast_for_1_2)
-            assert min_soc == 50  # Should be super premium (50%)
+            assert min_soc == 70  # Should be super premium
             
             # Just below 1.2 with recharge opportunity
             min_soc = engine._get_dynamic_min_soc(1.19, price_forecast_for_1_2)
-            assert min_soc == 60  # Premium (60%)
+            assert min_soc == 75  # Premium
             
             # Exactly at 0.9 threshold with recharge opportunity
             min_soc = engine._get_dynamic_min_soc(0.9, price_forecast_for_0_9)
-            assert min_soc == 60  # Premium (60%)
+            assert min_soc == 75  # Premium
             
-            # Just below 0.9 with recharge opportunity (now falls into very_high tier)
-            min_soc = engine._get_dynamic_min_soc(0.89, price_forecast_for_0_8)
-            # With very_high tier (0.8-0.9), 0.89 should return very_high_min_soc (70%)
-            assert min_soc == 70  # Very high tier (70%)
-            
-            # Exactly at 0.8 threshold with recharge opportunity (very_high tier)
-            min_soc = engine._get_dynamic_min_soc(0.8, price_forecast_for_0_8)
-            # Should be very_high tier (70%)
-            assert min_soc == 70  # Very high tier (70%)
-            
-            # Just below 0.8 with recharge opportunity
-            min_soc = engine._get_dynamic_min_soc(0.79, price_forecast_for_0_8)
-            assert min_soc == 80  # High tier (0.7-0.8)
+            # Just below 0.9 with recharge opportunity
+            min_soc = engine._get_dynamic_min_soc(0.89, price_forecast_for_0_9)
+            assert min_soc == 80  # High (but still could get lower SOC if price qualifies)
 

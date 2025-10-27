@@ -113,10 +113,21 @@ class BatterySellingTiming:
         self.max_wait_time_hours = timing_config.get('max_wait_time_hours', 4)
         self.min_forecast_confidence = timing_config.get('min_forecast_confidence', 0.6)
         
-        # Opportunity cost thresholds
+        # Opportunity cost thresholds (Phase 1: Enhanced graduated thresholds)
         opp_cost_config = timing_config.get('opportunity_cost', {})
+        self.high_confidence_wait_percent = opp_cost_config.get('high_confidence_wait', 30)
+        self.medium_confidence_wait_percent = opp_cost_config.get('medium_confidence_wait', 15)
+        self.low_confidence_wait_percent = opp_cost_config.get('low_confidence_wait', 10)
+        self.sell_threshold_percent = opp_cost_config.get('sell_threshold', 10)
+        # Legacy thresholds for backward compatibility
         self.significant_savings_percent = opp_cost_config.get('significant_savings_percent', 20)
         self.marginal_savings_percent = opp_cost_config.get('marginal_savings_percent', 5)
+        
+        # Enhanced percentile-based selling (Phase 1)
+        percentile_config = timing_config.get('percentile_thresholds', {})
+        self.aggressive_sell_percentile = percentile_config.get('aggressive_sell', 5)  # Top 5%
+        self.standard_sell_percentile = percentile_config.get('standard_sell', 15)     # Top 15%
+        self.conditional_sell_percentile = percentile_config.get('conditional_sell', 25)  # Top 25%
         
         # Trend analysis
         trend_config = timing_config.get('trend_analysis', {})
@@ -524,23 +535,27 @@ class BatterySellingTiming:
                              selling_windows: List[SellingWindow],
                              current_data: Dict[str, Any],
                              forecast_confidence: float) -> TimingRecommendation:
-        """Make final timing decision based on all analysis"""
+        """Make final timing decision based on all analysis (Phase 1: Enhanced)"""
         try:
-            # Decision logic priority:
-            # 1. If current price is at/near peak (top 10%) -> SELL NOW
-            # 2. If trend is falling and no better peak ahead -> SELL NOW
-            # 3. If significant opportunity cost (20%+ more revenue) -> WAIT
-            # 4. If current price is high (top 25%) and near peak threshold -> SELL NOW
-            # 5. Otherwise -> WAIT or NO_OPPORTUNITY
+            # Phase 1 Enhanced Decision Logic:
+            # 1. Top 5% prices (aggressive_sell_percentile) -> SELL NOW immediately
+            # 2. Top 15% prices (standard_sell_percentile) -> SELL NOW if no better peak within 2h
+            # 3. Top 25% prices (conditional_sell_percentile) -> SELL if high confidence and good opportunity cost
+            # 4. Improved opportunity cost thresholds (30%, 15%, 10%)
+            # 5. If trend is falling and no better peak ahead -> SELL NOW
+            # 6. Below top 25% -> WAIT or NO_OPPORTUNITY
             
-            # Rule 1: Current price at/near peak
-            if price_analysis.is_peak_price:
+            # Calculate current percentile rank (100 = highest price)
+            current_percentile_rank = price_analysis.current_percentile
+            
+            # Rule 1: Top 5% prices - Aggressive immediate selling
+            if current_percentile_rank >= (100 - self.aggressive_sell_percentile):
                 near_peak_threshold = price_analysis.max_price * (self.near_peak_threshold_percent / 100)
                 if current_price >= near_peak_threshold:
                     return TimingRecommendation(
                         decision=TimingDecision.SELL_NOW,
                         confidence=0.95,
-                        reasoning=f"Current price {current_price:.3f} PLN/kWh is at peak (top 10%, {price_analysis.current_percentile:.1f}th percentile)",
+                        reasoning=f"Current price {current_price:.3f} PLN/kWh in top {self.aggressive_sell_percentile}% (percentile: {current_percentile_rank:.1f}), near peak",
                         sell_time=datetime.now(),
                         expected_price=current_price,
                         opportunity_cost_pln=0.0,
@@ -550,7 +565,46 @@ class BatterySellingTiming:
                         risk_level="low"
                     )
             
-            # Rule 2: Falling trend and no better peak
+            # Rule 2: Top 15% prices - Standard selling if no better peak within 2h
+            if current_percentile_rank >= (100 - self.standard_sell_percentile):
+                # Check if there's a significantly better peak within 2h
+                if peak_info and peak_info.time_to_peak_hours <= 2.0 and peak_info.price_increase_percent >= 10:
+                    # Wait for nearby peak
+                    pass  # Continue to opportunity cost evaluation
+                else:
+                    # No nearby better peak, sell now
+                    return TimingRecommendation(
+                        decision=TimingDecision.SELL_NOW,
+                        confidence=0.85,
+                        reasoning=f"Current price {current_price:.3f} PLN/kWh in top {self.standard_sell_percentile}% (percentile: {current_percentile_rank:.1f}), no better peak within 2h",
+                        sell_time=datetime.now(),
+                        expected_price=current_price,
+                        opportunity_cost_pln=opportunity_cost if peak_info else 0.0,
+                        peak_info=peak_info,
+                        selling_windows=selling_windows,
+                        wait_hours=0.0,
+                        risk_level="low"
+                    )
+            
+            # Rule 3: Top 25% prices - Conditional selling with opportunity cost check
+            if current_percentile_rank >= (100 - self.conditional_sell_percentile):
+                # In top 25%, check opportunity cost before deciding
+                if not peak_info or peak_info.price_increase_percent < self.low_confidence_wait_percent:
+                    # No significant peak ahead, sell now
+                    return TimingRecommendation(
+                        decision=TimingDecision.SELL_NOW,
+                        confidence=0.80,
+                        reasoning=f"Current price {current_price:.3f} PLN/kWh in top {self.conditional_sell_percentile}% (percentile: {current_percentile_rank:.1f}), minimal upside",
+                        sell_time=datetime.now(),
+                        expected_price=current_price,
+                        opportunity_cost_pln=opportunity_cost if peak_info else 0.0,
+                        peak_info=peak_info,
+                        selling_windows=selling_windows,
+                        wait_hours=0.0,
+                        risk_level="low"
+                    )
+            
+            # Rule 4: Falling trend and no better peak
             if trend == PriceTrend.FALLING and (not peak_info or peak_info.price_increase_percent < 5):
                 return TimingRecommendation(
                     decision=TimingDecision.SELL_NOW,
@@ -565,7 +619,64 @@ class BatterySellingTiming:
                     risk_level="medium"
                 )
             
-            # Rule 3: Significant opportunity cost - wait for peak
+            # Rule 5: Phase 1 Enhanced Opportunity Cost Logic (Graduated Thresholds)
+            if peak_info:
+                # 30%+ gain: Definitely wait (high confidence)
+                if peak_info.price_increase_percent >= self.high_confidence_wait_percent:
+                    # Determine risk level based on time to peak
+                    if peak_info.time_to_peak_hours <= self.max_wait_time_hours * 0.5:
+                        risk_level = "low"
+                    elif peak_info.time_to_peak_hours <= self.max_wait_time_hours:
+                        risk_level = "medium"
+                    else:
+                        risk_level = "medium"
+                    
+                    return TimingRecommendation(
+                        decision=TimingDecision.WAIT_FOR_PEAK,
+                        confidence=peak_info.confidence * forecast_confidence,
+                        reasoning=f"High opportunity: Peak in {peak_info.time_to_peak_hours:.1f}h at {peak_info.peak_price:.3f} PLN/kWh (+{peak_info.price_increase_percent:.1f}%, {opportunity_cost:.2f} PLN gain)",
+                        sell_time=peak_info.peak_time,
+                        expected_price=peak_info.peak_price,
+                        opportunity_cost_pln=opportunity_cost,
+                        peak_info=peak_info,
+                        selling_windows=selling_windows,
+                        wait_hours=peak_info.time_to_peak_hours,
+                        risk_level=risk_level
+                    )
+                
+                # 15-30% gain: Wait if low risk and <3h to peak
+                if peak_info.price_increase_percent >= self.medium_confidence_wait_percent:
+                    if peak_info.time_to_peak_hours <= 3.0:
+                        return TimingRecommendation(
+                            decision=TimingDecision.WAIT_FOR_PEAK,
+                            confidence=peak_info.confidence * forecast_confidence * 0.9,
+                            reasoning=f"Medium opportunity: Peak in {peak_info.time_to_peak_hours:.1f}h at {peak_info.peak_price:.3f} PLN/kWh (+{peak_info.price_increase_percent:.1f}%, {opportunity_cost:.2f} PLN gain)",
+                            sell_time=peak_info.peak_time,
+                            expected_price=peak_info.peak_price,
+                            opportunity_cost_pln=opportunity_cost,
+                            peak_info=peak_info,
+                            selling_windows=selling_windows,
+                            wait_hours=peak_info.time_to_peak_hours,
+                            risk_level="medium" if peak_info.time_to_peak_hours > 2.0 else "low"
+                        )
+                
+                # 10-15% gain: Consider waiting if very low risk (<1h to peak)
+                if peak_info.price_increase_percent >= self.low_confidence_wait_percent:
+                    if peak_info.time_to_peak_hours <= 1.0:
+                        return TimingRecommendation(
+                            decision=TimingDecision.WAIT_FOR_HIGHER,
+                            confidence=peak_info.confidence * forecast_confidence * 0.8,
+                            reasoning=f"Small opportunity: Peak very soon ({peak_info.time_to_peak_hours:.1f}h) at {peak_info.peak_price:.3f} PLN/kWh (+{peak_info.price_increase_percent:.1f}%)",
+                            sell_time=peak_info.peak_time,
+                            expected_price=peak_info.peak_price,
+                            opportunity_cost_pln=opportunity_cost,
+                            peak_info=peak_info,
+                            selling_windows=selling_windows,
+                            wait_hours=peak_info.time_to_peak_hours,
+                            risk_level="low"
+                        )
+            
+            # Rule 6: Legacy opportunity cost logic (for backward compatibility)
             if peak_info and peak_info.price_increase_percent >= self.significant_savings_percent:
                 # Determine risk level based on time to peak
                 if peak_info.time_to_peak_hours <= self.max_wait_time_hours * 0.5:
@@ -588,24 +699,7 @@ class BatterySellingTiming:
                     risk_level=risk_level
                 )
             
-            # Rule 4: Current price is high and near peak threshold
-            if price_analysis.is_high_price:
-                near_peak_threshold = price_analysis.max_price * (self.near_peak_threshold_percent / 100)
-                if current_price >= near_peak_threshold:
-                    return TimingRecommendation(
-                        decision=TimingDecision.SELL_NOW,
-                        confidence=0.80,
-                        reasoning=f"Current price {current_price:.3f} PLN/kWh is high (top 25%, within {self.near_peak_threshold_percent}% of peak)",
-                        sell_time=datetime.now(),
-                        expected_price=current_price,
-                        opportunity_cost_pln=opportunity_cost if peak_info else 0.0,
-                        peak_info=peak_info,
-                        selling_windows=selling_windows,
-                        wait_hours=0.0,
-                        risk_level="low"
-                    )
-            
-            # Rule 5: Moderate opportunity - wait for peak
+            # Rule 7: Legacy moderate opportunity - wait for peak
             if peak_info and peak_info.price_increase_percent >= self.marginal_savings_percent:
                 return TimingRecommendation(
                     decision=TimingDecision.WAIT_FOR_HIGHER,
@@ -620,12 +714,12 @@ class BatterySellingTiming:
                     risk_level="medium" if peak_info.time_to_peak_hours <= self.max_wait_time_hours else "high"
                 )
             
-            # Rule 6: Price is not high enough - no good opportunity
-            if not price_analysis.is_high_price:
+            # Rule 8: Price below top 25% - no good opportunity (Phase 1 Enhanced)
+            if current_percentile_rank < (100 - self.conditional_sell_percentile):
                 return TimingRecommendation(
                     decision=TimingDecision.NO_OPPORTUNITY,
                     confidence=0.90,
-                    reasoning=f"Current price {current_price:.3f} PLN/kWh below high threshold (only {price_analysis.current_percentile:.1f}th percentile)",
+                    reasoning=f"Current price {current_price:.3f} PLN/kWh below top {self.conditional_sell_percentile}% threshold (percentile: {current_percentile_rank:.1f})",
                     sell_time=None,
                     expected_price=current_price,
                     opportunity_cost_pln=0.0,

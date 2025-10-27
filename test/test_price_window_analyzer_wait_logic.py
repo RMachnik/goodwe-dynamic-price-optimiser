@@ -1,7 +1,12 @@
+import sys
+from pathlib import Path
 from datetime import datetime, timedelta
 
-from src.price_window_analyzer import PriceWindowAnalyzer
-from src.pse_price_forecast_collector import PriceForecastPoint
+# Add src directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+
+from price_window_analyzer import PriceWindowAnalyzer
+from pse_price_forecast_collector import PriceForecastPoint
 
 
 def _analyzer():

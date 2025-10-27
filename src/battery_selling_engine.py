@@ -49,6 +49,14 @@ except ImportError:
     FORECAST_AVAILABLE = False
     logging.warning("PSE price forecast collector not available - timing features limited")
 
+# Import price spike detector (Phase 4)
+try:
+    from price_spike_detector import PriceSpikeDetector, SpikeLevel
+    SPIKE_DETECTOR_AVAILABLE = True
+except ImportError:
+    SPIKE_DETECTOR_AVAILABLE = False
+    logging.warning("Price spike detector not available - Phase 4 features disabled")
+
 # Import tariff pricing
 try:
     from tariff_pricing import TariffPricingCalculator, PriceComponents
@@ -111,13 +119,36 @@ class BatterySellingEngine:
         selling_config = config.get('battery_selling', {})
         
         # Conservative safety parameters (from project plan analysis)
-        self.min_selling_soc = selling_config.get('min_battery_soc', 80.0)  # 80% minimum SOC
+        self.min_selling_soc = selling_config.get('min_battery_soc', 80.0)  # 80% minimum SOC (default)
         self.safety_margin_soc = selling_config.get('safety_margin_soc', 50.0)  # 50% safety margin
         self.min_selling_price_pln = selling_config.get('min_selling_price_pln', 0.50)  # 0.50 PLN/kWh
         self.max_daily_cycles = selling_config.get('max_daily_cycles', 2)  # Max 2 cycles per day
         self.peak_hours = selling_config.get('peak_hours', [17, 18, 19, 20, 21])  # 5-9 PM
         self.grid_export_limit_w = selling_config.get('grid_export_limit_w', 5000)  # 5kW max export
         self.battery_dod_limit = selling_config.get('battery_dod_limit', 50)  # 50% max discharge
+        
+        # Phase 2: Dynamic SOC thresholds based on price magnitude
+        smart_timing_config = selling_config.get('smart_timing', {})
+        dynamic_soc_config = smart_timing_config.get('dynamic_soc_thresholds', {})
+        self.dynamic_soc_enabled = dynamic_soc_config.get('enabled', False)
+        self.super_premium_price_threshold = dynamic_soc_config.get('super_premium_price_threshold', 1.2)
+        self.super_premium_min_soc = dynamic_soc_config.get('super_premium_min_soc', 70)
+        self.premium_price_threshold = dynamic_soc_config.get('premium_price_threshold', 0.9)
+        self.premium_min_soc = dynamic_soc_config.get('premium_min_soc', 75)
+        self.high_price_threshold = dynamic_soc_config.get('high_price_threshold', 0.7)
+        self.high_min_soc = dynamic_soc_config.get('high_min_soc', 80)
+        self.require_peak_hours = dynamic_soc_config.get('require_peak_hours', True)
+        self.require_recharge_forecast = dynamic_soc_config.get('require_recharge_forecast', True)
+        
+        # Phase 3: Risk-adjusted safety margin
+        risk_margin_config = smart_timing_config.get('risk_adjusted_safety_margin', {})
+        self.risk_adjusted_margin_enabled = risk_margin_config.get('enabled', False)
+        self.conservative_margin_soc = risk_margin_config.get('conservative_margin', 55)  # High risk
+        self.moderate_margin_soc = risk_margin_config.get('moderate_margin', 50)  # Medium risk
+        self.aggressive_margin_soc = risk_margin_config.get('aggressive_margin', 48)  # Low risk
+        self.evening_hours_start = risk_margin_config.get('evening_hours_start', 18)
+        self.evening_hours_end = risk_margin_config.get('evening_hours_end', 22)
+        self.min_forecast_confidence_aggressive = risk_margin_config.get('min_forecast_confidence_aggressive', 0.8)
         
         # Battery specifications - read from config
         self.battery_capacity_kwh = config.get('battery_management', {}).get('capacity_kwh', 20.0)
@@ -157,14 +188,42 @@ class BatterySellingEngine:
             except Exception as e:
                 self.logger.warning(f"Failed to initialize tariff calculator: {e}")
         
+        # Phase 4: Price spike detector
+        self.spike_detector = None
+        if SPIKE_DETECTOR_AVAILABLE:
+            try:
+                self.spike_detector = PriceSpikeDetector(config)
+                self.logger.info("Price spike detector initialized (Phase 4)")
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize spike detector: {e}")
+        
+        # Phase 4: Negative price strategy
+        negative_price_config = smart_timing_config.get('negative_price_strategy', {})
+        self.negative_price_enabled = negative_price_config.get('enabled', False)
+        self.negative_price_threshold = negative_price_config.get('negative_price_threshold', 0.05)
+        self.spike_sell_min_soc = negative_price_config.get('spike_sell_min_soc', 60)
+        self.allow_sell_below_min_soc = negative_price_config.get('allow_sell_below_min_soc', True)
+        
+        # Phase 4: Kompas integration
+        kompas_config = smart_timing_config.get('kompas_integration', {})
+        self.kompas_enabled = kompas_config.get('enabled', False)
+        self.s4_extreme_sell = kompas_config.get('s4_extreme_sell', True)
+        self.s4_min_soc = kompas_config.get('s4_min_soc', 60)
+        self.s4_ignore_forecast = kompas_config.get('s4_ignore_forecast', True)
+        
         self.logger.info(f"Battery Selling Engine initialized with conservative parameters:")
-        self.logger.info(f"  - Min selling SOC: {self.min_selling_soc}%")
+        self.logger.info(f"  - Min selling SOC: {self.min_selling_soc}% (default)")
         self.logger.info(f"  - Safety margin SOC: {self.safety_margin_soc}%")
         self.logger.info(f"  - Min selling price: {self.min_selling_price_pln} PLN/kWh")
         self.logger.info(f"  - Usable energy per cycle: {self.usable_energy_per_cycle:.2f} kWh")
         self.logger.info(f"  - Net sellable energy: {self.net_sellable_energy:.2f} kWh")
         self.logger.info(f"  - Smart timing: {'Enabled' if self.timing_engine else 'Disabled'}")
         self.logger.info(f"  - Tariff pricing: {'Enabled' if self.tariff_calculator else 'SC-only'}")
+        self.logger.info(f"  - Phase 2 Dynamic SOC: {'Enabled' if self.dynamic_soc_enabled else 'Disabled'}")
+        if self.dynamic_soc_enabled:
+            self.logger.info(f"    * Super premium (>{self.super_premium_price_threshold} PLN/kWh): {self.super_premium_min_soc}% SOC")
+            self.logger.info(f"    * Premium ({self.premium_price_threshold}-{self.super_premium_price_threshold} PLN/kWh): {self.premium_min_soc}% SOC")
+            self.logger.info(f"    * High (>{self.high_price_threshold} PLN/kWh): {self.high_min_soc}% SOC")
     
     def _reset_daily_cycles(self):
         """Reset daily cycle counter if new day"""
@@ -184,23 +243,174 @@ class BatterySellingEngine:
         current_hour = datetime.now().hour
         return current_hour in [22, 23, 0, 1, 2, 3, 4, 5]  # 10 PM to 6 AM
     
+    def _get_dynamic_min_soc(self, current_price: float, price_forecast: Optional[List[Dict[str, Any]]] = None) -> float:
+        """
+        Phase 2: Calculate dynamic minimum SOC based on price magnitude
+        
+        Args:
+            current_price: Current electricity price (PLN/kWh)
+            price_forecast: Optional price forecast for recharge opportunity check
+            
+        Returns:
+            Minimum SOC threshold for current price level
+        """
+        if not self.dynamic_soc_enabled:
+            return self.min_selling_soc  # Return default 80%
+        
+        # Safety check: Only allow lower SOC during peak hours if configured
+        if self.require_peak_hours and not self._is_peak_hour():
+            return self.min_selling_soc  # Use default 80% outside peak hours
+        
+        # Check for recharge opportunity in forecast if required
+        if self.require_recharge_forecast:
+            if not price_forecast:
+                # No forecast available, can't verify recharge opportunity
+                return self.min_selling_soc  # Use default 80% - conservative
+            
+            has_recharge_opportunity = self._check_recharge_opportunity(price_forecast, current_price)
+            if not has_recharge_opportunity:
+                return self.min_selling_soc  # Use default 80% if no recharge opportunity
+        
+        # Dynamic SOC thresholds based on price magnitude
+        if current_price >= self.super_premium_price_threshold:
+            # Super premium prices (>1.2 PLN/kWh) - allow selling from 70%
+            self.logger.info(f"Super premium price {current_price:.3f} PLN/kWh detected - min SOC: {self.super_premium_min_soc}%")
+            return self.super_premium_min_soc
+        elif current_price >= self.premium_price_threshold:
+            # Premium prices (0.9-1.2 PLN/kWh) - allow selling from 75%
+            self.logger.info(f"Premium price {current_price:.3f} PLN/kWh detected - min SOC: {self.premium_min_soc}%")
+            return self.premium_min_soc
+        elif current_price >= self.high_price_threshold:
+            # High prices (0.7-0.9 PLN/kWh) - standard 80%
+            return self.high_min_soc
+        else:
+            # Normal prices - standard 80%
+            return self.min_selling_soc
+    
+    def _get_risk_adjusted_safety_margin(self, forecast_confidence: float = 0.7) -> float:
+        """
+        Calculate risk-adjusted safety margin based on multiple factors
+        
+        Phase 3 Feature: Adjusts safety margin (48-50-55%) based on:
+        - Forecast confidence (higher confidence = lower margin)
+        - Time of day (evening hours = higher margin for house usage)
+        - Historical selling success
+        
+        Args:
+            forecast_confidence: Confidence in price forecast (0-1)
+            
+        Returns:
+            Safety margin SOC percentage (48-55%)
+        """
+        if not self.risk_adjusted_margin_enabled:
+            return self.safety_margin_soc  # Default 50%
+        
+        # Factor 1: Time of day
+        current_hour = datetime.now().hour
+        is_evening = self.evening_hours_start <= current_hour <= self.evening_hours_end
+        
+        # Factor 2: Forecast confidence
+        high_confidence = forecast_confidence >= self.min_forecast_confidence_aggressive
+        
+        # Decision matrix for safety margin
+        if is_evening:
+            # Conservative during evening (preserve for house usage)
+            margin = self.conservative_margin_soc  # 55%
+            reason = "evening hours"
+        elif high_confidence:
+            # Aggressive with high confidence
+            margin = self.aggressive_margin_soc  # 48%
+            reason = "high forecast confidence"
+        else:
+            # Moderate in other cases
+            margin = self.moderate_margin_soc  # 50%
+            reason = "moderate conditions"
+        
+        if margin != self.safety_margin_soc:
+            self.logger.info(f"Risk-adjusted safety margin: {margin}% ({reason}, confidence: {forecast_confidence:.2f})")
+        
+        return margin
+    
+    def _check_recharge_opportunity(self, price_forecast: List[Dict[str, Any]], current_price: float) -> bool:
+        """
+        Check if there's a recharge opportunity (lower price) in the forecast
+        
+        Args:
+            price_forecast: List of forecast price points
+            current_price: Current price to compare against
+            
+        Returns:
+            True if there's a lower price period within 12h for recharging
+        """
+        try:
+            if not price_forecast:
+                return False
+                
+            current_time = datetime.now()
+            recharge_window_end = current_time + timedelta(hours=12)
+            
+            # Look for prices significantly lower than current (at least 30% lower for recharge)
+            recharge_price_threshold = current_price * 0.7
+            
+            for forecast_point in price_forecast:
+                if not isinstance(forecast_point, dict):
+                    continue
+                    
+                point_time = forecast_point.get('time')
+                if isinstance(point_time, str):
+                    try:
+                        point_time = datetime.fromisoformat(point_time.replace('Z', '+00:00'))
+                    except (ValueError, AttributeError):
+                        continue
+                
+                # Skip if no valid time or beyond window
+                if not point_time:
+                    continue
+                    
+                # Only check time comparison if point_time is a datetime object
+                try:
+                    if point_time > recharge_window_end:
+                        continue
+                except TypeError:
+                    # Skip if comparison fails
+                    continue
+                
+                price = forecast_point.get('price', forecast_point.get('forecasted_price_pln', 0))
+                if price > 0 and price <= recharge_price_threshold:
+                    self.logger.info(f"Recharge opportunity found: {price:.3f} PLN/kWh (threshold: {recharge_price_threshold:.3f})")
+                    return True
+            
+            self.logger.info("No recharge opportunity found in 12h forecast")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error checking recharge opportunity: {e}")
+            return False  # Conservative: no recharge opportunity if error
+    
     def _calculate_expected_revenue(self, current_price_pln: float, selling_duration_hours: float) -> float:
         """Calculate expected revenue from selling session"""
         selling_power_kw = self.grid_export_limit_w / 1000
         energy_sold_kwh = selling_power_kw * selling_duration_hours * self.discharge_efficiency
         return energy_sold_kwh * current_price_pln
     
-    def _check_safety_conditions(self, current_data: Dict[str, Any]) -> Tuple[bool, str]:
-        """Check if it's safe to start/continue selling"""
+    def _check_safety_conditions(self, current_data: Dict[str, Any], forecast_confidence: float = 0.7) -> Tuple[bool, str]:
+        """
+        Check if it's safe to start/continue selling
+        
+        Phase 3: Now uses risk-adjusted safety margin if enabled
+        """
         try:
             # Extract current system data
             battery_soc = current_data.get('battery', {}).get('soc_percent', 0)
             battery_temp = current_data.get('battery', {}).get('temperature', 0)
             grid_voltage = current_data.get('grid', {}).get('voltage', 0)
             
+            # Phase 3: Get risk-adjusted safety margin if enabled
+            effective_safety_margin = self._get_risk_adjusted_safety_margin(forecast_confidence)
+            
             # Safety check 1: Battery SOC above safety margin
-            if battery_soc <= self.safety_margin_soc:
-                return False, f"Battery SOC {battery_soc}% below safety margin {self.safety_margin_soc}%"
+            if battery_soc <= effective_safety_margin:
+                return False, f"Battery SOC {battery_soc}% below safety margin {effective_safety_margin}%"
             
             # Safety check 2: Battery temperature within limits
             if battery_temp > 50:  # GoodWe Lynx-D max operating temp
@@ -229,8 +439,9 @@ class BatterySellingEngine:
             self.logger.error(f"Error checking safety conditions: {e}")
             return False, f"Safety check error: {e}"
     
-    def _analyze_selling_opportunity(self, current_data: Dict[str, Any], price_data: Dict[str, Any]) -> SellingOpportunity:
-        """Analyze if there's a good opportunity to sell battery energy"""
+    def _analyze_selling_opportunity(self, current_data: Dict[str, Any], price_data: Dict[str, Any], 
+                                     price_forecast: Optional[List[Dict[str, Any]]] = None) -> SellingOpportunity:
+        """Analyze if there's a good opportunity to sell battery energy (Phase 2: with dynamic SOC)"""
         try:
             # Extract current system data
             battery_soc = current_data.get('battery', {}).get('soc_percent', 0)
@@ -252,15 +463,18 @@ class BatterySellingEngine:
                     risk_level="high"
                 )
             
-            # Check minimum SOC requirement
-            if battery_soc < self.min_selling_soc:
+            # Phase 2: Get dynamic minimum SOC based on price magnitude
+            min_soc_required = self._get_dynamic_min_soc(current_price_pln, price_forecast)
+            
+            # Check minimum SOC requirement (now dynamic)
+            if battery_soc < min_soc_required:
                 return SellingOpportunity(
                     decision=SellingDecision.WAIT,
                     confidence=0.0,
                     expected_revenue_pln=0.0,
                     selling_power_w=0,
                     estimated_duration_hours=0.0,
-                    reasoning=f"Battery SOC {battery_soc}% below minimum selling threshold {self.min_selling_soc}%",
+                    reasoning=f"Battery SOC {battery_soc}% below dynamic minimum threshold {min_soc_required}% (price: {current_price_pln:.3f} PLN/kWh)",
                     safety_checks_passed=True,
                     risk_level="low"
                 )
@@ -398,9 +612,12 @@ class BatterySellingEngine:
             return "high"
     
     async def analyze_selling_opportunity(self, current_data: Dict[str, Any], price_data: Dict[str, Any]) -> SellingOpportunity:
-        """Main method to analyze selling opportunity with smart timing"""
-        # Run basic analysis
-        basic_opportunity = self._analyze_selling_opportunity(current_data, price_data)
+        """Main method to analyze selling opportunity with smart timing (Phase 2: with dynamic SOC)"""
+        # Phase 2: Get price forecast for dynamic SOC calculation
+        price_forecast = await self._get_price_forecast()
+        
+        # Run basic analysis with forecast for dynamic SOC
+        basic_opportunity = self._analyze_selling_opportunity(current_data, price_data, price_forecast)
         
         # If timing engine not available or basic analysis says WAIT, return immediately
         if not self.timing_engine or basic_opportunity.decision == SellingDecision.WAIT:
