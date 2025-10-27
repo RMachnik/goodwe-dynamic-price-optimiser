@@ -1,6 +1,6 @@
 # GoodWe Dynamic Price Optimiser
 
-A comprehensive, intelligent energy management system that optimizes battery charging based on electricity prices, photovoltaic production, house consumption, and battery state for GoodWe inverters.
+A comprehensive, intelligent energy management system that optimizes battery charging based on electricity prices, photovoltaic production, house consumption, and battery state. **Now with support for multiple inverter brands through vendor-agnostic abstraction layer!**
 
 ## 🚀 **Project Overview**
 
@@ -22,6 +22,40 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 
 **For detailed implementation strategy, technical specifications, and current progress, see the [Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md).**
 
+## 🔌 **Supported Inverters**
+
+### Currently Supported
+- **GoodWe**: ET, ES, DT families (all models) ✅
+  - Full feature support: charging, discharging, data collection, operation modes
+  - Tested with GoodWe ET series inverters
+  - Uses [goodwe](https://pypi.org/project/goodwe/) Python library
+
+### Coming Soon
+- **Fronius**: Symo, Primo, Gen24 series 🔜
+- **SMA**: Sunny Boy, Sunny Tripower series 🔜
+- **Huawei**: SUN2000 series 🔜
+- **Solax**: X1, X3 series 🔜
+
+**Want to add support for your inverter?** See [Adding New Inverter Guide](docs/ADDING_NEW_INVERTER.md)
+
+## 🏗️ **Architecture**
+
+The system uses **Port and Adapter Pattern** (Hexagonal Architecture) to separate business logic from hardware integration:
+
+```
+Energy Algorithm → InverterPort Interface → Vendor Adapter → Inverter Hardware
+```
+
+This architecture enables:
+- ✅ Support for multiple inverter brands
+- ✅ Easy testing with mock adapters
+- ✅ Clean separation of concerns
+- ✅ Vendor-independent optimization algorithm
+
+See [Inverter Abstraction Documentation](docs/INVERTER_ABSTRACTION.md) for details.
+
+**For detailed implementation strategy, technical specifications, and current progress, see the [Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md).**
+
 ## 📊 **Historic Data Storage**
 
 The system currently uses file-based JSON storage with in-memory data limited to 24 hours. For advanced analytics and long-term data retention, comprehensive plans are available:
@@ -37,6 +71,16 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - **Advanced Analytics**: Complex data analysis and trend reporting
 
 ## 🆕 **Latest Updates (October 2025)**
+
+### **Multi-Inverter Support via Abstraction Layer** 🎉
+- **Vendor-Agnostic Architecture**: Port and Adapter pattern (hexagonal architecture) enables support for multiple inverter brands
+- **Currently Supported**: GoodWe (ET, ES, DT families) with full backward compatibility
+- **Easy Extension**: Simple framework to add Fronius, SMA, Huawei, and other inverter brands
+- **Flexible Configuration**: Specify inverter vendor in configuration file
+- **Comprehensive Testing**: 22 new tests for abstraction layer, all passing ✅
+- **Zero Regression**: All 473 existing tests still passing, no breaking changes
+- **See [Inverter Abstraction Documentation](docs/INVERTER_ABSTRACTION.md) for architecture details**
+- **See [Adding New Inverter Guide](docs/ADDING_NEW_INVERTER.md) for extending to other brands**
 
 ### **SOC Display and Blocking Reason Enhancement**
 - **Prominent SOC Display**: Battery State of Charge now shown prominently for all charging decisions

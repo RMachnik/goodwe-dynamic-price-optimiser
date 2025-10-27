@@ -4,6 +4,7 @@
 
 # Inverter Configuration
 inverter:
+  vendor: "goodwe"  # Inverter vendor: goodwe, fronius, sma, huawei, etc.
   ip_address: "192.168.33.6"  # Your inverter IP
   port: 8899
   timeout: 1
