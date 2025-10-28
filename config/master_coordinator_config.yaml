@@ -657,7 +657,7 @@ battery_selling:
 # PSE Price Forecast Configuration
 pse_price_forecast:
   enabled: true                              # Enable price forecasts
-  api_url: "https://api.raporty.pse.pl/api/price-fcst"
+  api_url: "https://api.raporty.pse.pl/api/energy-prices"  # CSDAC day-ahead prices
   update_interval_minutes: 60                # Update every 60 minutes
   forecast_hours_ahead: 24                   # Forecast 24 hours ahead
   confidence_threshold: 0.7                  # Minimum confidence to use forecasts
