@@ -304,24 +304,85 @@ Red Status + High Market:
 3. ✓ Monitor actual electricity bills
 4. ✓ Compare with https://www.gadek.pl/api for validation
 
+### G13s - Seasonal Three-Zone Tariff (NEW!)
+
+**Type**: Seasonal & day-type-aware time-based  
+**Best For**: Users wanting optimal pricing across all seasons
+
+**⚠️ REQUIRES**: Polish holiday detection for free day pricing
+
+**Seasonal Structure**:
+- **Summer**: April 1 - September 30
+- **Winter**: October 1 - March 31
+
+**Distribution Prices (Working Days)**:
+
+| Time Period | Summer | Winter | Hours |
+|------------|--------|---------|-------|
+| **Morning Peak** | 0.290 PLN/kWh | 0.340 PLN/kWh | Summer: 7-9h, Winter: 7-10h |
+| **Day Off-Peak** | 0.100 PLN/kWh | 0.200 PLN/kWh | Summer: 9-17h, Winter: 10-15h |
+| **Evening Peak** | 0.290 PLN/kWh | 0.340 PLN/kWh | Summer: 17-21h, Winter: 15-21h |
+| **Night** | 0.110 PLN/kWh | 0.110 PLN/kWh | Both: 21-7h |
+
+**Free Days (Weekends & Holidays)**: All hours use **0.110 PLN/kWh**
+
+**Configuration**:
+```yaml
+electricity_tariff:
+  tariff_type: "g13s"
+  sc_component_pln_kwh: 0.0892
+```
+
+**Example Pricing**:
+```
+Summer Working Day Morning Peak (8:00):
+  Market: 0.30 PLN/kWh
+  SC: 0.0892 PLN/kWh
+  Distribution: 0.290 PLN/kWh (morning peak)
+  Final: 0.6792 PLN/kWh
+
+Summer Working Day Off-Peak (12:00):
+  Market: 0.30 PLN/kWh
+  SC: 0.0892 PLN/kWh
+  Distribution: 0.100 PLN/kWh (day off-peak)
+  Final: 0.4892 PLN/kWh ✓ CHEAP
+
+Winter Working Day Evening Peak (18:00):
+  Market: 0.60 PLN/kWh
+  SC: 0.0892 PLN/kWh
+  Distribution: 0.340 PLN/kWh (evening peak)
+  Final: 1.0292 PLN/kWh ✗ EXPENSIVE
+
+Weekend (any hour):
+  Market: 0.25 PLN/kWh
+  SC: 0.0892 PLN/kWh
+  Distribution: 0.110 PLN/kWh (free day)
+  Final: 0.4492 PLN/kWh ✓ VERY CHEAP
+```
+
+**Benefits**:
+- Lowest off-peak prices in summer (0.100 PLN/kWh)
+- Predictable night pricing year-round (0.110 PLN/kWh)
+- Weekend/holiday flat pricing simplifies planning
+- Seasonal awareness optimizes charging strategies
+
+**Best Charging Times**:
+- **Summer**: Night (21-7h), Day off-peak (9-17h), weekends
+- **Winter**: Night (21-7h), weekends
+- **Avoid**: Morning/evening peaks (especially winter)
+
+---
+
 ## Adding New Tariffs
 
-To add support for a new tariff (e.g., G13):
+To add support for a new tariff:
 
 1. **Add Configuration** (`config/master_coordinator_config.yaml`):
 ```yaml
 distribution_pricing:
-  g13:
-    type: "time_based"  # or "static" or "kompas_based"
-    peak_hours:
-      morning_start: 7
-      morning_end: 13
-      evening_start: 16
-      evening_end: 21
-    prices:
-      morning_peak: 0.40
-      evening_peak: 0.45
-      off_peak: 0.08
+  your_tariff:
+    type: "time_based"  # or "static", "kompas_based", "seasonal_time_based"
+    # ... tariff-specific configuration
 ```
 
 2. **Extend Tariff Calculator** (if needed):
@@ -329,7 +390,7 @@ distribution_pricing:
    - Add new tariff type handler
 
 3. **Add Tests**:
-   - Create tests in `test/test_tariff_pricing.py`
+   - Create tests in `test/test_tariff_pricing_*.py`
    - Validate pricing calculations
 
 4. **Update Documentation**:
@@ -341,18 +402,23 @@ distribution_pricing:
 ### "G14dynamic requires PSE Peak Hours"
 **Solution**: Enable PSE Peak Hours in configuration
 
+### G13s showing unexpected prices on holidays
+**Explanation**: G13s automatically detects Polish holidays and applies 0.110 PLN/kWh flat pricing. Check system logs to see if the date is recognized as a holiday. All weekends and official Polish holidays use this pricing.
+
 ### Prices seem incorrect
 **Solution**: 
 1. Check tariff_type setting
 2. Verify distribution_pricing configuration
-3. Compare with https://www.gadek.pl/api
-4. Check system logs
+3. For G13s, verify the season (summer/winter) and day type (working/free)
+4. Compare with https://www.gadek.pl/api
+5. Check system logs for detailed pricing breakdown
 
 ### System not charging at expected times
 **Solution**:
 1. Verify final prices in logs
-2. Check if distribution price is correct
-3. Ensure Kompas data is being received (G14dynamic)
+2. Check if distribution price is correct for the time zone
+3. For G13s, verify season and day type detection
+4. Ensure Kompas data is being received (G14dynamic)
 
 ## References
 
