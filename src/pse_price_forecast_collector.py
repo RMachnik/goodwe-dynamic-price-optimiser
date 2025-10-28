@@ -37,7 +37,9 @@ class PSEPriceForecastCollector:
         forecast_config = config.get('pse_price_forecast', {})
         
         self.enabled = forecast_config.get('enabled', True)
-        self.api_url = forecast_config.get('api_url', 'https://api.raporty.pse.pl/api/price-fcst')
+        # Use energy-prices endpoint which includes CSDAC day-ahead forecasts
+        # The price-fcst endpoint only has near-real-time historical data
+        self.api_url = forecast_config.get('api_url', 'https://api.raporty.pse.pl/api/energy-prices')
         self.update_interval_minutes = forecast_config.get('update_interval_minutes', 60)
         self.forecast_hours_ahead = forecast_config.get('forecast_hours_ahead', 24)
         self.confidence_threshold = forecast_config.get('confidence_threshold', 0.7)
@@ -89,11 +91,31 @@ class PSEPriceForecastCollector:
             try:
                 logger.info(f"Fetching price forecast from PSE API (attempt {attempt + 1}/{self.retry_attempts})")
                 
+                # Build API URL with date filter to get current/future data
+                # PSE API defaults to old data without filtering
+                # Request data from today onwards to cover current and next days
+                today = datetime.now().strftime('%Y-%m-%d')
+                
+                # Simple filter - API doesn't support $top with $filter
+                api_url_with_filter = f"{self.api_url}?$filter=business_date ge '{today}'"
+                
+                logger.debug(f"API URL: {api_url_with_filter}")
+                
                 # Fetch data from API
-                response = requests.get(self.api_url, timeout=30)
+                response = requests.get(api_url_with_filter, timeout=30)
                 response.raise_for_status()
                 
                 data = response.json()
+                
+                # Log diagnostic info about received data
+                raw_count = len(data.get('value', []))
+                if raw_count > 0:
+                    first_date = data['value'][0].get('dtime', 'unknown')
+                    last_date = data['value'][-1].get('dtime', 'unknown')
+                    logger.debug(f"Received {raw_count} raw records from API (dates: {first_date} to {last_date})")
+                else:
+                    logger.warning("API returned empty data set")
+                
                 forecast_points = self._parse_forecast_data(data, hours_ahead)
                 
                 if forecast_points:
@@ -106,7 +128,10 @@ class PSEPriceForecastCollector:
                     logger.info(f"Successfully fetched {len(forecast_points)} forecast points")
                     return forecast_points
                 else:
-                    logger.warning("No forecast data received from API")
+                    if raw_count > 0:
+                        logger.warning(f"API returned {raw_count} records but none were future forecasts within {hours_ahead}h window")
+                    else:
+                        logger.warning("No forecast data received from API (empty response)")
                     
             except requests.exceptions.RequestException as e:
                 logger.error(f"Failed to fetch forecast data (attempt {attempt + 1}): {e}")
@@ -146,12 +171,21 @@ class PSEPriceForecastCollector:
         current_time = datetime.now()
         cutoff_time = current_time + timedelta(hours=hours_ahead)
         
+        # Statistics for logging
+        total_records = 0
+        past_records = 0
+        beyond_window_records = 0
+        parse_errors = 0
+        
         try:
             # PSE API returns data in 'value' field
             for item in data.get('value', []):
+                total_records += 1
+                
                 # Parse timestamp (format: "2024-06-14 00:15:00")
                 time_str = item.get('dtime')
                 if not time_str:
+                    parse_errors += 1
                     continue
                 
                 # Handle different timestamp formats
@@ -163,28 +197,41 @@ class PSEPriceForecastCollector:
                         # Format: "2025-10-14 14:00"
                         dt = datetime.strptime(time_str, '%Y-%m-%d %H:%M')
                 except ValueError as e:
-                    logger.error(f"Error parsing forecast data: {e}")
+                    logger.error(f"Error parsing timestamp '{time_str}': {e}")
+                    parse_errors += 1
                     continue
                 
-                # Only include future forecasts within the time window
-                if dt <= current_time or dt > cutoff_time:
+                # Only include forecasts within the time window
+                # Allow a small lookback (30 minutes) to account for publication delays
+                # PSE publishes forecasts with a delay, so recent past forecasts are still useful
+                lookback_minutes = 30
+                earliest_time = current_time - timedelta(minutes=lookback_minutes)
+                
+                if dt < earliest_time:
+                    past_records += 1
+                    continue
+                if dt > cutoff_time:
+                    beyond_window_records += 1
                     continue
                 
-                # Extract forecasted price (CEN - Cena Energii Netto)
-                # Note: PSE price-fcst API provides CEN (net energy price)
-                forecasted_price = item.get('cen_fcst')
+                # Extract forecasted price
+                # For energy-prices endpoint, try CSDAC first (day-ahead price), then CEN
+                forecasted_price = item.get('csdac_pln') or item.get('cen_cost')
                 if forecasted_price is None:
                     continue
                 
                 forecasted_price = float(forecasted_price)
                 period = item.get('period', '')
                 
+                # Determine forecast type based on available data
+                forecast_type = 'day_ahead' if item.get('csdac_pln') is not None else 'intraday'
+                
                 # Create forecast point
                 forecast_point = PriceForecastPoint(
                     time=dt,
                     forecasted_price_pln=forecasted_price,
                     confidence=1.0,  # PSE forecasts are considered high confidence
-                    forecast_type='intraday',
+                    forecast_type=forecast_type,
                     period=period
                 )
                 
@@ -193,7 +240,10 @@ class PSEPriceForecastCollector:
             # Sort by time
             forecast_points.sort(key=lambda x: x.time)
             
-            logger.debug(f"Parsed {len(forecast_points)} forecast points")
+            # Log parsing statistics
+            logger.info(f"Parsed {len(forecast_points)} usable forecast points from {total_records} total records")
+            if past_records > 0 or beyond_window_records > 0 or parse_errors > 0:
+                logger.debug(f"Filtering stats: {past_records} past, {beyond_window_records} beyond {hours_ahead}h window, {parse_errors} parse errors")
             
         except Exception as e:
             logger.error(f"Error parsing forecast data: {e}")
