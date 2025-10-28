@@ -10,7 +10,7 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **✅ RELIABLE**: Automates charging decisions using validated CSDAC-PLN API (100% uptime)
 - **✅ SMART**: Implements intelligent charging strategy with weather-aware PV forecasting and consumption analysis (1500W PV overproduction threshold)
 - **✅ INTELLIGENT**: Considers consumption patterns and price optimization opportunities
-- **✅ INTEGRATED**: Polish electricity pricing with SC component and G12 distribution tariff
+- **✅ INTEGRATED**: Polish electricity pricing with SC component and G13s seasonal distribution tariff (supports G11, G12, G12as, G12w, G13s, G14dynamic)
 - **✅ WEATHER-ENHANCED**: Real-time weather data from IMGW + Open-Meteo for accurate PV forecasting
 - **✅ NIGHT CHARGING**: Smart night charging for high price day preparation with battery discharge optimization
 - **✅ MULTI-SESSION**: Multiple daily charging sessions for maximum cost optimization
@@ -71,6 +71,16 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - **Advanced Analytics**: Complex data analysis and trend reporting
 
 ## 🆕 **Latest Updates (October 2025)**
+
+### **G13s Seasonal Tariff Implementation** 🎉
+- **Default Tariff**: G13s now the default with full seasonal awareness
+- **Polish Holiday Detection**: Automatic detection of all Polish public holidays (fixed and movable)
+- **Day-Type Awareness**: Weekends and holidays use flat 0.110 PLN/kWh rate
+- **Seasonal Pricing**: Different time zones for summer (Apr-Sep) and winter (Oct-Mar)
+- **Optimal Rates**: Summer day off-peak as low as 0.100 PLN/kWh
+- **19 New Tests**: All passing, comprehensive coverage of all scenarios
+- **Zero Breaking Changes**: All existing tariffs (G11, G12, G12as, G12w, G14dynamic) still work
+- **See [G13s Implementation Summary](docs/G13S_IMPLEMENTATION_SUMMARY.md) for complete details**
 
 ### **Multi-Inverter Support via Abstraction Layer** 🎉
 - **Vendor-Agnostic Architecture**: Port and Adapter pattern (hexagonal architecture) enables support for multiple inverter brands

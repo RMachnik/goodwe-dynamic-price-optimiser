@@ -24,7 +24,7 @@ charging:
 
 # Electricity Tariff Configuration
 electricity_tariff:
-  tariff_type: "g12"  # Options: g11, g12, g12as, g12w, g13, g14dynamic
+  tariff_type: "g13s"  # Options: g11, g12, g12as, g12w, g13, g13s, g14dynamic
   
   # SC Component (Składnik cenotwórczy) - same for all tariffs
   sc_component_pln_kwh: 0.0892
@@ -82,6 +82,66 @@ electricity_tariff:
       type: "static"
       price: 0.0  # Requires more complex implementation
       note: "G13 has three zones - morning peak, day, night - needs detailed implementation"
+    
+    # G13s - Seasonal three-zone tariff with day-type awareness
+    g13s:
+      type: "seasonal_time_based"
+      requires_pse_forecast: true
+      
+      seasons:
+        summer:
+          start_month: 4  # April
+          start_day: 1
+          end_month: 9    # September
+          end_day: 30
+          time_zones:
+            # Day peak has TWO separate periods
+            day_peak_morning:
+              start: 7
+              end: 9
+            day_off_peak:
+              start: 9
+              end: 17
+            day_peak_evening:
+              start: 17
+              end: 21
+            night:
+              start: 21
+              end: 7  # wraps to next day
+        winter:
+          start_month: 10  # October
+          start_day: 1
+          end_month: 3     # March
+          end_day: 31
+          time_zones:
+            # Day peak has TWO separate periods
+            day_peak_morning:
+              start: 7
+              end: 10
+            day_off_peak:
+              start: 10
+              end: 15
+            day_peak_evening:
+              start: 15
+              end: 21
+            night:
+              start: 21
+              end: 7  # wraps to next day
+      
+      prices:
+        working_days:
+          summer:
+            day_peak: 0.290      # 7-9h and 17-21h
+            day_off_peak: 0.100  # 9-17h
+            night: 0.110         # 21-7h
+          winter:
+            day_peak: 0.340      # 7-10h and 15-21h
+            day_off_peak: 0.200  # 10-15h
+            night: 0.110         # 21-7h
+        free_days:
+          all_hours: 0.110  # Weekends & holidays
+      
+      note: "G13s requires Polish holiday detection - weekends and holidays use flat 0.110 PLN/kWh"
 
 # Fast Charging Configuration (merged from fast_charge_config.yaml)
 fast_charging:
