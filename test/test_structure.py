@@ -30,7 +30,6 @@ def test_project_structure():
         required_files = [
             'src/enhanced_data_collector.py',
             'src/fast_charge.py',
-            'src/polish_electricity_analyzer.py',
             'src/automated_price_charging.py',
             'config/master_coordinator_config.yaml',
             'test/inverter_test.py',

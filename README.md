@@ -72,6 +72,13 @@ The system currently uses file-based JSON storage with in-memory data limited to
 
 ## 🆕 **Latest Updates (October 2025)**
 
+### **Codebase Cleanup** 🧹
+- **Removed Unused Files**: Cleaned up `src/` directory by removing unused modules
+- **Removed**: `battery_selling_scheduler.py` (never integrated), `battery_selling_analytics.py` (test-only), `polish_electricity_analyzer.py` (superseded by tariff_pricing.py)
+- **Cleaned Database Directory**: Removed empty `src/database/` directory
+- **Updated Tests**: All tests passing (20 battery selling, 19 G13s, 2 structure tests)
+- **Updated Documentation**: Removed outdated references from README and test files
+
 ### **G13s Seasonal Tariff Implementation** 🎉
 - **Default Tariff**: G13s now the default with full seasonal awareness
 - **Polish Holiday Detection**: Automatic detection of all Polish public holidays (fixed and movable)
@@ -312,8 +319,7 @@ goodwe-dynamic-price-optimiser/
 │   ├── master_coordinator.py              # 🎯 Master Coordinator (Main Service)
 │   ├── enhanced_data_collector.py         # Enhanced data collection system
 │   ├── fast_charge.py                     # Core inverter control library
-│   ├── sell_battery_now.py                # 🔋 Manual battery selling script
-│   ├── polish_electricity_analyzer.py     # Core price analysis library
+│   ├── tariff_pricing.py                  # Tariff-aware price calculation
 │   └── automated_price_charging.py        # Core automated charging application
 ├── config/                                 # Configuration files
 │   └── master_coordinator_config.yaml     # 🎯 Master Coordinator Configuration
@@ -651,8 +657,8 @@ python test/inverter_test.py
 # Test data collection
 python src/enhanced_data_collector.py --single
 
-# Test price analysis
-python src/polish_electricity_analyzer.py --date $(date +%Y-%m-%d)
+# Test master coordinator
+python src/master_coordinator.py
 
 # Test fast charging
 python src/fast_charge.py --status
