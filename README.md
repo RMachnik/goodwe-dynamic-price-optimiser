@@ -677,9 +677,11 @@ Edit `config/master_coordinator_config.yaml`:
 
 ```yaml
 electricity_tariff:
-  tariff_type: "g12w"  # Options: g11, g12, g12as, g12w, g13, g14dynamic
+  tariff_type: "g12"  # Options: g11, g12, g12as, g12w, g13, g14dynamic
   sc_component_pln_kwh: 0.0892
 ```
+
+Tip: For simple two-zone distribution with dynamic energy price (CSDAC), choose `g12`. See detailed tariff notes in `docs/TARIFF_CONFIGURATION.md`.
 
 #### **G14dynamic Special Requirements:**
 
