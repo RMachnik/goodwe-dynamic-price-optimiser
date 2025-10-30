@@ -669,8 +669,3 @@ Zalecenie: Instalacja SZR dla pełnego zabezpieczenia domu
 **Wersja:** 1.0  
 **Status:** Gotowe do użycia
 
-
-
-
-
-

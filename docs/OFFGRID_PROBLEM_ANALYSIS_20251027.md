@@ -328,8 +328,3 @@ crontab -e
 **Autor:** AI Assistant + GoodWe Dynamic Price Optimiser System  
 **Wersja:** 1.0
 
-
-
-
-
-

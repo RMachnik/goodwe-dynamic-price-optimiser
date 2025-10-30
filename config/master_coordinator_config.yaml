@@ -24,7 +24,7 @@ charging:
 
 # Electricity Tariff Configuration
 electricity_tariff:
-  tariff_type: "g13s"  # Options: g11, g12, g12as, g12w, g13, g13s, g14dynamic
+  tariff_type: "g12"  # Options: g11, g12, g12as, g12w, g13, g13s, g14dynamic
   
   # SC Component (Składnik cenotwórczy) - same for all tariffs
   sc_component_pln_kwh: 0.0892
