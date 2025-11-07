@@ -190,6 +190,30 @@ class EnhancedDataCollector:
                 }
             }
             
+            # Add compatibility aliases for backward compatibility
+            # Map 'system' to 'inverter' for battery_selling_monitor
+            if 'system' in comprehensive_data:
+                comprehensive_data['inverter'] = comprehensive_data['system'].copy()
+                # Initialize error_codes list if not present
+                if 'error_codes' not in comprehensive_data['inverter']:
+                    comprehensive_data['inverter']['error_codes'] = []
+            
+            # Map 'photovoltaic' to 'pv' for backward compatibility
+            if 'photovoltaic' in comprehensive_data and 'pv' not in comprehensive_data:
+                comprehensive_data['pv'] = {
+                    'power': comprehensive_data['photovoltaic'].get('current_power_w', 0),
+                    'power_w': comprehensive_data['photovoltaic'].get('current_power_w', 0),
+                    'total_power': comprehensive_data['photovoltaic'].get('current_power_w', 0)
+                }
+            
+            # Map 'house_consumption' to 'consumption' for backward compatibility
+            if 'house_consumption' in comprehensive_data and 'consumption' not in comprehensive_data:
+                comprehensive_data['consumption'] = {
+                    'house_consumption': comprehensive_data['house_consumption'].get('current_power_w', 0),
+                    'power_w': comprehensive_data['house_consumption'].get('current_power_w', 0),
+                    'current_power_w': comprehensive_data['house_consumption'].get('current_power_w', 0)
+                }
+            
             # Store current data
             self.current_data = comprehensive_data
             

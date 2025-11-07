@@ -552,10 +552,12 @@ battery_selling:
     dynamic_soc_thresholds:
       enabled: true                        # Enable dynamic SOC thresholds
       super_premium_price_threshold: 1.2   # >1.2 PLN/kWh = super premium (rare but highly profitable)
-      super_premium_min_soc: 70            # Allow selling from 70% SOC during super premium prices
+      super_premium_min_soc: 50            # Allow selling from 50% SOC during super premium prices
       premium_price_threshold: 0.9         # 0.9-1.2 PLN/kWh = premium prices
-      premium_min_soc: 75                  # Allow selling from 75% SOC during premium prices
-      high_price_threshold: 0.7            # 0.7-0.9 PLN/kWh = high prices
+      premium_min_soc: 60                  # Allow selling from 60% SOC during premium prices
+      very_high_price_threshold: 0.8       # 0.8-0.9 PLN/kWh = very high prices
+      very_high_min_soc: 70                # Allow selling from 70% SOC during very high prices
+      high_price_threshold: 0.7            # 0.7-0.8 PLN/kWh = high prices
       high_min_soc: 80                     # Standard 80% SOC for high prices
       require_peak_hours: true             # Only allow lower SOC during peak hours (17-21)
       require_recharge_forecast: true      # Require forecast showing recharge opportunity within 12h

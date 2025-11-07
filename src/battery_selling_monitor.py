@@ -316,13 +316,13 @@ class BatterySellingMonitor:
             battery_temp = self._safe_float(battery_data.get('temperature', 0))
             grid_voltage = self._safe_float(grid_data.get('voltage', 0))
             
-            # Log data validation issues
+            # Log data validation issues with more context
             if not battery_data:
-                self.logger.warning("No battery data available in current_data")
+                self.logger.warning("No battery data available in current_data - safety checks may be incomplete")
             if not grid_data:
-                self.logger.warning("No grid data available in current_data")
+                self.logger.warning("No grid data available in current_data - grid voltage safety check will use default")
             if not inverter_data:
-                self.logger.warning("No inverter data available in current_data")
+                self.logger.warning("No inverter data available in current_data - inverter error check will be skipped. Check if 'system' key is mapped to 'inverter'")
             
             # Perform all safety checks
             checks = [

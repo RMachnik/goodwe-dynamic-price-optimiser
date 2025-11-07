@@ -842,3 +842,23 @@ python src/automated_price_charging.py --schedule-today
 - **[Test Configuration Isolation](docs/TEST_CONFIGURATION_ISOLATION.md)** - How tests are isolated from production config
 
 🚀⚡🔋 **Validated, efficient, and ready to save you money!**
+
+---
+
+### 7-day charging effectiveness analysis
+
+Generate a 7-day analysis of charging vs prices and potential selling opportunities. This uses the dashboard API and writes results to `out/`:
+
+```bash
+python3 scripts/analyze_last_7_days.py \
+  --base-url http://192.168.33.10:8080 \
+  --days 7 \
+  --min-soc 0.2 \
+  --sell-soc-threshold 0.5
+```
+
+Outputs:
+- `out/charge_deferral_findings.csv` – candidate charge events above p25 with estimated savings
+- `out/sell_opportunity_findings.csv` – p80 price windows with SOC condition
+- `out/analysis_7d_summary.md` – concise summary
+

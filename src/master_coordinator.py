@@ -800,9 +800,21 @@ class MasterCoordinator:
                 'price_data': price_data
             }
             
+            # Prepare normalized current_data with inverter key for safety monitor
+            # Map 'system' to 'inverter' for backward compatibility
+            normalized_current_data = self.current_data.copy()
+            if 'system' in normalized_current_data and 'inverter' not in normalized_current_data:
+                normalized_current_data['inverter'] = normalized_current_data['system'].copy()
+                # Add error_codes if available from inverter status
+                if hasattr(self.charging_controller.goodwe_charger.inverter, 'error_codes'):
+                    try:
+                        normalized_current_data['inverter']['error_codes'] = []
+                    except Exception:
+                        pass
+            
             # Check safety conditions first
             safety_report = await self.battery_selling_monitor.check_safety_conditions(
-                self.charging_controller.goodwe_charger.inverter, self.current_data
+                self.charging_controller.goodwe_charger.inverter, normalized_current_data
             )
             
             if safety_report.emergency_stop_required:
@@ -811,23 +823,29 @@ class MasterCoordinator:
                 return
             
             # Prepare data in the format expected by battery selling engine
+            # Map from enhanced_data_collector format (photovoltaic, house_consumption) to expected format (pv, consumption)
+            battery_data = self.current_data.get('battery', {})
+            pv_data = self.current_data.get('photovoltaic', {}) or self.current_data.get('pv', {})
+            consumption_data = self.current_data.get('house_consumption', {}) or self.current_data.get('consumption', {})
+            grid_data = self.current_data.get('grid', {})
+            
             selling_data = {
                 'battery': {
-                    'soc_percent': self.current_data.get('battery', {}).get('soc_percent', 0),
-                    'charging_status': self.current_data.get('battery', {}).get('charging_status', False),
-                    'current': self.current_data.get('battery', {}).get('current', 0),
-                    'power': self.current_data.get('battery', {}).get('power', 0),
-                    'temperature': self.current_data.get('battery', {}).get('temperature', 25)
+                    'soc_percent': battery_data.get('soc_percent', 0),
+                    'charging_status': battery_data.get('charging_status', False),
+                    'current': battery_data.get('current', 0),
+                    'power': battery_data.get('power', 0) or battery_data.get('power_w', 0),
+                    'temperature': battery_data.get('temperature', 25)
                 },
                 'pv': {
-                    'power_w': self.current_data.get('pv', {}).get('power', 0)  # Convert power to power_w
+                    'power_w': pv_data.get('current_power_w', 0) or pv_data.get('power_w', 0) or pv_data.get('power', 0)
                 },
                 'consumption': {
-                    'power_w': self.current_data.get('consumption', {}).get('house_consumption', 0)  # Convert house_consumption to power_w
+                    'power_w': consumption_data.get('current_power_w', 0) or consumption_data.get('power_w', 0) or consumption_data.get('house_consumption', 0)
                 },
                 'grid': {
-                    'power': self.current_data.get('grid', {}).get('power', 0),
-                    'voltage': self.current_data.get('grid', {}).get('voltage', 0)  # Add voltage for safety checks
+                    'power': grid_data.get('power', 0) or grid_data.get('power_w', 0),
+                    'voltage': grid_data.get('voltage', 0)
                 }
             }
             
@@ -968,7 +986,9 @@ class MasterCoordinator:
             return
         
         # Calculate efficiency metrics
-        pv_production = self.current_data.get('pv', {}).get('total_power', 0)
+        # Use compatibility layer: check both 'photovoltaic' and 'pv' keys
+        pv_data = self.current_data.get('photovoltaic', {}) or self.current_data.get('pv', {})
+        pv_production = pv_data.get('total_power', 0) or pv_data.get('current_power_w', 0) or pv_data.get('power_w', 0)
         battery_charging = self.current_data.get('battery', {}).get('charging_power', 0)
         grid_import = self.current_data.get('grid', {}).get('import_power', 0)
         
