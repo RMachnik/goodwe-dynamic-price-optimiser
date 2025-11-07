@@ -135,6 +135,8 @@ class BatterySellingEngine:
         self.super_premium_min_soc = dynamic_soc_config.get('super_premium_min_soc', 70)
         self.premium_price_threshold = dynamic_soc_config.get('premium_price_threshold', 0.9)
         self.premium_min_soc = dynamic_soc_config.get('premium_min_soc', 75)
+        self.very_high_price_threshold = dynamic_soc_config.get('very_high_price_threshold', 0.8)
+        self.very_high_min_soc = dynamic_soc_config.get('very_high_min_soc', 60)
         self.high_price_threshold = dynamic_soc_config.get('high_price_threshold', 0.7)
         self.high_min_soc = dynamic_soc_config.get('high_min_soc', 80)
         self.require_peak_hours = dynamic_soc_config.get('require_peak_hours', True)
@@ -223,7 +225,8 @@ class BatterySellingEngine:
         if self.dynamic_soc_enabled:
             self.logger.info(f"    * Super premium (>{self.super_premium_price_threshold} PLN/kWh): {self.super_premium_min_soc}% SOC")
             self.logger.info(f"    * Premium ({self.premium_price_threshold}-{self.super_premium_price_threshold} PLN/kWh): {self.premium_min_soc}% SOC")
-            self.logger.info(f"    * High (>{self.high_price_threshold} PLN/kWh): {self.high_min_soc}% SOC")
+            self.logger.info(f"    * Very high ({self.very_high_price_threshold}-{self.premium_price_threshold} PLN/kWh): {self.very_high_min_soc}% SOC")
+            self.logger.info(f"    * High ({self.high_price_threshold}-{self.very_high_price_threshold} PLN/kWh): {self.high_min_soc}% SOC")
     
     def _reset_daily_cycles(self):
         """Reset daily cycle counter if new day"""
@@ -280,8 +283,12 @@ class BatterySellingEngine:
             # Premium prices (0.9-1.2 PLN/kWh) - allow selling from 75%
             self.logger.info(f"Premium price {current_price:.3f} PLN/kWh detected - min SOC: {self.premium_min_soc}%")
             return self.premium_min_soc
+        elif current_price >= self.very_high_price_threshold:
+            # Very high prices (0.8-0.9 PLN/kWh) - allow selling from 60%
+            self.logger.info(f"Very high price {current_price:.3f} PLN/kWh detected - min SOC: {self.very_high_min_soc}%")
+            return self.very_high_min_soc
         elif current_price >= self.high_price_threshold:
-            # High prices (0.7-0.9 PLN/kWh) - standard 80%
+            # High prices (0.7-0.8 PLN/kWh) - standard 80%
             return self.high_min_soc
         else:
             # Normal prices - standard 80%
