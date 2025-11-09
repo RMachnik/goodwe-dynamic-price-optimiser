@@ -555,7 +555,7 @@ class BatterySellingTiming:
                     return TimingRecommendation(
                         decision=TimingDecision.SELL_NOW,
                         confidence=0.95,
-                        reasoning=f"Current price {current_price:.3f} PLN/kWh in top {self.aggressive_sell_percentile}% (percentile: {current_percentile_rank:.1f}), near peak",
+                        reasoning=f"Current price {current_price:.3f} PLN/kWh in top {self.aggressive_sell_percentile}% (percentile: {current_percentile_rank:.1f}), near peak ({current_price/near_peak_threshold*100:.1f}% of max {price_analysis.max_price:.3f} PLN/kWh)",
                         sell_time=datetime.now(),
                         expected_price=current_price,
                         opportunity_cost_pln=0.0,
@@ -564,6 +564,21 @@ class BatterySellingTiming:
                         wait_hours=0.0,
                         risk_level="low"
                     )
+                else:
+                    # In top 5% but not quite at 95% of max - check if we should wait
+                    if peak_info and peak_info.price_increase_percent >= 5:
+                        return TimingRecommendation(
+                            decision=TimingDecision.WAIT_FOR_PEAK,
+                            confidence=0.80,
+                            reasoning=f"Current price {current_price:.3f} PLN/kWh in top {self.aggressive_sell_percentile}% but only {current_price/near_peak_threshold*100:.1f}% of max ({price_analysis.max_price:.3f} PLN/kWh). Waiting for peak at {peak_info.peak_price:.3f} PLN/kWh (+{peak_info.price_increase_percent:.1f}%)",
+                            sell_time=peak_info.peak_time,
+                            expected_price=peak_info.peak_price,
+                            opportunity_cost_pln=opportunity_cost if peak_info else 0.0,
+                            peak_info=peak_info,
+                            selling_windows=selling_windows,
+                            wait_hours=peak_info.time_to_peak_hours,
+                            risk_level="low"
+                        )
             
             # Rule 2: Top 15% prices - Standard selling if no better peak within 2h
             if current_percentile_rank >= (100 - self.standard_sell_percentile):
