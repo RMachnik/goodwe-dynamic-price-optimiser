@@ -265,14 +265,30 @@ class BatterySellingEngine:
             return self.min_selling_soc  # Use default 80% outside peak hours
         
         # Check for recharge opportunity in forecast if required
+        # Smart approach: For premium prices (top tier), recharge opportunity is advisory (not blocking)
+        # For lower prices, it's required for safety
+        is_premium_price = current_price >= self.premium_price_threshold
+        
         if self.require_recharge_forecast:
             if not price_forecast:
-                # No forecast available, can't verify recharge opportunity
-                return self.min_selling_soc  # Use default 80% - conservative
+                # No forecast available
+                if is_premium_price:
+                    # Premium prices: allow selling without forecast (advisory only)
+                    self.logger.info(f"Premium price {current_price:.3f} PLN/kWh - allowing dynamic SOC without forecast (advisory)")
+                else:
+                    # Lower prices: require forecast for safety
+                    self.logger.warning(f"Dynamic SOC requires recharge forecast but none available - using default {self.min_selling_soc}% SOC")
+                    return self.min_selling_soc  # Use default 80% - conservative
             
             has_recharge_opportunity = self._check_recharge_opportunity(price_forecast, current_price)
             if not has_recharge_opportunity:
-                return self.min_selling_soc  # Use default 80% if no recharge opportunity
+                if is_premium_price:
+                    # Premium prices: allow selling without recharge opportunity (advisory only)
+                    self.logger.info(f"Premium price {current_price:.3f} PLN/kWh - allowing dynamic SOC without recharge opportunity (advisory, would prefer price < {current_price * 0.7:.3f} PLN/kWh)")
+                else:
+                    # Lower prices: require recharge opportunity for safety
+                    self.logger.warning(f"Dynamic SOC requires recharge opportunity (price < {current_price * 0.7:.3f} PLN/kWh) in next 12h but none found - using default {self.min_selling_soc}% SOC")
+                    return self.min_selling_soc  # Use default 80% if no recharge opportunity
         
         # Dynamic SOC thresholds based on price magnitude
         if current_price >= self.super_premium_price_threshold:
@@ -475,13 +491,29 @@ class BatterySellingEngine:
             
             # Check minimum SOC requirement (now dynamic)
             if battery_soc < min_soc_required:
+                # Provide detailed reasoning about why dynamic SOC wasn't used
+                if self.dynamic_soc_enabled and min_soc_required == self.min_selling_soc:
+                    # Dynamic SOC is enabled but we're using default - explain why
+                    reason_parts = []
+                    if self.require_peak_hours and not self._is_peak_hour():
+                        reason_parts.append("outside peak hours (17-21)")
+                    if self.require_recharge_forecast:
+                        if not price_forecast:
+                            reason_parts.append("no price forecast available")
+                        elif not self._check_recharge_opportunity(price_forecast, current_price_pln):
+                            recharge_threshold = current_price_pln * 0.7
+                            reason_parts.append(f"no recharge opportunity (need price < {recharge_threshold:.3f} PLN/kWh in next 12h)")
+                    reason_suffix = f" - using default {min_soc_required}% because: {', '.join(reason_parts)}" if reason_parts else ""
+                else:
+                    reason_suffix = ""
+                
                 return SellingOpportunity(
                     decision=SellingDecision.WAIT,
                     confidence=0.0,
                     expected_revenue_pln=0.0,
                     selling_power_w=0,
                     estimated_duration_hours=0.0,
-                    reasoning=f"Battery SOC {battery_soc}% below dynamic minimum threshold {min_soc_required}% (price: {current_price_pln:.3f} PLN/kWh)",
+                    reasoning=f"Battery SOC {battery_soc}% below minimum threshold {min_soc_required}% (price: {current_price_pln:.3f} PLN/kWh){reason_suffix}",
                     safety_checks_passed=True,
                     risk_level="low"
                 )
