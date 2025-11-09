@@ -1862,8 +1862,24 @@ class LogWebServer:
                                                     blockReason = `High consumption detected (${socText})`;
                                                 } else if (reasonLower.includes('no suitable price window') || reasonLower.includes('not cheap enough')) {
                                                     blockReason = `Price conditions not met (${socText})`;
+                                                } else if (reasonLower.includes('below dynamic minimum threshold') || reasonLower.includes('below minimum threshold')) {
+                                                    // Extract the threshold from reason if possible
+                                                    const thresholdMatch = reason.match(/(\d+(?:\.\d+)?)%/);
+                                                    const threshold = thresholdMatch ? thresholdMatch[1] : 'threshold';
+                                                    blockReason = `SOC ${batterySoc}% below required ${threshold}% (price/conditions not met)`;
+                                                } else if (reasonLower.includes('pv power') && reasonLower.includes('sufficient')) {
+                                                    blockReason = `PV power sufficient - no need to sell battery (${socText})`;
+                                                } else if (reasonLower.includes('price') && reasonLower.includes('below minimum')) {
+                                                    blockReason = `Price too low for selling (${socText})`;
+                                                } else if (reasonLower.includes('not optimal') || reasonLower.includes('confidence')) {
+                                                    blockReason = `Conditions not optimal (low confidence/revenue) (${socText})`;
+                                                } else if (reasonLower.includes('recharge opportunity') || reasonLower.includes('no recharge')) {
+                                                    blockReason = `No recharge opportunity in forecast (${socText})`;
+                                                } else if (reasonLower.includes('outside peak hours') || reasonLower.includes('not peak hour')) {
+                                                    blockReason = `Outside peak hours - dynamic SOC requires 17:00-21:00 (${socText})`;
                                                 } else {
-                                                    blockReason = `Execution blocked - ${socText}`;
+                                                    // Show the actual reason if available, otherwise generic message
+                                                    blockReason = reason && reason.trim() ? `${reason} (${socText})` : `Execution blocked - ${socText}`;
                                                 }
                                                 
                                                 return { 
