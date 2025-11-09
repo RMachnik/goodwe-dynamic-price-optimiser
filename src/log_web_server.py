@@ -1827,7 +1827,8 @@ class LogWebServer:
                                             // If all values are 0, likely not executed - determine why
                                             if (energy === 0 && cost === 0 && savings === 0) {
                                                 // Analyze the reason to determine blocking cause
-                                                const reason = decision.reason || '';
+                                                // Battery selling decisions use 'reasoning', charging uses 'reason'
+                                                const reason = decision.reason || decision.reasoning || '';
                                                 const reasonLower = reason.toLowerCase();
                                                 let blockReason = 'Unknown reason';
                                                 
@@ -1909,7 +1910,7 @@ class LogWebServer:
                                                     <div style="flex: 1; min-width: 200px;">
                                                         <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 5px;">${new Date(decision.timestamp).toLocaleTimeString()}</div>
                                                         <div style="font-weight: 600; font-size: 16px; margin-bottom: 5px; text-transform: capitalize;">${decision.action.replace('_', ' ')}</div>
-                                                        <div style="color: var(--text-muted); font-size: 14px;">${decision.reason}</div>
+                                                        <div style="color: var(--text-muted); font-size: 14px;">${decision.reason || decision.reasoning || 'No reason provided'}</div>
                                                         ${execution.soc ? `
                                                             <div style="margin-top: 8px; display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; background: ${getSocColor(execution.soc)}22; border: 1px solid ${getSocColor(execution.soc)}; border-radius: 8px;">
                                                                 <span style="font-size: 13px; font-weight: 600; color: ${getSocColor(execution.soc)};">${execution.status === 'EXECUTED' ? '⚡' : '🔋'} ${execution.soc}%</span>
@@ -3189,13 +3190,20 @@ class LogWebServer:
     def _get_real_price_data(self) -> Optional[Dict[str, Any]]:
         """Get real price data using AutomatedPriceCharger (correct SC calculation) with caching"""
         try:
-            # Check cache first (cache for 1 hour since prices don't change during the day)
-            cached_data = self._get_cached_data('real_price_data', ttl=3600)  # Cache for 1 hour
-            if cached_data:
-                return cached_data
-            
             from automated_price_charging import AutomatedPriceCharger
             from datetime import datetime, timedelta
+            
+            # Create cache key based on current 15-minute period to ensure prices update correctly
+            # This ensures cache is invalidated when we move to a new price period
+            now = datetime.now()
+            current_period = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
+            cache_key = f'real_price_data_{current_period.strftime("%Y%m%d_%H%M")}'
+            
+            # Check cache first (cache for 5 minutes to balance freshness and performance)
+            # Prices can change during the day, so shorter cache is better
+            cached_data = self._get_cached_data(cache_key, ttl=300)  # Cache for 5 minutes
+            if cached_data:
+                return cached_data
             
             # Use AutomatedPriceCharger for consistent price calculation
             charger = AutomatedPriceCharger()
@@ -3219,9 +3227,16 @@ class LogWebServer:
             prices = []
             for item in price_data['value']:
                 market_price = float(item['csdac_pln'])
-                final_price = charger.calculate_final_price(market_price)
+                # Parse timestamp from price data item for accurate tariff calculation
+                try:
+                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                except ValueError:
+                    # Try alternative format
+                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M:%S')
+                # Pass timestamp to calculate_final_price for accurate tariff calculation
+                final_price = charger.calculate_final_price(market_price, item_time)
                 final_price_kwh = final_price / 1000  # Convert to PLN/kWh
-                prices.append((final_price_kwh, datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M').hour))
+                prices.append((final_price_kwh, item_time.hour))
             
             if not prices:
                 return None
@@ -3239,11 +3254,13 @@ class LogWebServer:
                 'average_price_pln_kwh': round(avg_price, 4),
                 'price_trend': 'stable',  # Could be enhanced with trend analysis
                 'data_source': 'PSE API (CSDAC-PLN)',
-                'last_updated': datetime.now().isoformat()
+                'last_updated': datetime.now().isoformat(),
+                'calculation_method': 'tariff_aware'  # Indicate calculation method for debugging
             }
             
-            # Cache the result
-            self._set_cached_data('real_price_data', result)
+            # Cache the result with period-specific key (5 minute TTL ensures fresh data)
+            self._set_cached_data(cache_key, result)
+            logger.debug(f"Price data calculated: current={current_price_kwh:.4f} PLN/kWh, cheapest={cheapest_price:.4f} PLN/kWh at {cheapest_hour:02d}:00 (period: {current_period.strftime('%H:%M')})")
             return result
             
         except Exception as e:
