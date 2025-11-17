@@ -2095,7 +2095,7 @@ The conservative parameters (80% min SOC, 50% safety margin) are:
 final_price_pln_kwh = market_price_pln_kwh + sc_component_pln_kwh + distribution_price_pln_kwh
 ```
 
-**Example for G14dynamic during "REQUIRED REDUCTION":**
+**Example for G14dynamic during "WYMAGANE OGRANICZANIE":**
 - Market price: 0.400 PLN/kWh
 - SC component: 0.0892 PLN/kWh
 - Distribution (S4): 2.8931 PLN/kWh
@@ -2143,7 +2143,7 @@ final_price_pln_kwh = market_price_pln_kwh + sc_component_pln_kwh + distribution
 - [x] **2.0.1**: Add module `src/pse_peak_hours_collector.py` with `pdgsz` support
   - ✅ Fetch data from `https://api.raporty.pse.pl/api/pdgsz`
   - ✅ Filter by `business_date` and `is_active eq true`
-  - ✅ Map `usage_fcst` to statuses: `NORMAL USAGE` (0), `RECOMMENDED USAGE` (1), `RECOMMENDED SAVING` (2), `REQUIRED REDUCTION` (3)
+  - ✅ Map `usage_fcst` to statuses: `ZALECANE UŻYTKOWANIE` (0), `NORMALNE UŻYTKOWANIE` (1), `ZALECANE OSZCZĘDZANIE` (2), `WYMAGANE OGRANICZANIE` (3)
   - ✅ Data caching (e.g., 60 minutes)
   - ✅ Error handling and retry logic
   - **Estimated Time**: 4-6 hours
@@ -2165,17 +2165,17 @@ final_price_pln_kwh = market_price_pln_kwh + sc_component_pln_kwh + distribution
   - **Estimated Time**: 2 hours
 
 - [x] **2.0.4**: Implement `usage_fcst` impact on charging decisions
-  - ✅ **REQUIRED REDUCTION (3)**: Block grid charging (force wait/stop), prefer battery discharge for home use, ignore price opportunities.
-  - ✅ **RECOMMENDED SAVING (2)**: Increase "wait" threshold (e.g., `min_savings_to_wait_percent` +10 pp), may limit maximum charging power.
-  - ✅ **RECOMMENDED USAGE (1)**: Decrease "wait" threshold (more lenient charging conditions).
-  - ✅ **NORMAL USAGE (0)**: Use base logic.
+- ✅ **WYMAGANE OGRANICZANIE (3)**: Block grid charging (force wait/stop), prefer battery discharge for home use, ignore price opportunities.
+- ✅ **ZALECANE OSZCZĘDZANIE (2)**: Increase "wait" threshold (e.g., `min_savings_to_wait_percent` +10 pp), may limit maximum charging power.
+- ✅ **NORMALNE UŻYTKOWANIE (1)**: Decrease "wait" threshold (more lenient charging conditions).
+- ✅ **ZALECANE UŻYTKOWANIE (0)**: Use base logic.
   - **Estimated Time**: 4-6 hours
 
 - [x] **2.0.5**: Add unit and integration tests
   - ✅ `usage_fcst` mapping tests
   - ✅ Versioning tests (`is_active`, `publication_ts`)
-  - ✅ E2E charging block tests for `REQUIRED REDUCTION`
-  - ✅ Decision impact tests for `RECOMMENDED SAVING` and `RECOMMENDED USAGE`
+- ✅ E2E charging block tests for `WYMAGANE OGRANICZANIE`
+- ✅ Decision impact tests for `ZALECANE OSZCZĘDZANIE` and `NORMALNE UŻYTKOWANIE`
   - **Estimated Time**: 3-4 hours
 
 - [x] **2.0.6**: Update `README.md` with Kompas Energetyczny description and configuration

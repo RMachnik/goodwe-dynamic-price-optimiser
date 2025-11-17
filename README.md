@@ -202,9 +202,9 @@ The system currently uses file-based JSON storage with in-memory data limited to
 ### **PSE Peak Hours (Kompas Energetyczny) (NEW)**
 - **Grid Status Awareness**: Real-time monitoring of Polish grid load status
 - **Smart Charging Decisions**: Adapts charging behavior based on grid conditions
-- **REQUIRED REDUCTION**: Blocks all grid charging when grid is overloaded
-- **RECOMMENDED SAVING**: Increases wait thresholds and limits charging power
-- **RECOMMENDED USAGE**: Relaxes charging conditions when grid has capacity
+- **WYMAGANE OGRANICZANIE**: Blocks all grid charging when grid is overloaded
+- **ZALECANE OSZCZĘDZANIE**: Increases wait thresholds and limits charging power
+- **ZALECANE / NORMALNE UŻYTKOWANIE**: Relaxes charging conditions when grid has capacity
 - **API Integration**: Official PSE pdgsz API for reliable grid status data
 - **Network Stability**: Supports Polish grid stability by avoiding charging during peak load
 
@@ -485,26 +485,26 @@ chmod +x scripts/ubuntu_setup.sh
      update_interval_minutes: 60                # Update every 60 minutes
      peak_hours_ahead: 24                     # Monitor 24 hours ahead
      
-     # Decision rules based on Peak Hours status
-     decision_rules:
-       # REQUIRED REDUCTION (usage_fcst = 3)
-       required_reduction:
-         block_charging: true                 # Block all grid charging
-         prefer_discharge_for_home: true      # Prefer battery discharge for home use
-         ignore_price_opportunities: true     # Ignore low price opportunities
-         
-       # RECOMMENDED SAVING (usage_fcst = 2)
-       recommended_saving:
-         increase_wait_threshold_percent: 10  # Increase min_savings_to_wait_percent by 10%
-         limit_charging_power_percent: 50    # Limit charging power to 50%
-         
-       # RECOMMENDED USAGE (usage_fcst = 1)
-       recommended_usage:
-         decrease_wait_threshold_percent: 5   # Decrease min_savings_to_wait_percent by 5%
-         
-       # NORMAL USAGE (usage_fcst = 0)
-       normal_usage:
-         default_logic: true                  # Use default charging logic
+    # Decision rules based on Peak Hours status
+    decision_rules:
+      # WYMAGANE OGRANICZANIE (usage_fcst = 3)
+      required_reduction:
+        block_charging: true                 # Block all grid charging
+        prefer_discharge_for_home: true      # Prefer battery discharge for home use
+        ignore_price_opportunities: true     # Ignore low price opportunities
+        
+      # ZALECANE OSZCZĘDZANIE (usage_fcst = 2)
+      recommended_saving:
+        increase_wait_threshold_percent: 10  # Increase min_savings_to_wait_percent by 10%
+        limit_charging_power_percent: 50    # Limit charging power to 50%
+        
+      # NORMALNE UŻYTKOWANIE (usage_fcst = 1)
+      recommended_usage:
+        decrease_wait_threshold_percent: 5   # Decrease min_savings_to_wait_percent by 5%
+        
+      # ZALECANE UŻYTKOWANIE (usage_fcst = 0)
+      normal_usage:
+        default_logic: true                  # Use default charging logic
          
      # Fallback configuration
      fallback:

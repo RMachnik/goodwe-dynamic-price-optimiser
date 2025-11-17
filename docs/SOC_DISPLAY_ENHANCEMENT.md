@@ -22,8 +22,8 @@ Enhanced the charging decision display and logging system to prominently show SO
 #### Enhanced Blocking Reasons
 Improved blocking reason detection and display with specific categories:
 - **Kompas Peak Hours**:
-  - REQUIRED REDUCTION (code 3): "Grid charging blocked during peak hours"
-  - RECOMMENDED SAVING (code 2): "Deferred to reduce load"
+  - WYMAGANE OGRANICZANIE (code 3): "Grid charging blocked during peak hours"
+  - ZALECANE OSZCZĘDZANIE (code 2): "Deferred to reduce load"
 - **Price Conditions**: "Price threshold not met"
 - **Safety Conditions**: Battery safety margin, grid voltage, emergency stops
 - **Communication**: Errors, timeouts, connection issues
@@ -51,7 +51,7 @@ logger.info(f"Executing decision: Start charging at SOC {battery_soc}%")
 Added detailed logging for peak hours policy blocking:
 
 ```python
-logger.warning(f"🚫 Kompas REQUIRED REDUCTION: Blocking grid charging (SOC: {battery_soc}%, Peak hours code 3)")
+logger.warning(f"🚫 Kompas WYMAGANE OGRANICZANIE: Blocking grid charging (SOC: {battery_soc}%, Peak hours code 3)")
 logger.warning(f"   Reason: Required reduction period - grid charging not allowed regardless of price or battery level")
 ```
 
@@ -113,7 +113,7 @@ Energy: 2.20 kWh | Cost: 0.94 PLN | Savings: 0.00 PLN
 **Logs (Blocked):**
 ```
 2025-10-21 14:32:15 INFO Executing decision: Start charging at SOC 45%
-2025-10-21 14:32:15 WARNING 🚫 Kompas REQUIRED REDUCTION: Blocking grid charging (SOC: 45%, Peak hours code 3)
+2025-10-21 14:32:15 WARNING 🚫 Kompas WYMAGANE OGRANICZANIE: Blocking grid charging (SOC: 45%, Peak hours code 3)
 2025-10-21 14:32:15 WARNING    Reason: Required reduction period - grid charging not allowed regardless of price or battery level
 2025-10-21 14:32:15 WARNING Charging execution blocked at SOC 45% - See charging controller logs for details
 ```
@@ -124,7 +124,7 @@ Energy: 2.20 kWh | Cost: 0.94 PLN | Savings: 0.00 PLN
 Charging recommended but blocked
 🔋 45%
 🚫 BLOCKED
-Kompas REQUIRED REDUCTION - Grid charging blocked during peak hours (SOC: 45%)
+Kompas WYMAGANE OGRANICZANIE - Grid charging blocked during peak hours (SOC: 45%)
 ```
 
 ---

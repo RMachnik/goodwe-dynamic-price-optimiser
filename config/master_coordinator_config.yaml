@@ -46,10 +46,10 @@ electricity_tariff:
       type: "kompas_based"
       requires_pse_peak_hours: true
       prices:
-        normal_usage: 0.0578      # S2 (usage_fcst=0)
-        recommended_usage: 0.0145  # S1 (usage_fcst=1)
-        recommended_saving: 0.4339 # S3 (usage_fcst=2)
-        required_reduction: 2.8931 # S4 (usage_fcst=3)
+        normal_usage: 0.0578      # usage_fcst=1 → NORMALNE UŻYTKOWANIE (S2)
+        recommended_usage: 0.0145  # usage_fcst=0 → ZALECANE UŻYTKOWANIE (S1)
+        recommended_saving: 0.4339 # usage_fcst=2 → ZALECANE OSZCZĘDZANIE (S3)
+        required_reduction: 2.8931 # usage_fcst=3 → WYMAGANE OGRANICZANIE (S4)
       fallback_price: 0.0578  # Use normal_usage if kompas unavailable
     
     # G11 - Single-zone tariff (static)

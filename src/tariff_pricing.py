@@ -67,7 +67,7 @@ class TariffPricingCalculator:
         Args:
             market_price_pln_kwh: Market price in PLN/kWh from CSDAC API
             timestamp: Time for the price (used for time-based tariffs)
-            kompas_status: Kompas status for G14dynamic (NORMAL USAGE, etc.)
+            kompas_status: Kompas status for G14dynamic (ZALECANE UŻYTKOWANIE, etc.)
         
         Returns:
             PriceComponents with detailed breakdown
@@ -165,10 +165,10 @@ class TariffPricingCalculator:
         
         # Map kompas status labels to config keys
         status_map = {
-            'NORMAL USAGE': 'normal_usage',
-            'RECOMMENDED USAGE': 'recommended_usage',
-            'RECOMMENDED SAVING': 'recommended_saving',
-            'REQUIRED REDUCTION': 'required_reduction'
+            'ZALECANE UŻYTKOWANIE': 'recommended_usage',
+            'NORMALNE UŻYTKOWANIE': 'normal_usage',
+            'ZALECANE OSZCZĘDZANIE': 'recommended_saving',
+            'WYMAGANE OGRANICZANIE': 'required_reduction'
         }
         
         price_key = status_map.get(kompas_status)

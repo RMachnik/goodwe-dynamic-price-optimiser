@@ -52,7 +52,7 @@ def test_parse_and_cache(monkeypatch):
 
     # Check mapping
     reduction = [o for o in out if o.code == 3]
-    assert reduction and reduction[0].label == "REQUIRED REDUCTION"
+    assert reduction and reduction[0].label == "WYMAGANE OGRANICZANIE"
 
     # Cache hit should avoid second fetch
     called = {"count": 0}

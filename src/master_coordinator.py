@@ -1393,9 +1393,9 @@ class MultiFactorDecisionEngine:
     def _apply_peak_hours_policy(self, action: str) -> str:
         """Adjust action based on Kompas (Peak Hours) policy if configured.
 
-        - REQUIRED REDUCTION (code 3): block grid charging -> return 'none'
-        - RECOMMENDED SAVING (code 2): prefer wait -> return 'none' if action is start
-        - RECOMMENDED USAGE (code 1): slightly permissive (no hard change here)
+        - WYMAGANE OGRANICZANIE (code 3): block grid charging -> return 'none'
+        - ZALECANE OSZCZĘDZANIE (code 2): prefer wait -> return 'none' if action is start
+        - NORMALNE/ZALECANE UŻYTKOWANIE (codes 1/0): informational only (no hard change)
         """
         try:
             if not getattr(self, 'peak_hours_collector', None):
@@ -1412,19 +1412,19 @@ class MultiFactorDecisionEngine:
             if not status:
                 return action
 
-            if status.code == 3:  # REQUIRED REDUCTION
+            if status.code == 3:  # WYMAGANE OGRANICZANIE
                 if action.startswith('start'):
                     soc_info = f" (SOC: {battery_soc}%)" if battery_soc is not None else ""
-                    logger.warning(f"🚫 Kompas REQUIRED REDUCTION: Blocking grid charging{soc_info}, Peak hours code 3")
+                    logger.warning(f"🚫 Kompas WYMAGANE OGRANICZANIE: Blocking grid charging{soc_info}, Peak hours code 3")
                     logger.warning(f"   Reason: Required reduction period - grid charging not allowed regardless of price or battery level")
                     return 'none'
-            elif status.code == 2:  # RECOMMENDED SAVING
+            elif status.code == 2:  # ZALECANE OSZCZĘDZANIE
                 if action.startswith('start'):
                     soc_info = f" (SOC: {battery_soc}%)" if battery_soc is not None else ""
-                    logger.info(f"⚠️  Kompas RECOMMENDED SAVING: Deferring charging start{soc_info}, Peak hours code 2")
+                    logger.info(f"⚠️  Kompas ZALECANE OSZCZĘDZANIE: Deferring charging start{soc_info}, Peak hours code 2")
                     logger.info(f"   Reason: Recommended to save energy and reduce grid load during this period")
                     return 'none'
-            # code 1 (RECOMMENDED USAGE) and 0 (NORMAL) -> no strict change
+            # codes 1 (NORMALNE) and 0 (ZALECANE) -> no strict change
             return action
         except Exception as e:
             logger.debug(f"Peak Hours policy application failed: {e}")
