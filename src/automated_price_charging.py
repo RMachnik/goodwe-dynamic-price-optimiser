@@ -878,6 +878,15 @@ class AutomatedPriceCharger:
                 battery_soc, current_price, cheapest_price, cheapest_hour
             )
         
+        # HIGH: PV overproduction - no need to charge from grid (check BEFORE aggressive charging)
+        if overproduction > self.overproduction_threshold:
+            return {
+                'should_charge': False,
+                'reason': f'PV overproduction ({overproduction}W > {self.overproduction_threshold}W) - no grid charging needed',
+                'priority': 'high',
+                'confidence': 0.9
+            }
+
         # ENHANCED AGGRESSIVE CHEAPEST PRICE CHARGING: Use new smart logic
         if self.enhanced_aggressive:
             try:
@@ -888,11 +897,11 @@ class AutomatedPriceCharger:
                     forecast_collector = PSEPriceForecastCollector(self.config)
                     forecast_points = forecast_collector.fetch_price_forecast()
                     if forecast_points:
-                        forecast_data = [{'price': p.forecasted_price_pln, 'time': p.time, 'confidence': p.confidence} 
+                        forecast_data = [{'price': p.forecasted_price_pln, 'time': p.time, 'confidence': p.confidence}
                                        for p in forecast_points]
                 except Exception as e:
                     logger.debug(f"Could not fetch forecast data: {e}")
-                
+
                 # Make enhanced aggressive charging decision
                 decision = self.enhanced_aggressive.should_charge_aggressively(
                     battery_soc=battery_soc,
@@ -900,7 +909,7 @@ class AutomatedPriceCharger:
                     forecast_data=forecast_data,
                     current_data={'battery': {'soc_percent': battery_soc}}
                 )
-                
+
                 if decision.should_charge:
                     return {
                         'should_charge': True,
@@ -910,10 +919,10 @@ class AutomatedPriceCharger:
                         'target_soc': decision.target_soc,
                         'price_category': decision.price_category.value
                     }
-                
+
             except Exception as e:
                 logger.error(f"Error in enhanced aggressive charging: {e}")
-        
+
         # FALLBACK: Legacy aggressive charging logic
         if self._check_aggressive_cheapest_price_conditions(battery_soc, current_price, cheapest_price, cheapest_hour):
             return {
@@ -922,8 +931,8 @@ class AutomatedPriceCharger:
                 'priority': 'high',
                 'confidence': 0.9
             }
-        
-        # HIGH: PV overproduction - no need to charge from grid
+
+        # HIGH: PV overproduction - no need to charge from grid (duplicated for fallback)
         if overproduction > self.overproduction_threshold:
             return {
                 'should_charge': False,

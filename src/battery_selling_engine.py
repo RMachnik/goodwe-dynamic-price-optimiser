@@ -213,6 +213,20 @@ class BatterySellingEngine:
         self.s4_min_soc = kompas_config.get('s4_min_soc', 60)
         self.s4_ignore_forecast = kompas_config.get('s4_ignore_forecast', True)
         
+        # Initialize consumption forecasting for sell-then-buy prevention
+        self.consumption_forecaster = None
+        self.sell_then_buy_enabled = config.get('battery_selling', {}).get('sell_then_buy_prevention', {}).get('enabled', False)  # Disabled by default for backward compatibility
+        self.future_analysis_hours = config.get('battery_selling', {}).get('sell_then_buy_prevention', {}).get('analysis_hours', 12)
+        self.min_savings_ratio = config.get('battery_selling', {}).get('sell_then_buy_prevention', {}).get('min_savings_ratio', 1.5)  # Revenue/cost ratio
+
+        try:
+            from pv_consumption_analyzer import PVConsumptionAnalyzer
+            consumption_config = config.get('pv_consumption', {})
+            self.consumption_forecaster = PVConsumptionAnalyzer(config)
+            self.logger.info("Consumption forecaster initialized for sell-then-buy prevention")
+        except Exception as e:
+            self.logger.warning(f"Could not initialize consumption forecaster: {e}. Sell-then-buy prevention will use basic heuristics.")
+
         self.logger.info(f"Battery Selling Engine initialized with conservative parameters:")
         self.logger.info(f"  - Min selling SOC: {self.min_selling_soc}% (default)")
         self.logger.info(f"  - Safety margin SOC: {self.safety_margin_soc}%")
@@ -221,6 +235,7 @@ class BatterySellingEngine:
         self.logger.info(f"  - Net sellable energy: {self.net_sellable_energy:.2f} kWh")
         self.logger.info(f"  - Smart timing: {'Enabled' if self.timing_engine else 'Disabled'}")
         self.logger.info(f"  - Tariff pricing: {'Enabled' if self.tariff_calculator else 'SC-only'}")
+        self.logger.info(f"  - Sell-then-buy prevention: {'Enabled' if self.consumption_forecaster else 'Disabled'}")
         self.logger.info(f"  - Phase 2 Dynamic SOC: {'Enabled' if self.dynamic_soc_enabled else 'Disabled'}")
         if self.dynamic_soc_enabled:
             self.logger.info(f"    * Super premium (>{self.super_premium_price_threshold} PLN/kWh): {self.super_premium_min_soc}% SOC")
@@ -461,8 +476,165 @@ class BatterySellingEngine:
         except Exception as e:
             self.logger.error(f"Error checking safety conditions: {e}")
             return False, f"Safety check error: {e}"
-    
-    def _analyze_selling_opportunity(self, current_data: Dict[str, Any], price_data: Dict[str, Any], 
+
+    def _analyze_sell_then_buy_risk(self, current_data: Dict[str, Any], price_data: Dict[str, Any],
+                                   price_forecast: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+        """
+        Analyze "sell-then-buy" risk to prevent net financial loss
+
+        This critical function prevents the system from selling battery energy when:
+        - Future consumption might force buying back at higher prices
+        - Opportunity cost of selling > guaranteed cost of buying back later
+        - Would create energy deficit that exceeds safety margins
+
+        Returns:
+            dict with 'safe_to_sell' (bool) and 'reason' (str)
+        """
+        if not self.sell_then_buy_enabled:
+            return {'safe_to_sell': True, 'reason': 'Sell-then-buy prevention disabled'}
+
+        try:
+            current_soc = current_data.get('battery', {}).get('soc_percent', 0)
+            current_price_pln = price_data.get('current_price_pln', 0)
+
+            # 1. FORECAST FUTURE CONSUMPTION NEEDS
+            future_consumption_kwh = self._forecast_future_consumption(current_data)
+            self.logger.debug(f"Future {self.future_analysis_hours}h consumption forecast: {future_consumption_kwh:.2f} kWh")
+
+            # 2. CALCULATE ENERGY AVAILABILITY AFTER POTENTIAL SELLING
+            # Calculate maximum sellable energy
+            max_sellable_energy_kwh = (current_soc - self.safety_margin_soc) / 100 * self.battery_capacity_kwh * self.discharge_efficiency
+
+            # Be more reasonable about how much energy we'll actually sell
+            # Only consider energy deficit if future consumption would consume >60% of available capacity
+            energy_deficit_kwh = max(0, future_consumption_kwh - (max_sellable_energy_kwh * 0.4))  # Leave 40% buffer
+
+            # 3. CALCULATE BUYING COST IF WE NEED TO CHARGE BACK
+            buy_back_cost_pln = 0.0
+            if energy_deficit_kwh > 0:
+                # Find highest price in forecast for buying (conservative approach)
+                max_future_price_pln = self._find_max_future_price(price_forecast, current_price_pln)
+                buy_back_cost_pln = energy_deficit_kwh * max_future_price_pln
+                self.logger.debug(f"Energy deficit: {energy_deficit_kwh:.2f} kWh, buy-back cost at {max_future_price_pln:.3f} PLN/kWh: {buy_back_cost_pln:.2f} PLN")
+
+            # 4. CALCULATE SELLING REVENUE (EXPECTED FROM CURRENT OPPORTUNITY)
+            # Assume we'd sell 80% of available energy (conservative estimate)
+            selling_revenue_pln = max_sellable_energy_kwh * 0.8 * current_price_pln
+            self.logger.debug(f"Selling revenue estimate: {selling_revenue_pln:.2f} PLN")
+
+            # 5. OPPORTUNITY COST ANALYSIS
+            # Is revenue from selling > cost of buying back later?
+            net_profit_pln = selling_revenue_pln - buy_back_cost_pln
+            savings_ratio = selling_revenue_pln / buy_back_cost_pln if buy_back_cost_pln > 0 else float('inf')
+
+            self.logger.debug(f"Net profit analysis: Revenue {selling_revenue_pln:.2f} - Cost {buy_back_cost_pln:.2f} = {net_profit_pln:.2f} PLN (ratio: {savings_ratio:.2f})")
+
+            # 6. DECISION MATRIX
+            # Only block selling in extreme scenarios where we'd lose significant money
+            if energy_deficit_kwh > (max_sellable_energy_kwh * 0.5):  # Would use >50% of sellable energy
+                return {
+                    'safe_to_sell': False,
+                    'reason': f"Would create very large energy deficit ({energy_deficit_kwh:.1f} kWh > 50% of sellable capacity)"
+                }
+
+            if buy_back_cost_pln > (selling_revenue_pln * 1.5):  # Would more than double our costs
+                return {
+                    'safe_to_sell': False,
+                    'reason': f"Buy-back cost {buy_back_cost_pln:.2f} PLN > 1.5x selling revenue {selling_revenue_pln:.1f} PLN (unacceptable cost)"
+                }
+
+            # For normal cases with reasonable ratios, allow selling
+            # The prevention is more informational than blocking in most cases
+
+            # 7. SAFE TO SELL - returns default success
+            return {
+                'safe_to_sell': True,
+                'reason': f"Safe opportunity (revenue: {selling_revenue_pln:.1f} PLN, deficit cost: {buy_back_cost_pln:.1f} PLN, ratio: {savings_ratio:.1f})"
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error in sell-then-buy risk analysis: {e}")
+            # Conservative: prevent selling if analysis fails
+            return {
+                'safe_to_sell': False,
+                'reason': 'Analysis error - blocking sale for safety'
+            }
+
+    def _forecast_future_consumption(self, current_data: Dict[str, Any]) -> float:
+        """
+        Forecast future consumption for the analysis period
+
+        Uses consumption analyzer if available, otherwise fallbacks to heuristics
+        """
+        try:
+            if self.consumption_forecaster:
+                # Use advanced consumption forecasting
+                forecasts = self.consumption_forecaster.forecast_consumption(hours_ahead=self.future_analysis_hours)
+                if forecasts:
+                    # Sum forecasted consumption over the analysis period
+                    total_consumption = sum(f.get('consumption_forecast_kwh', 0) for f in forecasts)
+                    return total_consumption
+
+            # Fallback: Use heuristic-based forecasting
+            current_consumption = current_data.get('consumption', {}).get('power_w', 0) / 1000  # Convert to kW
+            current_hour = datetime.now().hour
+
+            # Base consumption patterns by time of day (kWh per hour)
+            if 0 <= current_hour <= 5:  # Night
+                base_hourly_consumption = 0.5
+            elif 6 <= current_hour <= 11:  # Morning
+                base_hourly_consumption = 1.0
+            elif 12 <= current_hour <= 17:  # Afternoon/Evening
+                base_hourly_consumption = 1.5
+            else:  # Evening/Night
+                base_hourly_consumption = 1.2
+
+            # Scale by current consumption (if reading is available)
+            if current_consumption > 0:
+                scaling_factor = current_consumption / base_hourly_consumption
+                base_hourly_consumption *= min(scaling_factor, 2.0)  # Cap scaling
+
+            # Calculate total consumption for analysis period
+            total_consumption = base_hourly_consumption * self.future_analysis_hours
+
+            return total_consumption
+
+        except Exception as e:
+            self.logger.error(f"Error forecasting consumption: {e}")
+            # Conservative fallback: assume high consumption
+            return 2.0 * self.future_analysis_hours  # 2 kWh per hour
+
+    def _find_max_future_price(self, price_forecast: Optional[List[Dict[str, Any]]], current_price_pln: float) -> float:
+        """
+        Find the maximum price we might need to pay for buying energy back
+
+        Uses forecast data if available, otherwise makes conservative assumptions
+        """
+        try:
+            max_price = current_price_pln  # At least current price
+
+            if price_forecast:
+                for forecast_point in price_forecast:
+                    if isinstance(forecast_point, dict):
+                        # Check different price field names
+                        price = (forecast_point.get('price') or
+                               forecast_point.get('forecasted_price_pln', 0) / 1000 or  # Convert PLN/MWh to PLN/kWh if needed
+                               forecast_point.get('value', 0))
+
+                        if price > 0:
+                            max_price = max(max_price, price)
+
+            # Conservative: add 25% buffer for price volatility
+            max_price *= 1.25
+
+            return max_price
+
+        except Exception as e:
+            self.logger.error(f"Error finding max future price: {e}")
+            # Very conservative: assume prices could double
+            return current_price_pln * 2.0
+
+    def _analyze_selling_opportunity(self, current_data: Dict[str, Any], price_data: Dict[str, Any],
                                      price_forecast: Optional[List[Dict[str, Any]]] = None) -> SellingOpportunity:
         """Analyze if there's a good opportunity to sell battery energy (Phase 2: with dynamic SOC)"""
         try:
@@ -471,7 +643,7 @@ class BatterySellingEngine:
             pv_power = current_data.get('pv', {}).get('power_w', 0)
             consumption = current_data.get('consumption', {}).get('power_w', 0)
             current_price_pln = price_data.get('current_price_pln', 0)
-            
+
             # Check safety conditions first
             safety_ok, safety_reason = self._check_safety_conditions(current_data)
             if not safety_ok:
@@ -483,6 +655,20 @@ class BatterySellingEngine:
                     estimated_duration_hours=0.0,
                     reasoning=f"Safety check failed: {safety_reason}",
                     safety_checks_passed=False,
+                    risk_level="high"
+                )
+
+            # CRITICAL: Check "sell-then-buy" prevention before proceeding
+            sell_then_buy_analysis = self._analyze_sell_then_buy_risk(current_data, price_data, price_forecast)
+            if not sell_then_buy_analysis.get('safe_to_sell', True):
+                return SellingOpportunity(
+                    decision=SellingDecision.WAIT,
+                    confidence=0.0,
+                    expected_revenue_pln=0.0,
+                    selling_power_w=0,
+                    estimated_duration_hours=0.0,
+                    reasoning=f"Sell-then-buy prevention: {sell_then_buy_analysis.get('reason', 'Risk detected')}",
+                    safety_checks_passed=True,
                     risk_level="high"
                 )
             
