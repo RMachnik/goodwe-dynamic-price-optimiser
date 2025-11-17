@@ -104,8 +104,17 @@ class TestStorageInterface:
         )
     
     @pytest.fixture
-    def storage(self, storage_config):
-        """Create storage instance"""
+    def storage(self, storage_config, temp_db):
+        """Create storage instance with schema"""
+        # Create schema and tables first
+        from database.schema import DatabaseSchema
+        schema = DatabaseSchema(temp_db)
+        assert schema.connect()
+        assert schema.create_tables()
+        assert schema.create_indexes()
+        schema.disconnect()
+
+        # Now create storage instance
         return SQLiteStorage(storage_config)
     
     @pytest.mark.asyncio
@@ -369,12 +378,13 @@ class TestStorageInterface:
     async def test_batch_operations(self, storage):
         """Test batch operations for performance"""
         await storage.connect()
-        
-        # Create large dataset
+
+        # Create large dataset with sufficient time spread to avoid precision issues
+        base_time = datetime.now().replace(microsecond=0)  # Remove microseconds for precision
         large_dataset = []
         for i in range(100):
             large_dataset.append({
-                'timestamp': datetime.now() + timedelta(minutes=i),
+                'timestamp': base_time + timedelta(minutes=i),
                 'battery_soc': 50.0 + i * 0.1,
                 'pv_power': 1000.0 + i * 10,
                 'grid_power': -500.0 - i * 5,
@@ -384,48 +394,55 @@ class TestStorageInterface:
                 'battery_voltage': 400.0 + i * 0.1,
                 'grid_voltage': 230.0 + i * 0.01
             })
-        
+
         # Save in batches
-        start_time = datetime.now()
+        save_start_time = datetime.now()
         assert await storage.save_energy_data(large_dataset)
-        end_time = datetime.now()
-        
+        save_end_time = datetime.now()
+
         # Should complete quickly
-        duration = (end_time - start_time).total_seconds()
-        assert duration < 5.0  # Should complete in under 5 seconds
-        
-        # Verify data was saved
-        start_time_query = datetime.now() - timedelta(hours=1)
-        end_time_query = datetime.now() + timedelta(hours=1)
-        retrieved_data = await storage.get_energy_data(start_time_query, end_time_query)
-        
+        save_duration = (save_end_time - save_start_time).total_seconds()
+        assert save_duration < 5.0  # Should complete in under 5 seconds
+
+        # Verify data was saved with wider time range to account for any timing precision issues
+        query_start_time = base_time - timedelta(minutes=5)
+        query_end_time = base_time + timedelta(hours=2)  # Extend far enough
+        retrieved_data = await storage.get_energy_data(query_start_time, query_end_time)
+
+        # Should have all 100 records
         assert len(retrieved_data) == 100
-        
+
         await storage.disconnect()
     
     @pytest.mark.asyncio
     async def test_error_handling(self, storage):
         """Test error handling and retry logic"""
-        # Test with invalid database path
+        # Test with invalid database path - should raise ConnectionError
         invalid_config = StorageConfig(
             db_path="/invalid/path/database.db",
             max_retries=2,
             retry_delay=0.1
         )
         invalid_storage = SQLiteStorage(invalid_config)
-        
-        # Should fail to connect
-        assert not await invalid_storage.connect()
-        
+
+        # Should fail to connect and raise ConnectionError
+        try:
+            await invalid_storage.connect()
+            assert False, "Should have raised ConnectionError"
+        except Exception as e:
+            # Should raise ConnectionError from the storage interface
+            from database.storage_interface import ConnectionError as StorageConnectionError
+            assert isinstance(e, StorageConnectionError), f"Unexpected exception type: {type(e)}"
+
         # Test with valid connection but invalid operations
         await storage.connect()
-        
+
         # Test with invalid data (should handle gracefully)
         invalid_data = [{'invalid': 'data'}]
         # Should not crash, may use fallback
         result = await storage.save_energy_data(invalid_data)
-        # Result may be False due to fallback, but should not crash
-        
+        # Result may be False due to fallback, but should not crash - doesn't matter for this test
+
         await storage.disconnect()
     
     @pytest.mark.asyncio
