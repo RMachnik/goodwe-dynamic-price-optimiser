@@ -555,6 +555,9 @@ class SQLiteStorage(StorageInterface, RetryMixin, CircuitBreakerMixin, FallbackM
     
     async def health_check(self) -> bool:
         """Check storage health"""
+        if not self.is_connected:
+            return False
+
         try:
             conn = await self._get_connection()
             await conn.execute("SELECT 1")
