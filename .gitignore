@@ -4,6 +4,14 @@ logs/
 out/
 *.log
 
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+goodwe_demo.db
+goodwe_energy.db
+data/*.db
+
 # Python
 __pycache__/
 *.py[cod]
