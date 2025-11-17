@@ -643,7 +643,7 @@ class MasterCoordinator:
             
             if should_charge:
                 # Calculate energy needed based on battery capacity and current SOC
-                battery_capacity = self.config.get('battery', {}).get('capacity_kwh', 10.0)
+                battery_capacity = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)
                 current_soc = self.current_data.get('battery', {}).get('soc_percent', 0)
                 target_soc = 80.0  # Target 80% SOC
                 energy_needed = battery_capacity * (target_soc - current_soc) / 100.0
@@ -651,9 +651,10 @@ class MasterCoordinator:
                 
                 # Calculate cost based on current price
                 if current_price > 0:
-                    estimated_cost_pln = energy_kwh * (current_price / 1000.0)  # Convert from PLN/MWh to PLN/kWh
+                    # current_price is already in PLN/kWh (converted on line 623)
+                    estimated_cost_pln = energy_kwh * current_price
                     
-                    # Calculate savings compared to reference price (400 PLN/MWh)
+                    # Calculate savings compared to reference price (400 PLN/MWh = 0.4 PLN/kWh)
                     reference_price = 400.0 / 1000.0  # 0.4 PLN/kWh
                     reference_cost = energy_kwh * reference_price
                     estimated_savings_pln = max(0, reference_cost - estimated_cost_pln)
@@ -799,9 +800,21 @@ class MasterCoordinator:
                 'price_data': price_data
             }
             
+            # Prepare normalized current_data with inverter key for safety monitor
+            # Map 'system' to 'inverter' for backward compatibility
+            normalized_current_data = self.current_data.copy()
+            if 'system' in normalized_current_data and 'inverter' not in normalized_current_data:
+                normalized_current_data['inverter'] = normalized_current_data['system'].copy()
+                # Add error_codes if available from inverter status
+                if hasattr(self.charging_controller.goodwe_charger.inverter, 'error_codes'):
+                    try:
+                        normalized_current_data['inverter']['error_codes'] = []
+                    except Exception:
+                        pass
+            
             # Check safety conditions first
             safety_report = await self.battery_selling_monitor.check_safety_conditions(
-                self.charging_controller.goodwe_charger.inverter, self.current_data
+                self.charging_controller.goodwe_charger.inverter, normalized_current_data
             )
             
             if safety_report.emergency_stop_required:
@@ -810,23 +823,29 @@ class MasterCoordinator:
                 return
             
             # Prepare data in the format expected by battery selling engine
+            # Map from enhanced_data_collector format (photovoltaic, house_consumption) to expected format (pv, consumption)
+            battery_data = self.current_data.get('battery', {})
+            pv_data = self.current_data.get('photovoltaic', {}) or self.current_data.get('pv', {})
+            consumption_data = self.current_data.get('house_consumption', {}) or self.current_data.get('consumption', {})
+            grid_data = self.current_data.get('grid', {})
+            
             selling_data = {
                 'battery': {
-                    'soc_percent': self.current_data.get('battery', {}).get('soc_percent', 0),
-                    'charging_status': self.current_data.get('battery', {}).get('charging_status', False),
-                    'current': self.current_data.get('battery', {}).get('current', 0),
-                    'power': self.current_data.get('battery', {}).get('power', 0),
-                    'temperature': self.current_data.get('battery', {}).get('temperature', 25)
+                    'soc_percent': battery_data.get('soc_percent', 0),
+                    'charging_status': battery_data.get('charging_status', False),
+                    'current': battery_data.get('current', 0),
+                    'power': battery_data.get('power', 0) or battery_data.get('power_w', 0),
+                    'temperature': battery_data.get('temperature', 25)
                 },
                 'pv': {
-                    'power_w': self.current_data.get('pv', {}).get('power', 0)  # Convert power to power_w
+                    'power_w': pv_data.get('current_power_w', 0) or pv_data.get('power_w', 0) or pv_data.get('power', 0)
                 },
                 'consumption': {
-                    'power_w': self.current_data.get('consumption', {}).get('house_consumption', 0)  # Convert house_consumption to power_w
+                    'power_w': consumption_data.get('current_power_w', 0) or consumption_data.get('power_w', 0) or consumption_data.get('house_consumption', 0)
                 },
                 'grid': {
-                    'power': self.current_data.get('grid', {}).get('power', 0),
-                    'voltage': self.current_data.get('grid', {}).get('voltage', 0)  # Add voltage for safety checks
+                    'power': grid_data.get('power', 0) or grid_data.get('power_w', 0),
+                    'voltage': grid_data.get('voltage', 0)
                 }
             }
             
@@ -879,24 +898,26 @@ class MasterCoordinator:
         reason = decision.get('reason', 'Unknown')
         priority = decision.get('priority', 'low')
         
+        # Get SOC for logging
+        battery_data = self.current_data.get('battery', {})
+        battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
+        
         if should_charge:
-            logger.info(f"Executing decision: Start charging - {reason}")
+            logger.info(f"Executing decision: Start charging at SOC {battery_soc}% - {reason}")
             # Check if this is a critical battery situation (force start)
-            battery_data = self.current_data.get('battery', {})
-            battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
             force_start = battery_soc <= 20 or priority == 'critical'
             
             # Always force start if decision was made to charge (decision engine already validated)
             if not force_start:
                 force_start = True
-                logger.info("Decision was made to charge - forcing start (decision engine already validated conditions)")
+                logger.info(f"Decision to charge validated by engine (SOC: {battery_soc}%, Priority: {priority})")
             
             await self.charging_controller.start_price_based_charging(
                 decision.get('price_data', {}), 
                 force_start=force_start
             )
         else:
-            logger.info(f"Executing decision: No action needed - {reason}")
+            logger.info(f"Executing decision: No action needed at SOC {battery_soc}% - {reason}")
             # Stop charging if currently charging
             if self.charging_controller.is_charging:
                 await self.charging_controller.stop_price_based_charging()
@@ -905,42 +926,46 @@ class MasterCoordinator:
         """Execute the charging decision"""
         action = decision.get('action', 'none')
         
+        # Get SOC for logging
+        battery_data = self.current_data.get('battery', {})
+        battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
+        
         if action == 'start_charging':
-            logger.info("Executing decision: Start charging")
-            # Check if this is a critical battery situation (force start)
-            battery_data = self.current_data.get('battery', {})
-            battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
+            logger.info(f"Executing decision: Start charging at SOC {battery_soc}%")
             force_start = battery_soc <= 5  # Emergency battery level only
             
             # If decision was made by smart charging system, trust it and force start
             # This prevents re-checking price when decision was already made with proper analysis
             if decision.get('priority') in ['medium', 'high', 'critical', 'emergency']:
                 force_start = True
-                logger.info(f"Trusting smart charging decision (priority: {decision.get('priority')}) - forcing start")
+                logger.info(f"Trusting smart charging decision (SOC: {battery_soc}%, Priority: {decision.get('priority')})")
             
             # Always force start if decision was made to charge (decision engine already validated)
             if not force_start:
                 force_start = True
-                logger.info("Decision was made to charge - forcing start (decision engine already validated conditions)")
+                logger.info(f"Decision validated by engine (SOC: {battery_soc}%)")
             
-            await self.charging_controller.start_price_based_charging(
+            result = await self.charging_controller.start_price_based_charging(
                 decision.get('price_data', {}), 
                 force_start=force_start
             )
             
+            if not result:
+                logger.warning(f"Charging execution blocked at SOC {battery_soc}% - See charging controller logs for details")
+            
         elif action == 'stop_charging':
-            logger.info("Executing decision: Stop charging")
+            logger.info(f"Executing decision: Stop charging at SOC {battery_soc}%")
             await self.charging_controller.stop_price_based_charging()
             
         elif action == 'continue_charging':
-            logger.info("Executing decision: Continue charging")
+            logger.info(f"Executing decision: Continue charging at SOC {battery_soc}%")
             # No action needed, charging continues
             
         elif action == 'none':
-            logger.info("Executing decision: No action needed")
+            logger.info(f"Executing decision: No action needed at SOC {battery_soc}%")
             
         else:
-            logger.warning(f"Unknown decision action: {action}")
+            logger.warning(f"Unknown decision action: {action} at SOC {battery_soc}%")
     
     async def _update_system_state(self):
         """Update system state based on current conditions"""
@@ -961,7 +986,9 @@ class MasterCoordinator:
             return
         
         # Calculate efficiency metrics
-        pv_production = self.current_data.get('pv', {}).get('total_power', 0)
+        # Use compatibility layer: check both 'photovoltaic' and 'pv' keys
+        pv_data = self.current_data.get('photovoltaic', {}) or self.current_data.get('pv', {})
+        pv_production = pv_data.get('total_power', 0) or pv_data.get('current_power_w', 0) or pv_data.get('power_w', 0)
         battery_charging = self.current_data.get('battery', {}).get('charging_power', 0)
         grid_import = self.current_data.get('grid', {}).get('import_power', 0)
         
@@ -1078,6 +1105,17 @@ class MultiFactorDecisionEngine:
         self.config = config
         self.charging_controller = charging_controller
         self.coordinator_config = config.get('coordinator', {})
+        
+        # Validate G14dynamic tariff configuration
+        tariff_config = config.get('electricity_tariff', {})
+        tariff_type = tariff_config.get('tariff_type', 'g12w')
+        if tariff_type == 'g14dynamic':
+            pse_enabled = config.get('pse_peak_hours', {}).get('enabled', False)
+            if not pse_enabled:
+                logger.error("G14dynamic tariff requires PSE Peak Hours (Kompas) to be enabled!")
+                logger.error("Please set pse_peak_hours.enabled = true in configuration")
+                raise ValueError("G14dynamic tariff requires pse_peak_hours.enabled = true")
+            logger.info("G14dynamic tariff detected - PSE Peak Hours integration enabled")
         
         # Decision weights (from project plan)
         self.weights = {
@@ -1355,27 +1393,38 @@ class MultiFactorDecisionEngine:
     def _apply_peak_hours_policy(self, action: str) -> str:
         """Adjust action based on Kompas (Peak Hours) policy if configured.
 
-        - REQUIRED REDUCTION (code 3): block grid charging -> return 'none'
-        - RECOMMENDED SAVING (code 2): prefer wait -> return 'none' if action is start
-        - RECOMMENDED USAGE (code 1): slightly permissive (no hard change here)
+        - WYMAGANE OGRANICZANIE (code 3): block grid charging -> return 'none'
+        - ZALECANE OSZCZĘDZANIE (code 2): prefer wait -> return 'none' if action is start
+        - NORMALNE/ZALECANE UŻYTKOWANIE (codes 1/0): informational only (no hard change)
         """
         try:
             if not getattr(self, 'peak_hours_collector', None):
                 return action
+            
+            # Get SOC for logging (if available)
+            battery_soc = None
+            if hasattr(self, 'current_data') and self.current_data:
+                battery_data = self.current_data.get('battery', {})
+                battery_soc = battery_data.get('soc_percent', battery_data.get('soc', None))
+            
             # Determine current hour status
             status = self.peak_hours_collector.get_status_for_time(datetime.now())
             if not status:
                 return action
 
-            if status.code == 3:  # REQUIRED REDUCTION
+            if status.code == 3:  # WYMAGANE OGRANICZANIE
                 if action.startswith('start'):
-                    logger.warning("Kompas REQUIRED REDUCTION: blocking grid charging in this hour")
+                    soc_info = f" (SOC: {battery_soc}%)" if battery_soc is not None else ""
+                    logger.warning(f"🚫 Kompas WYMAGANE OGRANICZANIE: Blocking grid charging{soc_info}, Peak hours code 3")
+                    logger.warning(f"   Reason: Required reduction period - grid charging not allowed regardless of price or battery level")
                     return 'none'
-            elif status.code == 2:  # RECOMMENDED SAVING
+            elif status.code == 2:  # ZALECANE OSZCZĘDZANIE
                 if action.startswith('start'):
-                    logger.info("Kompas RECOMMENDED SAVING: deferring start to reduce load")
+                    soc_info = f" (SOC: {battery_soc}%)" if battery_soc is not None else ""
+                    logger.info(f"⚠️  Kompas ZALECANE OSZCZĘDZANIE: Deferring charging start{soc_info}, Peak hours code 2")
+                    logger.info(f"   Reason: Recommended to save energy and reduce grid load during this period")
                     return 'none'
-            # code 1 (RECOMMENDED USAGE) and 0 (NORMAL) -> no strict change
+            # codes 1 (NORMALNE) and 0 (ZALECANE) -> no strict change
             return action
         except Exception as e:
             logger.debug(f"Peak Hours policy application failed: {e}")

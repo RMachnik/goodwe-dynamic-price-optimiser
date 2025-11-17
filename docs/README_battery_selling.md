@@ -9,7 +9,7 @@ The Battery Energy Selling functionality enables your GoodWe inverter to sell ex
 ### 🔋 **Conservative Safety Parameters**
 - **Minimum SOC**: 80% (only sell when battery is well-charged)
 - **Safety Margin**: 50% (never discharge below 50% SOC)
-- **Revenue Potential**: ~260 PLN/year (conservative estimate)
+- **Revenue Potential**: ~520 PLN/year (conservative estimate with smart timing)
 - **Battery Protection**: Excellent protection against degradation
 
 ### ⚡ **Smart Selling Logic**
@@ -17,6 +17,22 @@ The Battery Energy Selling functionality enables your GoodWe inverter to sell ex
 - **PV-Aware**: Avoids selling when PV production is sufficient
 - **Peak Hours**: Optimizes for high-price periods (5-9 PM)
 - **Night Preservation**: Never sells during night hours (10 PM - 6 AM)
+
+### 🎯 **Smart Timing (ENHANCED - Phase 1)**
+- **Extended Forecast Analysis**: Analyzes upcoming **12 hours** for better prices (upgraded from 6h)
+- **Peak Detection**: Identifies peak prices and waits to sell at optimal times
+- **Enhanced Percentile Thresholds**: 
+  - Top 5% prices: Aggressive immediate selling
+  - Top 15% prices: Standard selling if no better peak within 2h
+  - Top 25% prices: Conditional selling with opportunity cost check
+- **Improved Opportunity Cost**:
+  - 30%+ gain: Definitely wait (high confidence)
+  - 15-30% gain: Wait if low risk and <3h to peak
+  - 10-15% gain: Consider waiting if <1h away
+  - <10% gain: Sell now
+- **Trend Analysis**: Detects rising/falling price trends for better decisions
+- **Multi-Session Support**: Plans multiple selling sessions throughout the day
+- **Confidence-Based**: Adjusts decisions based on forecast reliability
 
 ### 🛡️ **Comprehensive Safety Monitoring**
 - **Real-time Safety Checks**: Battery temperature, SOC, grid voltage
@@ -43,8 +59,36 @@ battery_selling:
   grid_export_limit_w: 5000        # Max export power (5kW)
   battery_dod_limit: 50            # Max discharge depth (50% = 50% SOC min)
   
+  # Smart Timing Configuration (Avoid Selling Too Early)
+  smart_timing:
+    enabled: true                          # Enable smart timing logic
+    forecast_lookahead_hours: 6            # Look ahead 6 hours for better prices
+    near_peak_threshold_percent: 95        # Sell if within 95% of forecasted peak
+    min_peak_difference_percent: 15        # Wait only if peak is 15%+ higher
+    max_wait_time_hours: 4                 # Maximum 4 hours to wait for better price
+    min_forecast_confidence: 0.6           # Minimum forecast confidence to trust
+    
+    # Opportunity cost thresholds
+    opportunity_cost:
+      significant_savings_percent: 20      # 20%+ revenue gain = significant (definitely wait)
+      marginal_savings_percent: 5          # 5%+ revenue gain = marginal (consider waiting)
+      
+    # Trend analysis configuration
+    trend_analysis:
+      enabled: true                        # Enable price trend analysis
+      trend_window_hours: 2                # Analyze 2-hour price trends
+      rising_threshold: 0.02               # 2% increase = rising trend
+      falling_threshold: -0.02             # 2% decrease = falling trend
+      
+    # Multi-session selling configuration
+    multi_session:
+      enabled: true                        # Enable multiple selling sessions per day
+      max_sessions_per_day: 3              # Maximum 3 selling sessions
+      min_session_gap_hours: 1             # Minimum 1 hour between sessions
+      reserve_battery_percent: 20          # Reserve 20% battery for house usage
+  
   # Revenue estimation (conservative)
-  expected_daily_revenue_pln: 0.71  # ~0.71 PLN/day (2.85 kWh × 0.25 PLN/kWh)
+  expected_daily_revenue_pln: 1.43  # ~1.43 PLN/day (5.7 kWh × 0.25 PLN/kWh)
   expected_monthly_revenue_pln: 21  # ~21 PLN/month
   expected_annual_revenue_pln: 260  # ~260 PLN/year
   
@@ -73,6 +117,8 @@ The system continuously monitors:
 - **Electricity Price**: Must be ≥0.50 PLN/kWh
 - **PV Production**: Only sells when PV insufficient for consumption
 - **Safety Conditions**: Temperature, voltage, error codes
+- **Price Forecast**: Analyzes next 6 hours for better selling opportunities
+- **Price Trends**: Detects if prices are rising, falling, or stable
 
 ### 2. **Selling Logic**
 
@@ -87,7 +133,23 @@ def should_start_selling(battery_soc, current_price, pv_power, consumption):
     )
 ```
 
-### 3. **GoodWe Integration**
+### 3. **Smart Timing Process**
+
+The smart timing engine performs these steps:
+
+1. **Fetch Price Forecast**: Get next 6 hours of price forecasts from PSE
+2. **Analyze Price Context**: Calculate percentiles, identify high/low prices
+3. **Detect Peak**: Find peak price within forecast window
+4. **Analyze Trend**: Determine if price is rising, falling, or stable
+5. **Calculate Opportunity Cost**: Compare revenue now vs. waiting for peak
+6. **Make Decision**:
+   - **SELL NOW** if at/near peak (top 10% prices)
+   - **SELL NOW** if falling trend and no better peak ahead
+   - **WAIT** if significant peak ahead (20%+ higher revenue)
+   - **WAIT** if moderate peak ahead and good forecast confidence
+   - **NO OPPORTUNITY** if price too low overall
+
+### 4. **GoodWe Integration**
 
 Uses standard GoodWe inverter features:
 - **Operation Mode**: `eco_discharge` for battery selling
@@ -100,14 +162,14 @@ Uses standard GoodWe inverter features:
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| **Battery Capacity** | 10 kWh | GoodWe Lynx-D 10kWh |
-| **Usable Energy** | 3.0 kWh | 80% - 50% = 30% usable |
-| **Net Sellable** | 2.85 kWh | 3.0 kWh × 95% efficiency |
+| **Battery Capacity** | 20 kWh | 2x GoodWe Lynx-D 10kWh |
+| **Usable Energy** | 6.0 kWh | 80% - 50% = 30% usable |
+| **Net Sellable** | 5.7 kWh | 6.0 kWh × 95% efficiency |
 | **Daily Cycles** | 1-2 | Conservative with 50% safety margin |
 | **Price Spread** | 0.20-0.30 PLN/kWh | Average price difference |
-| **Daily Revenue** | 0.71 PLN | 2.85 kWh × 0.25 PLN/kWh |
-| **Monthly Revenue** | ~21 PLN | 0.71 PLN × 30 days |
-| **Annual Revenue** | ~260 PLN | Conservative estimate |
+| **Daily Revenue** | ~1.43 PLN | 5.7 kWh × 0.25 PLN/kWh |
+| **Monthly Revenue** | ~43 PLN | 1.43 PLN × 30 days |
+| **Annual Revenue** | ~520 PLN | Conservative estimate |
 
 ### **Risk Assessment**
 
@@ -187,8 +249,17 @@ from battery_selling_monitor import BatterySellingMonitor
 engine = BatterySellingEngine(config)
 monitor = BatterySellingMonitor(config)
 
-# Analyze selling opportunity
+# Analyze selling opportunity (with smart timing)
 opportunity = await engine.analyze_selling_opportunity(current_data, price_data)
+
+# Check timing recommendation
+if opportunity.timing_recommendation:
+    print(f"Decision: {opportunity.timing_recommendation.decision}")
+    print(f"Reasoning: {opportunity.timing_recommendation.reasoning}")
+    print(f"Opportunity cost: {opportunity.opportunity_cost_pln:.2f} PLN")
+    if opportunity.should_wait_for_peak:
+        print(f"Peak expected at: {opportunity.optimal_sell_time}")
+        print(f"Peak price: {opportunity.peak_price:.3f} PLN/kWh")
 
 # Check safety conditions
 safety_report = await monitor.check_safety_conditions(inverter, current_data)
@@ -196,6 +267,56 @@ safety_report = await monitor.check_safety_conditions(inverter, current_data)
 # Start selling session (if safe and profitable)
 if opportunity.decision == "start_selling" and safety_report.overall_status == "safe":
     success = await engine.start_selling_session(inverter, opportunity)
+```
+
+### **Smart Timing Example Scenarios**
+
+#### Scenario 1: Wait for Evening Peak
+```
+Time: 14:00
+Current Price: 0.60 PLN/kWh (decent)
+Forecast: Peak at 19:00 with 0.95 PLN/kWh
+
+Decision: WAIT
+Reasoning: Peak expected in 5h at 0.95 PLN/kWh (+58%, opportunity cost: 2.00 PLN)
+Action: System will wait and sell at 19:00
+Result: +2.00 PLN revenue gain vs selling immediately
+```
+
+#### Scenario 2: Already at Peak
+```
+Time: 19:00
+Current Price: 0.95 PLN/kWh (peak)
+Forecast: Prices dropping to 0.70 PLN/kWh
+
+Decision: SELL NOW
+Reasoning: Current price 0.95 PLN/kWh is at peak (top 10%, 100th percentile)
+Action: Sell immediately
+Result: Maximize revenue by selling at peak
+```
+
+#### Scenario 3: Falling Trend - Sell Now
+```
+Time: 20:00
+Current Price: 0.80 PLN/kWh
+Forecast: Prices falling to 0.60 PLN/kWh
+
+Decision: SELL NOW
+Reasoning: Price is falling and no significant peak ahead - sell now
+Action: Sell immediately before price drops
+Result: Avoid revenue loss from price decline
+```
+
+#### Scenario 4: Price Too Low - Wait
+```
+Time: 12:00
+Current Price: 0.35 PLN/kWh (low)
+Forecast: Only rises to 0.40 PLN/kWh
+
+Decision: NO OPPORTUNITY
+Reasoning: Current price 0.35 PLN/kWh below high threshold (only 20th percentile)
+Action: Don't sell, keep battery for house usage
+Result: Preserve battery for when it's actually needed
 ```
 
 ### **Revenue Analysis**

@@ -29,7 +29,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from master_coordinator import MasterCoordinator, SystemState
 from enhanced_data_collector import EnhancedDataCollector
 from automated_price_charging import AutomatedPriceCharger
-from polish_electricity_analyzer import PolishElectricityAnalyzer
 from weather_data_collector import WeatherDataCollector
 from pv_consumption_analyzer import PVConsumptionAnalyzer
 from multi_session_manager import MultiSessionManager

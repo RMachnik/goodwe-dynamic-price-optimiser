@@ -21,6 +21,14 @@ from dataclasses import dataclass
 from pv_forecasting import PVForecaster
 from price_window_analyzer import PriceWindowAnalyzer, PriceWindow
 
+
+try:
+    from tariff_pricing import TariffPricingCalculator, PriceComponents
+    TARIFF_PRICING_AVAILABLE = True
+except ImportError:
+    TARIFF_PRICING_AVAILABLE = False
+    logging.warning("Tariff pricing module not available - using SC-only pricing")
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -64,7 +72,7 @@ class HybridChargingLogic:
         
         # Charging parameters
         self.charging_rate_kw = self.config.get('charging_rate_kw', 3.0)  # Default 3kW charging
-        self.battery_capacity_kwh = self.config.get('battery_capacity_kwh', 10.0)  # Default 10kWh battery
+        self.battery_capacity_kwh = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)
         self.min_charging_duration_hours = self.config.get('min_charging_duration_hours', 0.25)  # 15 minutes
         self.max_charging_duration_hours = self.config.get('max_charging_duration_hours', 4.0)   # 4 hours
         
@@ -81,12 +89,21 @@ class HybridChargingLogic:
         self.pv_charging_efficiency = self.config.get('pv_charging_efficiency', 0.95)  # 95% efficiency
         self.grid_charging_efficiency = self.config.get('grid_charging_efficiency', 0.90)  # 90% efficiency
         self.house_consumption_buffer_kw = self.config.get('house_consumption_buffer_kw', 0.5)  # 500W buffer
+        
+        # Tariff pricing calculator (if available)
+        self.tariff_calculator = None
+        if TARIFF_PRICING_AVAILABLE:
+            try:
+                self.tariff_calculator = TariffPricingCalculator(self.config)
+                logger.info("Tariff pricing calculator initialized for hybrid charging logic")
+            except Exception as e:
+                logger.warning(f"Failed to initialize tariff calculator: {e}")
     
     def _get_default_config(self) -> Dict[str, Any]:
         """Get default configuration when config file is missing or invalid"""
         return {
             'charging_rate_kw': 3.0,
-            'battery_capacity_kwh': 10.0,
+            'battery_management': {'capacity_kwh': 20.0},
             'min_charging_duration_hours': 0.25,
             'max_charging_duration_hours': 4.0,
             'min_savings_threshold_pln': 50.0,
@@ -576,7 +593,15 @@ class HybridChargingLogic:
                     item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
                     if item_time <= current_time < item_time + timedelta(minutes=15):
                         market_price = float(item['csdac_pln'])
-                        return market_price + 0.0892  # Add SC component
+                        
+                        if self.tariff_calculator:
+                            # Use tariff-aware pricing (price is in PLN/MWh)
+                            market_price_kwh = market_price / 1000
+                            components = self.tariff_calculator.calculate_final_price(market_price_kwh, item_time, None)
+                            return components.final_price  # Return in PLN/kWh
+                        else:
+                            # Fallback: SC component only
+                            return market_price / 1000 + 0.0892  # Convert to PLN/kWh and add SC
             elif 'prices' in price_data:
                 # Simple format with just prices array
                 return price_data.get('current_price', price_data['prices'][0] if price_data['prices'] else 400.0)

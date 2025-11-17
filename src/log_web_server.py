@@ -96,6 +96,11 @@ class LogWebServer:
         self.data_log = self.log_dir / "enhanced_data_collector.log"
         self.fast_charge_log = self.log_dir / "fast_charge.log"
         
+        # Initialize daily snapshot manager for efficient monthly reporting
+        from daily_snapshot_manager import DailySnapshotManager
+        project_root = Path(__file__).parent.parent
+        self.snapshot_manager = DailySnapshotManager(project_root)
+        
         # Setup routes
         self._setup_routes()
         
@@ -324,15 +329,6 @@ class LogWebServer:
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
         
-        @self.app.route('/battery-selling')
-        def get_battery_selling():
-            """Get battery selling decision history and analytics"""
-            try:
-                selling_data = self._get_battery_selling_data()
-                return jsonify(selling_data)
-            except Exception as e:
-                return jsonify({'error': str(e)}), 500
-        
         @self.app.route('/historical-data')
         def get_historical_data():
             """Get historical time series data for SOC and PV production"""
@@ -340,6 +336,49 @@ class LogWebServer:
                 historical_data = self._get_historical_time_series_data()
                 return jsonify(historical_data)
             except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/monthly-summary')
+        def get_monthly_summary():
+            """Get monthly summary statistics"""
+            try:
+                # Get year and month from query params (default to current month)
+                year = request.args.get('year', type=int)
+                month = request.args.get('month', type=int)
+                
+                if year is None or month is None:
+                    now = datetime.now()
+                    year = year or now.year
+                    month = month or now.month
+                
+                # Check cache first (60s TTL for monthly data)
+                cache_key = f'monthly_summary_{year}_{month}'
+                cached_data = self._get_cached_data(cache_key, ttl=60)
+                if cached_data:
+                    return jsonify(cached_data)
+                
+                # Get monthly summary
+                summary = self._get_monthly_summary(year, month)
+                self._set_cached_data(cache_key, summary)
+                return jsonify(summary)
+            except Exception as e:
+                logger.error(f"Error getting monthly summary: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/monthly-comparison')
+        def get_monthly_comparison():
+            """Get current month vs previous month comparison"""
+            try:
+                # Check cache first (60s TTL)
+                cached_data = self._get_cached_data('monthly_comparison', ttl=60)
+                if cached_data:
+                    return jsonify(cached_data)
+                
+                comparison = self._get_monthly_comparison()
+                self._set_cached_data('monthly_comparison', comparison)
+                return jsonify(comparison)
+            except Exception as e:
+                logger.error(f"Error getting monthly comparison: {e}")
                 return jsonify({'error': str(e)}), 500
     
     def _get_log_file(self, log_name: str) -> Optional[Path]:
@@ -747,69 +786,6 @@ class LogWebServer:
                 'error': str(e),
                 'timestamp': datetime.now().isoformat(),
                 'data_source': 'unknown'
-            }
-    
-    def _get_battery_selling_data(self) -> Dict[str, Any]:
-        """Get battery selling decision history and analytics"""
-        try:
-            # Check if there are any battery selling decision files
-            project_root = Path(__file__).parent.parent
-            selling_files = list((project_root / "out" / "energy_data").glob("battery_selling_decision_*.json"))
-            
-            selling_decisions = []
-            total_revenue = 0.0
-            total_energy_sold = 0.0
-            active_sessions = 0
-            
-            for file_path in sorted(selling_files, key=lambda x: x.stat().st_mtime, reverse=True)[:50]:  # Last 50 decisions
-                try:
-                    with open(file_path, 'r') as f:
-                        decision_data = json.load(f)
-                        selling_decisions.append(decision_data)
-                        
-                        # Calculate totals
-                        if decision_data.get('action') == 'battery_selling':
-                            total_revenue += decision_data.get('expected_revenue_pln', 0)
-                            total_energy_sold += decision_data.get('energy_sold_kwh', 0)
-                            if decision_data.get('decision') == 'start_selling':
-                                active_sessions += 1
-                                
-                except Exception as e:
-                    logger.warning(f"Failed to read battery selling file {file_path}: {e}")
-            
-            # Calculate analytics
-            avg_revenue_per_session = total_revenue / len(selling_decisions) if selling_decisions else 0
-            avg_energy_per_session = total_energy_sold / len(selling_decisions) if selling_decisions else 0
-            
-            # Get recent activity (last 24 hours)
-            recent_cutoff = datetime.now() - timedelta(hours=24)
-            recent_decisions = [
-                d for d in selling_decisions 
-                if datetime.fromisoformat(d['timestamp'].replace('Z', '+00:00')) > recent_cutoff
-            ]
-            
-            return {
-                'decisions': selling_decisions,
-                'analytics': {
-                    'total_sessions': len(selling_decisions),
-                    'total_revenue_pln': round(total_revenue, 2),
-                    'total_energy_sold_kwh': round(total_energy_sold, 2),
-                    'avg_revenue_per_session_pln': round(avg_revenue_per_session, 2),
-                    'avg_energy_per_session_kwh': round(avg_energy_per_session, 2),
-                    'active_sessions': active_sessions,
-                    'recent_24h_sessions': len(recent_decisions),
-                    'recent_24h_revenue_pln': round(sum(d.get('expected_revenue_pln', 0) for d in recent_decisions), 2)
-                },
-                'timestamp': datetime.now().isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to get battery selling data: {e}")
-            return {
-                'decisions': [],
-                'analytics': {},
-                'error': str(e),
-                'timestamp': datetime.now().isoformat()
             }
     
     def _get_dashboard_template(self) -> str:
@@ -1221,9 +1197,7 @@ class LogWebServer:
         <div class="tabs">
             <div class="tab active" onclick="showTab('overview')">Overview</div>
             <div class="tab" onclick="showTab('decisions')">Decisions</div>
-            <div class="tab" onclick="showTab('battery-selling')">Battery Selling</div>
             <div class="tab" onclick="showTab('time-series')">Time Series</div>
-            <div class="tab" onclick="showTab('metrics')">Metrics</div>
             <div class="tab" onclick="showTab('logs')">Logs</div>
         </div>
         
@@ -1250,12 +1224,7 @@ class LogWebServer:
                 </div>
                 
                 <div class="card">
-                    <h3>Battery Selling Status</h3>
-                    <div id="battery-selling-status">Loading...</div>
-                </div>
-                
-                <div class="card">
-                    <h3>Cost & Savings</h3>
+                    <h3>Cost & Savings <span style="font-size: 0.8em; color: #888;">(Current Month)</span></h3>
                     <div id="cost-savings">Loading...</div>
                 </div>
             </div>
@@ -1299,28 +1268,10 @@ class LogWebServer:
                             <span style="font-weight: 600;">Wait:</span>
                             <span id="wait-count" class="stat-value" style="background: #ffc107; color: black; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">0</span>
                         </div>
-                        <div class="stat-item" style="display: flex; align-items: center; gap: 8px;">
-                            <span style="font-weight: 600;">Battery Selling:</span>
-                            <span id="battery-selling-count" class="stat-value" style="background: #17a2b8; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">0</span>
-                        </div>
                     </div>
                 </div>
                 
                 <div id="decisions-list">Loading...</div>
-            </div>
-        </div>
-        
-        <!-- Battery Selling Tab -->
-        <div id="battery-selling" class="tab-content">
-            <div class="grid">
-                <div class="card">
-                    <h3>Battery Selling Analytics</h3>
-                    <div id="battery-selling-analytics">Loading...</div>
-                </div>
-                <div class="card">
-                    <h3>Recent Selling Decisions</h3>
-                    <div id="battery-selling-decisions">Loading...</div>
-                </div>
             </div>
         </div>
         
@@ -1368,24 +1319,6 @@ class LogWebServer:
                             <span class="metric-label">PV Peak</span>
                             <span class="metric-value" id="pv-peak">--</span>
                         </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Metrics Tab -->
-        <div id="metrics" class="tab-content">
-            <div class="grid">
-                <div class="card">
-                    <h3>Decision Analytics</h3>
-                    <div class="chart-container">
-                        <canvas id="decisionChart"></canvas>
-                    </div>
-                </div>
-                <div class="card">
-                    <h3>Cost Analysis</h3>
-                    <div class="chart-container">
-                        <canvas id="costChart"></canvas>
                     </div>
                 </div>
             </div>
@@ -1446,12 +1379,8 @@ class LogWebServer:
             // Load data for the tab
             if (tabName === 'decisions') {
                 loadDecisions();
-            } else if (tabName === 'battery-selling') {
-                loadBatterySelling();
             } else if (tabName === 'time-series') {
                 loadTimeSeries();
-            } else if (tabName === 'metrics') {
-                loadMetrics();
             }
         }
         
@@ -1542,10 +1471,6 @@ class LogWebServer:
                             <span class="metric-value">${(normalized.house_consumption && normalized.house_consumption.current_power_w != null) ? normalized.house_consumption.current_power_w : 'N/A'}W</span>
                         </div>
                         <div class="metric">
-                            <span class="metric-label">Grid Flow</span>
-                            <span class="metric-value">${(normalized.grid && normalized.grid.current_power_w != null) ? normalized.grid.current_power_w : 'N/A'}W (${normalized.grid && normalized.grid.flow_direction ? normalized.grid.flow_direction : 'N/A'})</span>
-                        </div>
-                        <div class="metric">
                             <span class="metric-label">L1 Current</span>
                             <span class="metric-value">${(normalized.grid && normalized.grid.l1_current_a != null ? normalized.grid.l1_current_a : 'N/A')} A</span>
                         </div>
@@ -1564,10 +1489,6 @@ class LogWebServer:
                         <div class="metric">
                             <span class="metric-label">Cheapest Price</span>
                             <span class="metric-value">${(normalized.pricing && normalized.pricing.cheapest_price_pln_kwh != null) ? normalized.pricing.cheapest_price_pln_kwh : 'N/A'} PLN/kWh (${normalized.pricing && normalized.pricing.cheapest_hour ? normalized.pricing.cheapest_hour : 'N/A'})</span>
-                        </div>
-                        <div class="system-health">
-                            <span class="health-indicator health-${(normalized.system_health && normalized.system_health.status) ? normalized.system_health.status : 'unknown'}">${(normalized.system_health && normalized.system_health.status ? String(normalized.system_health.status).toUpperCase() : 'UNKNOWN')}</span>
-                            <span>Uptime: ${(normalized.system_health && (normalized.system_health.uptime_human || normalized.system_health.uptime_hours != null)) ? (normalized.system_health.uptime_human || (normalized.system_health.uptime_hours + 'h')) : 'N/A'}</span>
                         </div>
                     `;
                     document.getElementById('current-state').innerHTML = stateHtml;
@@ -1626,7 +1547,7 @@ class LogWebServer:
                                 </div>
                                 <div class="metric" title="Average confidence level of all decisions made">
                                     <span class="metric-label">Avg Confidence</span>
-                                    <span class="metric-value">${(data.avg_confidence * 100).toFixed(1)}%</span>
+                                    <span class="metric-value">${data.avg_confidence.toFixed(1)}%</span>
                                 </div>
                                 <div class="monitoring-note">
                                     <small>System is actively monitoring conditions for optimal charging opportunities</small>
@@ -1656,7 +1577,7 @@ class LogWebServer:
                         </div>
                         <div class="metric" title="Average confidence level of all decisions made">
                             <span class="metric-label">Avg Confidence</span>
-                            <span class="metric-value">${(data.avg_confidence * 100).toFixed(1)}%</span>
+                            <span class="metric-value">${data.avg_confidence.toFixed(1)}%</span>
                         </div>
                     `;
                     document.getElementById('performance-metrics').innerHTML = metricsHtml;
@@ -1849,7 +1770,6 @@ class LogWebServer:
                     document.getElementById('total-count').textContent = data.total_count || 0;
                     document.getElementById('charging-count').textContent = data.charging_count || 0;
                     document.getElementById('wait-count').textContent = data.wait_count || 0;
-                    document.getElementById('battery-selling-count').textContent = data.battery_selling_count || 0;
                     
                     // Group decisions by date
                     const groupedDecisions = groupDecisionsByDate(data.decisions);
@@ -1877,14 +1797,25 @@ class LogWebServer:
                                         const decisionClass = getDecisionClass(decision.action);
                                         const confidencePercent = (decision.confidence * 100).toFixed(1);
                                         
+                                        // Get SOC color based on battery level
+                                        const getSocColor = (soc) => {
+                                            if (soc < 20) return '#dc3545'; // Red
+                                            if (soc < 50) return '#ffc107'; // Yellow
+                                            return '#28a745'; // Green
+                                        };
+                                        
                                         // Determine execution status with detailed reasons
                                         const getExecutionStatus = (decision) => {
+                                            const batterySoc = decision.battery_soc || 0;
+                                            const socText = `SOC: ${batterySoc}%`;
+                                            
                                             if (decision.action === 'wait') {
                                                 return { 
                                                     status: 'N/A', 
                                                     color: '#6c757d', 
                                                     icon: '⏸️',
-                                                    reason: 'Wait decision - no execution needed'
+                                                    reason: 'Wait decision - no execution needed',
+                                                    soc: batterySoc
                                                 };
                                             }
                                             
@@ -1896,41 +1827,71 @@ class LogWebServer:
                                             // If all values are 0, likely not executed - determine why
                                             if (energy === 0 && cost === 0 && savings === 0) {
                                                 // Analyze the reason to determine blocking cause
-                                                const reason = decision.reason || '';
+                                                // Battery selling decisions use 'reasoning', charging uses 'reason'
+                                                const reason = decision.reason || decision.reasoning || '';
+                                                const reasonLower = reason.toLowerCase();
                                                 let blockReason = 'Unknown reason';
                                                 
-                                                // Check for specific blocking patterns
-                                                if (reason.includes('emergency') || reason.includes('safety')) {
-                                                    blockReason = 'Emergency safety stop';
-                                                } else if (reason.includes('price') && reason.includes('not optimal')) {
-                                                    blockReason = 'Price threshold not met';
-                                                } else if (reason.includes('Could not determine current price')) {
-                                                    blockReason = 'Price data unavailable';
-                                                } else if (reason.includes('battery') && reason.includes('safety margin')) {
-                                                    blockReason = 'Battery safety margin exceeded';
-                                                } else if (reason.includes('grid voltage') && reason.includes('outside safe range')) {
-                                                    blockReason = 'Grid voltage out of range';
-                                                } else if (reason.includes('communication') || reason.includes('connection')) {
-                                                    blockReason = 'Communication error';
-                                                } else if (reason.includes('inverter') && reason.includes('error')) {
-                                                    blockReason = 'Inverter error';
-                                                } else if (reason.includes('timeout') || reason.includes('retry')) {
-                                                    blockReason = 'Communication timeout';
-                                                } else if (reason.includes('charging') && reason.includes('already')) {
-                                                    blockReason = 'Already charging';
-                                                } else if (reason.includes('PV') && reason.includes('overproduction')) {
-                                                    blockReason = 'PV overproduction detected';
-                                                } else if (reason.includes('consumption') && reason.includes('high')) {
-                                                    blockReason = 'High consumption detected';
+                                                // Check for specific blocking patterns with more detail
+                                                const kompasRequired = reasonLower.includes('wymagane ogranicz') || reasonLower.includes('required reduction');
+                                                const kompasSaving = reasonLower.includes('zalecane oszcz') || reasonLower.includes('recommended saving');
+                                                
+                                                if (reasonLower.includes('kompas') && kompasRequired) {
+                                                    blockReason = `Kompas WYMAGANE OGRANICZANIE - Grid charging blocked during peak hours (${socText})`;
+                                                } else if (reasonLower.includes('kompas') && kompasSaving) {
+                                                    blockReason = `Kompas ZALECANE OSZCZĘDZANIE - Deferred to reduce load (${socText})`;
+                                                } else if (reasonLower.includes('peak hours') || reasonLower.includes('peak period')) {
+                                                    blockReason = `Peak hours restriction - Charging blocked (${socText})`;
+                                                } else if (reasonLower.includes('emergency') || reasonLower.includes('safety')) {
+                                                    blockReason = `Emergency safety stop at ${socText}`;
+                                                } else if (reasonLower.includes('price') && reasonLower.includes('not optimal')) {
+                                                    blockReason = `Price threshold not met at ${socText}`;
+                                                } else if (reasonLower.includes('could not determine current price')) {
+                                                    blockReason = `Price data unavailable (${socText})`;
+                                                } else if (reasonLower.includes('battery') && reasonLower.includes('safety margin')) {
+                                                    blockReason = `Battery safety margin exceeded (${socText})`;
+                                                } else if (reasonLower.includes('grid voltage') && reasonLower.includes('outside safe range')) {
+                                                    blockReason = `Grid voltage out of range at ${socText}`;
+                                                } else if (reasonLower.includes('communication') || reasonLower.includes('connection')) {
+                                                    blockReason = `Communication error (${socText})`;
+                                                } else if (reasonLower.includes('inverter') && reasonLower.includes('error')) {
+                                                    blockReason = `Inverter error at ${socText}`;
+                                                } else if (reasonLower.includes('timeout') || reasonLower.includes('retry')) {
+                                                    blockReason = `Communication timeout (${socText})`;
+                                                } else if (reasonLower.includes('charging') && reasonLower.includes('already')) {
+                                                    blockReason = `Already charging at ${socText}`;
+                                                } else if (reasonLower.includes('pv') && reasonLower.includes('overproduction')) {
+                                                    blockReason = `PV overproduction detected (${socText})`;
+                                                } else if (reasonLower.includes('consumption') && reasonLower.includes('high')) {
+                                                    blockReason = `High consumption detected (${socText})`;
+                                                } else if (reasonLower.includes('no suitable price window') || reasonLower.includes('not cheap enough')) {
+                                                    blockReason = `Price conditions not met (${socText})`;
+                                                } else if (reasonLower.includes('below dynamic minimum threshold') || reasonLower.includes('below minimum threshold')) {
+                                                    // Extract the threshold from reason if possible
+                                                    const thresholdMatch = reason.match(/(\d+(?:\.\d+)?)%/);
+                                                    const threshold = thresholdMatch ? thresholdMatch[1] : 'threshold';
+                                                    blockReason = `SOC ${batterySoc}% below required ${threshold}% (price/conditions not met)`;
+                                                } else if (reasonLower.includes('pv power') && reasonLower.includes('sufficient')) {
+                                                    blockReason = `PV power sufficient - no need to sell battery (${socText})`;
+                                                } else if (reasonLower.includes('price') && reasonLower.includes('below minimum')) {
+                                                    blockReason = `Price too low for selling (${socText})`;
+                                                } else if (reasonLower.includes('not optimal') || reasonLower.includes('confidence')) {
+                                                    blockReason = `Conditions not optimal (low confidence/revenue) (${socText})`;
+                                                } else if (reasonLower.includes('recharge opportunity') || reasonLower.includes('no recharge')) {
+                                                    blockReason = `No recharge opportunity in forecast (${socText})`;
+                                                } else if (reasonLower.includes('outside peak hours') || reasonLower.includes('not peak hour')) {
+                                                    blockReason = `Outside peak hours - dynamic SOC requires 17:00-21:00 (${socText})`;
                                                 } else {
-                                                    blockReason = 'Execution blocked by safety system';
+                                                    // Show the actual reason if available, otherwise generic message
+                                                    blockReason = reason && reason.trim() ? `${reason} (${socText})` : `Execution blocked - ${socText}`;
                                                 }
                                                 
                                                 return { 
                                                     status: 'BLOCKED', 
                                                     color: '#dc3545', 
                                                     icon: '🚫',
-                                                    reason: blockReason
+                                                    reason: blockReason,
+                                                    soc: batterySoc
                                                 };
                                             }
                                             
@@ -1939,7 +1900,8 @@ class LogWebServer:
                                                 status: 'EXECUTED', 
                                                 color: '#28a745', 
                                                 icon: '✅',
-                                                reason: `Charged ${energy.toFixed(2)} kWh for ${cost.toFixed(2)} PLN`
+                                                reason: `Charged ${energy.toFixed(2)} kWh for ${cost.toFixed(2)} PLN`,
+                                                soc: batterySoc
                                             };
                                         };
                                         
@@ -1951,7 +1913,12 @@ class LogWebServer:
                                                     <div style="flex: 1; min-width: 200px;">
                                                         <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 5px;">${new Date(decision.timestamp).toLocaleTimeString()}</div>
                                                         <div style="font-weight: 600; font-size: 16px; margin-bottom: 5px; text-transform: capitalize;">${decision.action.replace('_', ' ')}</div>
-                                                        <div style="color: var(--text-muted); font-size: 14px;">${decision.reason}</div>
+                                                        <div style="color: var(--text-muted); font-size: 14px;">${decision.reason || decision.reasoning || 'No reason provided'}</div>
+                                                        ${execution.soc ? `
+                                                            <div style="margin-top: 8px; display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; background: ${getSocColor(execution.soc)}22; border: 1px solid ${getSocColor(execution.soc)}; border-radius: 8px;">
+                                                                <span style="font-size: 13px; font-weight: 600; color: ${getSocColor(execution.soc)};">${execution.status === 'EXECUTED' ? '⚡' : '🔋'} ${execution.soc}%</span>
+                                                            </div>
+                                                        ` : ''}
                                                     </div>
                                                     <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
                                                         <div style="background: ${getDecisionColor(decision.action)}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">
@@ -1960,9 +1927,11 @@ class LogWebServer:
                                                         <div style="background: ${execution.color}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">
                                                             ${execution.icon} ${execution.status}
                                                         </div>
-                                                        <div style="font-size: 11px; color: var(--text-muted); text-align: right; max-width: 150px;">
-                                                            ${execution.reason}
-                                                        </div>
+                                                        ${execution.status === 'BLOCKED' ? `
+                                                            <div style="font-size: 11px; color: ${execution.color}; text-align: right; max-width: 200px; font-weight: 500;">
+                                                                ${execution.reason}
+                                                            </div>
+                                                        ` : ''}
                                                         <div style="font-size: 12px; color: var(--text-muted);">
                                                             Confidence: ${confidencePercent}%
                                                         </div>
@@ -2048,172 +2017,6 @@ class LogWebServer:
             return '#dc3545';
         }
         
-        function loadBatterySelling() {
-            // Load analytics
-            fetch('/battery-selling')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        document.getElementById('battery-selling-analytics').innerHTML = `<p>Error: ${data.error}</p>`;
-                        document.getElementById('battery-selling-decisions').innerHTML = `<p>Error: ${data.error}</p>`;
-                        return;
-                    }
-                    
-                    // Display analytics
-                    const analytics = data.analytics;
-                    const analyticsHtml = `
-                        <div class="metrics-grid">
-                            <div class="metric">
-                                <span class="metric-label">Total Sessions:</span>
-                                <span class="metric-value">${analytics.total_sessions || 0}</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">Total Revenue:</span>
-                                <span class="metric-value">${analytics.total_revenue_pln || 0} PLN</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">Energy Sold:</span>
-                                <span class="metric-value">${analytics.total_energy_sold_kwh || 0} kWh</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">Avg Revenue/Session:</span>
-                                <span class="metric-value">${analytics.avg_revenue_per_session_pln || 0} PLN</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">Active Sessions:</span>
-                                <span class="metric-value">${analytics.active_sessions || 0}</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">24h Revenue:</span>
-                                <span class="metric-value">${analytics.recent_24h_revenue_pln || 0} PLN</span>
-                            </div>
-                        </div>
-                    `;
-                    document.getElementById('battery-selling-analytics').innerHTML = analyticsHtml;
-                    
-                    // Display recent decisions
-                    const decisionsHtml = data.decisions.map(decision => {
-                        const decisionClass = decision.decision === 'start_selling' ? 'selling' : 'wait';
-                        const confidencePercent = (decision.confidence * 100).toFixed(1);
-                        const revenue = decision.expected_revenue_pln || 0;
-                        const energy = decision.energy_sold_kwh || 0;
-                        const price = decision.current_price_pln || 0;
-                        
-                        // Determine execution status for battery selling with detailed reasons
-                        const getSellingExecutionStatus = (decision) => {
-                            if (decision.decision === 'wait') {
-                                return { 
-                                    status: 'N/A', 
-                                    color: '#6c757d', 
-                                    icon: '⏸️',
-                                    reason: 'Wait decision - no execution needed'
-                                };
-                            }
-                            
-                            // Check if selling was actually executed
-                            const revenue = decision.expected_revenue_pln || 0;
-                            const energy = decision.energy_sold_kwh || 0;
-                            
-                            // If values are 0, likely not executed - determine why
-                            if (revenue === 0 && energy === 0) {
-                                const reasoning = decision.reasoning || '';
-                                let blockReason = 'Unknown reason';
-                                
-                                // Check for specific blocking patterns in battery selling
-                                if (reasoning.includes('emergency') || reasoning.includes('safety')) {
-                                    blockReason = 'Emergency safety stop';
-                                } else if (reasoning.includes('battery') && reasoning.includes('SOC') && reasoning.includes('below')) {
-                                    blockReason = 'Battery SOC too low';
-                                } else if (reasoning.includes('price') && reasoning.includes('below')) {
-                                    blockReason = 'Price below selling threshold';
-                                } else if (reasoning.includes('grid voltage') && reasoning.includes('outside')) {
-                                    blockReason = 'Grid voltage out of range';
-                                } else if (reasoning.includes('communication') || reasoning.includes('connection')) {
-                                    blockReason = 'Communication error';
-                                } else if (reasoning.includes('inverter') && reasoning.includes('error')) {
-                                    blockReason = 'Inverter error';
-                                } else if (reasoning.includes('night') || reasoning.includes('preserve')) {
-                                    blockReason = 'Night hours - preserve charge';
-                                } else if (reasoning.includes('temperature') && reasoning.includes('exceed')) {
-                                    blockReason = 'Battery temperature too high';
-                                } else if (reasoning.includes('cycles') && reasoning.includes('limit')) {
-                                    blockReason = 'Daily cycle limit reached';
-                                } else {
-                                    blockReason = 'Selling blocked by safety system';
-                                }
-                                
-                                return { 
-                                    status: 'BLOCKED', 
-                                    color: '#dc3545', 
-                                    icon: '🚫',
-                                    reason: blockReason
-                                };
-                            }
-                            
-                            // If values are present, likely executed
-                            return { 
-                                status: 'EXECUTED', 
-                                color: '#28a745', 
-                                icon: '✅',
-                                reason: `Sold ${energy.toFixed(2)} kWh for ${revenue.toFixed(2)} PLN`
-                            };
-                        };
-                        
-                        const execution = getSellingExecutionStatus(decision);
-                        
-                        return `
-                            <div class="decision-item ${decisionClass}">
-                                <div class="decision-time">${new Date(decision.timestamp).toLocaleString()}</div>
-                                <div class="decision-action">${decision.decision.replace('_', ' ').toUpperCase()}</div>
-                                <div class="decision-reason">${decision.reasoning}</div>
-                                <div style="background: ${execution.color}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; display: inline-block; margin-top: 5px;">
-                                    ${execution.icon} ${execution.status}
-                                </div>
-                                <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
-                                    ${execution.reason}
-                                </div>
-                                ${decision.decision === 'start_selling' ? `
-                                    <div class="metric">
-                                        <span class="metric-label">Revenue:</span>
-                                        <span class="metric-value">${revenue.toFixed(2)} PLN</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Energy:</span>
-                                        <span class="metric-value">${energy.toFixed(2)} kWh</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Price:</span>
-                                        <span class="metric-value">${price.toFixed(3)} PLN/kWh</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Power:</span>
-                                        <span class="metric-value">${decision.selling_power_w || 0}W</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Duration:</span>
-                                        <span class="metric-value">${(decision.estimated_duration_hours || 0).toFixed(1)}h</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Confidence:</span>
-                                        <span class="metric-value">${confidencePercent}%</span>
-                                    </div>
-                                    <div class="metric">
-                                        <span class="metric-label">Safety:</span>
-                                        <span class="metric-value">${decision.safety_checks_passed ? '✓' : '✗'}</span>
-                                    </div>
-                                ` : ''}
-                            </div>
-                        `;
-                    }).join('');
-                    
-                    document.getElementById('battery-selling-decisions').innerHTML = decisionsHtml || '<p>No battery selling decisions found</p>';
-                })
-                .catch(error => {
-                    document.getElementById('battery-selling-analytics').innerHTML = `<p>Error loading analytics: ${error.message}</p>`;
-                    document.getElementById('battery-selling-decisions').innerHTML = `<p>Error loading decisions: ${error.message}</p>`;
-                });
-        }
-        
         let timeSeriesChart = null;
         
         function loadTimeSeries() {
@@ -2251,7 +2054,7 @@ class LogWebServer:
             const pvPeak = pvData.length > 0 ? Math.max(...pvData).toFixed(2) : '--';
             
             document.getElementById('data-points').textContent = data.data_points || '--';
-            document.getElementById('data-source').textContent = data.data_source === 'real_data' ? 'Real Data' : 'Mock Data';
+            document.getElementById('data-source').textContent = data.data_source === 'real_inverter' ? 'Real Data' : 'Mock Data';
             document.getElementById('soc-range').textContent = `${socMin}% - ${socMax}%`;
             document.getElementById('pv-peak').textContent = `${pvPeak} kW`;
         }
@@ -2593,81 +2396,22 @@ class LogWebServer:
             return div.innerHTML;
         }
         
-        function loadBatterySellingStatus() {
-            fetch('/battery-selling')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        document.getElementById('battery-selling-status').innerHTML = `<p>Error: ${data.error}</p>`;
-                        return;
-                    }
-                    
-                    const analytics = data.analytics;
-                    const recentDecisions = data.decisions.slice(0, 3); // Last 3 decisions
-                    
-                    let statusHtml = `
-                        <div class="metrics-grid">
-                            <div class="metric">
-                                <span class="metric-label">Total Revenue:</span>
-                                <span class="metric-value">${analytics.total_revenue_pln || 0} PLN</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">Energy Sold:</span>
-                                <span class="metric-value">${analytics.total_energy_sold_kwh || 0} kWh</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">Active Sessions:</span>
-                                <span class="metric-value">${analytics.active_sessions || 0}</span>
-                            </div>
-                            <div class="metric">
-                                <span class="metric-label">24h Revenue:</span>
-                                <span class="metric-value">${analytics.recent_24h_revenue_pln || 0} PLN</span>
-                            </div>
-                        </div>
-                    `;
-                    
-                    if (recentDecisions.length > 0) {
-                        statusHtml += '<h4>Recent Activity:</h4><div class="recent-activity">';
-                        recentDecisions.forEach(decision => {
-                            const time = new Date(decision.timestamp).toLocaleString();
-                            const action = decision.decision.replace('_', ' ').toUpperCase();
-                            const revenue = decision.expected_revenue_pln || 0;
-                            statusHtml += `
-                                <div class="activity-item">
-                                    <span class="activity-time">${time}</span>
-                                    <span class="activity-action">${action}</span>
-                                    ${revenue > 0 ? `<span class="activity-revenue">+${revenue.toFixed(2)} PLN</span>` : ''}
-                                </div>
-                            `;
-                        });
-                        statusHtml += '</div>';
-                    }
-                    
-                    document.getElementById('battery-selling-status').innerHTML = statusHtml;
-                })
-                .catch(error => {
-                    document.getElementById('battery-selling-status').innerHTML = `<p>Error loading status: ${error.message}</p>`;
-                });
-        }
-        
         // Initialize
         updateStatus();
         loadCurrentState();
         loadPerformanceMetrics();
         loadCostSavings();
-        loadBatterySellingStatus();
         loadLogs();
         setInterval(() => {
             updateStatus();
             loadCurrentState();
             loadPerformanceMetrics();
             loadCostSavings();
-            loadBatterySellingStatus();
             // Only refresh time series if the tab is active
             if (document.getElementById('time-series').classList.contains('active')) {
                 loadTimeSeries();
             }
-        }, 60000); // Update every 60 seconds (reduced frequency)
+        }, 120000); // Update every 120 seconds
 
         // Theme-aware chart colors
         function getChartColors() {
@@ -3131,19 +2875,17 @@ class LogWebServer:
                     decision_data_type == 'battery_selling' or 
                     is_battery_selling_file):
                     battery_selling_decisions.append(decision)
+                # Wait decisions - check action first to avoid misclassification
+                elif action == 'wait':
+                    wait_decisions.append(decision)
                 # Charging decisions - look for actual charging intent in both action and reason
-                # Only categorize as charging if it's from a charging_decision file AND has charging intent
                 elif (action in ['charge', 'charging', 'start_pv_charging', 'start_grid_charging'] or
                       'start charging' in reason_lower or
                       'charging from' in reason_lower or
                       'pv charging' in reason_lower or
                       'grid charging' in reason_lower or
-                      'charging started' in reason_lower or
-                      ('charging_decision' in filename and 'wait' not in filename)):
+                      'charging started' in reason_lower):
                     charging_decisions.append(decision)
-                # Wait decisions - any decision that's not charging or battery selling
-                elif action == 'wait':
-                    wait_decisions.append(decision)
                 # Default to wait for any unclassified decisions
                 else:
                     wait_decisions.append(decision)
@@ -3224,81 +2966,97 @@ class LogWebServer:
     def _get_system_metrics(self) -> Dict[str, Any]:
         """Get system performance metrics including historical data"""
         try:
-            # Get decision history for the same time range as the decisions endpoint (7 days by default for metrics)
-            # This ensures consistency between /decisions and /metrics endpoints
-            decision_data = self._get_decision_history(time_range='7d')
+            # Use monthly snapshot data for Cost & Savings (much faster than reading all files)
+            now = datetime.now()
+            monthly_summary = self.snapshot_manager.get_monthly_summary(now.year, now.month)
+            
+            # Get recent decisions for Performance Metrics (last 24h only)
+            decision_data = self._get_decision_history(time_range='24h')
             all_decisions = decision_data.get('decisions', [])
             
             if not all_decisions:
-                return {'error': 'No decision data available'}
+                # If no recent decisions, use monthly data for everything
+                return {
+                    'timestamp': datetime.now().isoformat(),
+                    'total_decisions': monthly_summary.get('total_decisions', 0),
+                    'total_count': monthly_summary.get('total_decisions', 0),
+                    'charging_decisions': monthly_summary.get('charging_count', 0),
+                    'wait_decisions': monthly_summary.get('wait_count', 0),
+                    'battery_selling_decisions': 0,
+                    'charging_count': monthly_summary.get('charging_count', 0),
+                    'wait_count': monthly_summary.get('wait_count', 0),
+                    'battery_selling_count': 0,
+                    'total_energy_charged_kwh': monthly_summary.get('total_energy_kwh', 0),
+                    'total_cost_pln': monthly_summary.get('total_cost_pln', 0),
+                    'total_savings_pln': monthly_summary.get('total_savings_pln', 0),
+                    'savings_percentage': monthly_summary.get('savings_percentage', 0),
+                    'avg_confidence': round(monthly_summary.get('avg_confidence', 0) * 100, 2),
+                    'avg_energy_per_charge_kwh': round(monthly_summary.get('total_energy_kwh', 0) / monthly_summary.get('charging_count', 1), 2) if monthly_summary.get('charging_count', 0) > 0 else 0,
+                    'avg_cost_per_kwh_pln': monthly_summary.get('avg_cost_per_kwh', 0),
+                    'decision_breakdown': {},
+                    'source_breakdown': monthly_summary.get('source_breakdown', {}),
+                    'efficiency_score': 50.0,  # Default mid-range
+                    'time_range': 'current_month'
+                }
             
-            # Calculate metrics using the same categorization logic as the decisions endpoint
+            # Calculate recent decision metrics for efficiency score
             total_decisions = len(all_decisions)
             
-            # Categorize decisions using the same logic as _get_decision_history
+            # Categorize recent decisions
             charging_decisions = []
             wait_decisions = []
             battery_selling_decisions = []
             
             for decision in all_decisions:
                 action = decision.get('action', '')
-                decision_data_type = decision.get('decision', '')  # For battery selling decisions
+                decision_data_type = decision.get('decision', '')
                 
-                # Battery selling decisions
                 if action == 'battery_selling' or decision_data_type == 'battery_selling':
                     battery_selling_decisions.append(decision)
-                # Charging decisions - look for actual charging intent
                 elif action in ['charge', 'charging', 'start_pv_charging', 'start_grid_charging']:
                     charging_decisions.append(decision)
-                # Wait decisions - any decision that's not charging or battery selling
                 elif action == 'wait':
                     wait_decisions.append(decision)
-                # Default to wait for any unclassified decisions
                 else:
                     wait_decisions.append(decision)
             
-            total_energy_charged = sum(d.get('energy_kwh', 0) for d in charging_decisions)
-            total_cost = sum(d.get('estimated_cost_pln', 0) for d in charging_decisions)
-            total_savings = sum(d.get('estimated_savings_pln', 0) for d in charging_decisions)
+            # Calculate averages from recent decisions (for efficiency score)
+            avg_confidence = sum(d.get('confidence', 0) for d in all_decisions) / total_decisions if total_decisions > 0 else monthly_summary.get('avg_confidence', 0)
             
-            # Calculate averages
-            avg_confidence = sum(d.get('confidence', 0) for d in all_decisions) / total_decisions if total_decisions > 0 else 0
-            avg_energy_per_charge = total_energy_charged / len(charging_decisions) if charging_decisions else 0
-            avg_cost_per_kwh = total_cost / total_energy_charged if total_energy_charged > 0 else 0
-            
-            # Decision type breakdown
+            # Decision type breakdown (recent decisions only)
             decision_breakdown = {}
             for decision in all_decisions:
                 action = decision.get('action', 'unknown')
                 decision_breakdown[action] = decision_breakdown.get(action, 0) + 1
             
-            # Source breakdown
-            source_breakdown = {}
-            for decision in charging_decisions:
-                source = decision.get('charging_source', 'unknown')
-                source_breakdown[source] = source_breakdown.get(source, 0) + 1
+            # Calculate efficiency score based on recent decisions
+            efficiency_score = self._calculate_efficiency_score(all_decisions) if all_decisions else 50.0
             
+            # Return combined data: Monthly Cost & Savings + Recent Performance Metrics
             return {
                 'timestamp': datetime.now().isoformat(),
-                'total_decisions': total_decisions,
-                'total_count': total_decisions,
-                'charging_decisions': len(charging_decisions),
-                'wait_decisions': len(wait_decisions),
-                'battery_selling_decisions': len(battery_selling_decisions),
+                'total_decisions': monthly_summary.get('total_decisions', 0),
+                'total_count': monthly_summary.get('total_decisions', 0),
+                'charging_decisions': monthly_summary.get('charging_count', 0),
+                'wait_decisions': monthly_summary.get('wait_count', 0),
+                'battery_selling_decisions': 0,
                 # Also provide the field names expected by the frontend
-                'charging_count': len(charging_decisions),
-                'wait_count': len(wait_decisions),
-                'battery_selling_count': len(battery_selling_decisions),
-                'total_energy_charged_kwh': round(total_energy_charged, 2),
-                'total_cost_pln': round(total_cost, 2),
-                'total_savings_pln': round(total_savings, 2),
-                'savings_percentage': round((total_savings / (total_cost + total_savings)) * 100, 1) if (total_cost + total_savings) > 0 else 0,
-                'avg_confidence': round(avg_confidence, 2),
-                'avg_energy_per_charge_kwh': round(avg_energy_per_charge, 2),
-                'avg_cost_per_kwh_pln': round(avg_cost_per_kwh, 3),
+                'charging_count': monthly_summary.get('charging_count', 0),
+                'wait_count': monthly_summary.get('wait_count', 0),
+                'battery_selling_count': 0,
+                # Monthly Cost & Savings data (from snapshots - fast!)
+                'total_energy_charged_kwh': monthly_summary.get('total_energy_kwh', 0),
+                'total_cost_pln': monthly_summary.get('total_cost_pln', 0),
+                'total_savings_pln': monthly_summary.get('total_savings_pln', 0),
+                'savings_percentage': monthly_summary.get('savings_percentage', 0),
+                'avg_cost_per_kwh_pln': monthly_summary.get('avg_cost_per_kwh', 0),
+                # Performance metrics (from recent data)
+                'avg_confidence': round(avg_confidence * 100, 1),
+                'avg_energy_per_charge_kwh': round(monthly_summary.get('total_energy_kwh', 0) / monthly_summary.get('charging_count', 1), 2) if monthly_summary.get('charging_count', 0) > 0 else 0,
                 'decision_breakdown': decision_breakdown,
-                'source_breakdown': source_breakdown,
-                'efficiency_score': self._calculate_efficiency_score(all_decisions)
+                'source_breakdown': monthly_summary.get('source_breakdown', {}),
+                'efficiency_score': efficiency_score,
+                'time_range': 'current_month'
             }
         except Exception as e:
             logger.error(f"Error getting system metrics: {e}")
@@ -3435,13 +3193,20 @@ class LogWebServer:
     def _get_real_price_data(self) -> Optional[Dict[str, Any]]:
         """Get real price data using AutomatedPriceCharger (correct SC calculation) with caching"""
         try:
-            # Check cache first (cache for 1 hour since prices don't change during the day)
-            cached_data = self._get_cached_data('real_price_data', ttl=3600)  # Cache for 1 hour
-            if cached_data:
-                return cached_data
-            
             from automated_price_charging import AutomatedPriceCharger
             from datetime import datetime, timedelta
+            
+            # Create cache key based on current 15-minute period to ensure prices update correctly
+            # This ensures cache is invalidated when we move to a new price period
+            now = datetime.now()
+            current_period = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
+            cache_key = f'real_price_data_{current_period.strftime("%Y%m%d_%H%M")}'
+            
+            # Check cache first (cache for 5 minutes to balance freshness and performance)
+            # Prices can change during the day, so shorter cache is better
+            cached_data = self._get_cached_data(cache_key, ttl=300)  # Cache for 5 minutes
+            if cached_data:
+                return cached_data
             
             # Use AutomatedPriceCharger for consistent price calculation
             charger = AutomatedPriceCharger()
@@ -3465,9 +3230,16 @@ class LogWebServer:
             prices = []
             for item in price_data['value']:
                 market_price = float(item['csdac_pln'])
-                final_price = charger.calculate_final_price(market_price)
+                # Parse timestamp from price data item for accurate tariff calculation
+                try:
+                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                except ValueError:
+                    # Try alternative format
+                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M:%S')
+                # Pass timestamp to calculate_final_price for accurate tariff calculation
+                final_price = charger.calculate_final_price(market_price, item_time)
                 final_price_kwh = final_price / 1000  # Convert to PLN/kWh
-                prices.append((final_price_kwh, datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M').hour))
+                prices.append((final_price_kwh, item_time.hour))
             
             if not prices:
                 return None
@@ -3485,11 +3257,13 @@ class LogWebServer:
                 'average_price_pln_kwh': round(avg_price, 4),
                 'price_trend': 'stable',  # Could be enhanced with trend analysis
                 'data_source': 'PSE API (CSDAC-PLN)',
-                'last_updated': datetime.now().isoformat()
+                'last_updated': datetime.now().isoformat(),
+                'calculation_method': 'tariff_aware'  # Indicate calculation method for debugging
             }
             
-            # Cache the result
-            self._set_cached_data('real_price_data', result)
+            # Cache the result with period-specific key (5 minute TTL ensures fresh data)
+            self._set_cached_data(cache_key, result)
+            logger.debug(f"Price data calculated: current={current_price_kwh:.4f} PLN/kWh, cheapest={cheapest_price:.4f} PLN/kWh at {cheapest_hour:02d}:00 (period: {current_period.strftime('%H:%M')})")
             return result
             
         except Exception as e:
@@ -4099,6 +3873,95 @@ class LogWebServer:
             
         except Exception as e:
             logger.error(f"Error generating mock historical data: {e}")
+            return {'error': str(e)}
+    
+    def _get_monthly_summary(self, year: int, month: int) -> Dict[str, Any]:
+        """Get monthly summary using daily snapshots for efficiency
+        
+        Args:
+            year: Year (e.g., 2025)
+            month: Month (1-12)
+            
+        Returns:
+            Monthly summary dictionary
+        """
+        try:
+            return self.snapshot_manager.get_monthly_summary(year, month)
+        except Exception as e:
+            logger.error(f"Error getting monthly summary for {year}-{month}: {e}")
+            return {'error': str(e)}
+    
+    def _get_monthly_comparison(self) -> Dict[str, Any]:
+        """Get current month vs previous month comparison
+        
+        Returns:
+            Comparison dictionary with current and previous month data
+        """
+        try:
+            now = datetime.now()
+            current_year = now.year
+            current_month = now.month
+            
+            # Calculate previous month
+            if current_month == 1:
+                prev_year = current_year - 1
+                prev_month = 12
+            else:
+                prev_year = current_year
+                prev_month = current_month - 1
+            
+            # Get both months' summaries
+            current_summary = self.snapshot_manager.get_monthly_summary(current_year, current_month)
+            previous_summary = self.snapshot_manager.get_monthly_summary(prev_year, prev_month)
+            
+            # Calculate changes
+            def calculate_change(current, previous):
+                if previous == 0:
+                    return 0 if current == 0 else 100
+                return round(((current - previous) / previous) * 100, 1)
+            
+            current_cost = current_summary.get('total_cost_pln', 0)
+            previous_cost = previous_summary.get('total_cost_pln', 0)
+            current_energy = current_summary.get('total_energy_kwh', 0)
+            previous_energy = previous_summary.get('total_energy_kwh', 0)
+            current_savings = current_summary.get('total_savings_pln', 0)
+            previous_savings = previous_summary.get('total_savings_pln', 0)
+            
+            return {
+                'current_month': {
+                    'year': current_year,
+                    'month': current_month,
+                    'month_name': current_summary.get('month_name', ''),
+                    'total_cost_pln': current_cost,
+                    'total_energy_kwh': current_energy,
+                    'total_savings_pln': current_savings,
+                    'avg_cost_per_kwh': current_summary.get('avg_cost_per_kwh', 0),
+                    'days_with_data': current_summary.get('days_with_data', 0),
+                    'charging_count': current_summary.get('charging_count', 0)
+                },
+                'previous_month': {
+                    'year': prev_year,
+                    'month': prev_month,
+                    'month_name': previous_summary.get('month_name', ''),
+                    'total_cost_pln': previous_cost,
+                    'total_energy_kwh': previous_energy,
+                    'total_savings_pln': previous_savings,
+                    'avg_cost_per_kwh': previous_summary.get('avg_cost_per_kwh', 0),
+                    'days_with_data': previous_summary.get('days_with_data', 0),
+                    'charging_count': previous_summary.get('charging_count', 0)
+                },
+                'changes': {
+                    'cost_change_pct': calculate_change(current_cost, previous_cost),
+                    'energy_change_pct': calculate_change(current_energy, previous_energy),
+                    'savings_change_pct': calculate_change(current_savings, previous_savings),
+                    'cost_diff_pln': round(current_cost - previous_cost, 2),
+                    'energy_diff_kwh': round(current_energy - previous_energy, 2),
+                    'savings_diff_pln': round(current_savings - previous_savings, 2)
+                },
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error getting monthly comparison: {e}")
             return {'error': str(e)}
 
 

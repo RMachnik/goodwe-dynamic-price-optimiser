@@ -612,11 +612,11 @@ class TestDecisionHistoryBadgeCounts(unittest.TestCase):
         
         base_time = datetime.now() - timedelta(hours=2)  # More recent for 1h test
         
-        # Create charging decision files (with action='wait' but charging intent)
+        # Create charging decision files with proper action values
         charging_decisions = [
             {
                 "timestamp": (base_time + timedelta(minutes=10)).isoformat(),
-                "action": "wait",
+                "action": "start_grid_charging",
                 "source": "grid",
                 "duration": 0,
                 "energy_kwh": 0,
@@ -634,7 +634,7 @@ class TestDecisionHistoryBadgeCounts(unittest.TestCase):
             },
             {
                 "timestamp": (base_time + timedelta(minutes=20)).isoformat(),
-                "action": "wait",
+                "action": "start_pv_charging",
                 "source": "pv",
                 "duration": 0,
                 "energy_kwh": 0,

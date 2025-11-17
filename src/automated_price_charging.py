@@ -25,6 +25,8 @@ sys.path.insert(0, str(current_dir))
 
 from fast_charge import GoodWeFastCharger
 from enhanced_data_collector import EnhancedDataCollector
+from enhanced_aggressive_charging import EnhancedAggressiveCharging
+from tariff_pricing import TariffPricingCalculator, PriceComponents
 
 # Logging configuration handled by main application
 logger = logging.getLogger(__name__)
@@ -96,8 +98,24 @@ class AutomatedPriceCharger:
         # Load electricity pricing configuration
         self._load_pricing_config()
         
-        # Load aggressive cheapest price charging configuration
+        # Initialize tariff pricing calculator
+        try:
+            self.tariff_calculator = TariffPricingCalculator(self.config)
+            logger.info("Tariff pricing calculator initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize tariff pricing calculator: {e}")
+            self.tariff_calculator = None
+        
+        # Load aggressive cheapest price charging configuration (legacy)
         self._load_aggressive_cheapest_config()
+        
+        # Initialize enhanced aggressive charging module
+        try:
+            self.enhanced_aggressive = EnhancedAggressiveCharging(self.config)
+            logger.info("Enhanced aggressive charging module initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize enhanced aggressive charging: {e}")
+            self.enhanced_aggressive = None
     
     def _load_config(self):
         """Load configuration from config file"""
@@ -154,11 +172,39 @@ class AutomatedPriceCharger:
             self.aggressive_cheapest_config = {}
             self.aggressive_cheapest_enabled = False
     
-    def calculate_final_price(self, market_price: float) -> float:
-        """Calculate final price including SC component (Składnik cenotwórczy)"""
-        # According to Polish electricity pricing: Final Price = Market Price + SC Component
-        final_price = market_price + self.sc_component_net
-        return final_price
+    def calculate_final_price(self, market_price: float, timestamp: Optional[datetime] = None, kompas_status: Optional[str] = None) -> float:
+        """
+        Calculate final price using tariff-aware pricing.
+        
+        Args:
+            market_price: Market price in PLN/MWh
+            timestamp: Time for the price (used for time-based tariffs)
+            kompas_status: Kompas status for G14dynamic
+        
+        Returns:
+            Final price in PLN/MWh (for consistency with existing code)
+        """
+        if timestamp is None:
+            timestamp = datetime.now()
+        
+        # Use tariff calculator if available
+        if self.tariff_calculator:
+            # Convert from PLN/MWh to PLN/kWh if needed
+            market_price_kwh = market_price / 1000 if market_price > 10 else market_price
+            
+            components = self.tariff_calculator.calculate_final_price(
+                market_price_kwh,
+                timestamp,
+                kompas_status
+            )
+            
+            # Return in PLN/MWh for consistency with existing code
+            return components.final_price * 1000
+        else:
+            # Fallback to legacy pricing (SC component only)
+            logger.warning("Tariff calculator not available, using legacy SC-only pricing")
+            final_price = market_price + self.sc_component_net
+            return final_price
     
     def apply_minimum_price_floor(self, price: float) -> float:
         """Apply minimum price floor as per Polish regulations"""
@@ -205,22 +251,34 @@ class AutomatedPriceCharger:
         
         # Calculate price threshold if not provided
         if max_price_threshold is None:
-            # Calculate final prices (market price + SC component) for threshold calculation
-            final_prices = [self.calculate_final_price(float(item['csdac_pln'])) for item in price_data['value']]
+            # Calculate final prices (market price + SC component + distribution) for threshold calculation
+            final_prices = [
+                self.calculate_final_price(
+                    float(item['csdac_pln']), 
+                    datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                ) 
+                for item in price_data['value']
+            ]
             max_price_threshold = sorted(final_prices)[int(len(final_prices) * self.charging_threshold_percentile)]
         
         target_minutes = int(target_hours * 60)
         window_size = target_minutes // 15  # Number of 15-minute periods
         
-        logger.info(f"Finding charging windows of {target_hours}h at max price {max_price_threshold:.2f} PLN/MWh (including SC component)")
+        logger.info(f"Finding charging windows of {target_hours}h at max price {max_price_threshold:.2f} PLN/MWh (including tariff pricing)")
         
         charging_windows = []
         
         # Slide through all possible windows
         for i in range(len(price_data['value']) - window_size + 1):
             window_data = price_data['value'][i:i + window_size]
-            # Calculate final prices (market price + SC component) for each window
-            window_final_prices = [self.calculate_final_price(float(item['csdac_pln'])) for item in window_data]
+            # Calculate final prices (market price + SC component + distribution) for each window
+            window_final_prices = [
+                self.calculate_final_price(
+                    float(item['csdac_pln']), 
+                    datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                ) 
+                for item in window_data
+            ]
             avg_price = sum(window_final_prices) / len(window_final_prices)
             
             # Check if window meets criteria
@@ -228,8 +286,14 @@ class AutomatedPriceCharger:
                 start_time = datetime.strptime(window_data[0]['dtime'], '%Y-%m-%d %H:%M')
                 end_time = datetime.strptime(window_data[-1]['dtime'], '%Y-%m-%d %H:%M') + timedelta(minutes=15)
                 
-                # Calculate savings using final prices (market price + SC component)
-                all_final_prices = [self.calculate_final_price(float(item['csdac_pln'])) for item in price_data['value']]
+                # Calculate savings using final prices (market price + SC component + distribution)
+                all_final_prices = [
+                    self.calculate_final_price(
+                        float(item['csdac_pln']), 
+                        datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                    ) 
+                    for item in price_data['value']
+                ]
                 overall_avg = sum(all_final_prices) / len(all_final_prices)
                 savings = overall_avg - avg_price
                 
@@ -249,8 +313,8 @@ class AutomatedPriceCharger:
         logger.info(f"Found {len(charging_windows)} optimal charging windows")
         return charging_windows
     
-    def get_current_price(self, price_data: Dict) -> Optional[float]:
-        """Get current electricity price including SC component"""
+    def get_current_price(self, price_data: Dict, kompas_status: Optional[str] = None) -> Optional[float]:
+        """Get current electricity price including SC component and distribution"""
         if not price_data or 'value' not in price_data:
             return None
         
@@ -262,27 +326,34 @@ class AutomatedPriceCharger:
             item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
             if item_time <= current_time < item_time + timedelta(minutes=15):
                 market_price_pln_mwh = float(item['csdac_pln'])
-                # Convert to PLN/kWh and add SC component
-                market_price_pln_kwh = market_price_pln_mwh / 1000
-                final_price_pln_kwh = self.calculate_final_price(market_price_pln_kwh)
+                # Calculate final price with tariff-aware pricing
+                final_price_pln_mwh = self.calculate_final_price(market_price_pln_mwh, item_time, kompas_status)
                 # Return in PLN/MWh for consistency with other methods
-                return final_price_pln_kwh * 1000
+                return final_price_pln_mwh
         
         return None
     
     def should_start_charging(self, price_data: Dict, 
-                            max_price_threshold: Optional[float] = None) -> bool:
+                            max_price_threshold: Optional[float] = None,
+                            kompas_status: Optional[str] = None) -> bool:
         """Determine if charging should start based on current price"""
         
-        current_price = self.get_current_price(price_data)
+        current_price = self.get_current_price(price_data, kompas_status)
         if current_price is None:
             logger.warning("Could not determine current price")
             return False
         
         # Calculate price threshold if not provided
         if max_price_threshold is None:
-            # Calculate final prices (market price + SC component) for threshold calculation
-            final_prices = [self.calculate_final_price(float(item['csdac_pln'])) for item in price_data['value']]
+            # Calculate final prices (market price + SC component + distribution) for threshold calculation
+            final_prices = [
+                self.calculate_final_price(
+                    float(item['csdac_pln']), 
+                    datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M'),
+                    kompas_status
+                ) 
+                for item in price_data['value']
+            ]
             max_price_threshold = sorted(final_prices)[int(len(final_prices) * self.charging_threshold_percentile)]
         
         should_charge = current_price <= max_price_threshold
@@ -320,7 +391,8 @@ class AutomatedPriceCharger:
                 grid_direction=grid_direction,
                 current_price=current_price,
                 cheapest_price=cheapest_price,
-                cheapest_hour=cheapest_hour
+                cheapest_hour=cheapest_hour,
+                price_data=price_data  # Pass full price data for enhanced logic
             )
             
             # Store decision in history
@@ -357,13 +429,15 @@ class AutomatedPriceCharger:
             current_hour = datetime.now().hour
             prices_raw = price_data['value']
             
-            # Convert to hourly averages
+            # Convert to hourly averages with tariff-aware pricing
             hourly_prices = {}
             for entry in prices_raw:
                 hour = int(entry['dtime'].split(' ')[1].split(':')[0])
-                market_price_pln_kwh = entry['csdac_pln'] / 1000  # Convert to PLN/kWh
-                # Add SC component to get final price
-                price_pln_kwh = market_price_pln_kwh + self.sc_component_net
+                market_price_pln_mwh = entry['csdac_pln']  # Already in PLN/MWh
+                entry_time = datetime.strptime(entry['dtime'], '%Y-%m-%d %H:%M')
+                # Use tariff-aware pricing
+                final_price_pln_mwh = self.calculate_final_price(market_price_pln_mwh, entry_time)
+                price_pln_kwh = final_price_pln_mwh / 1000  # Convert to PLN/kWh for display
                 
                 if hour not in hourly_prices:
                     hourly_prices[hour] = []
@@ -681,7 +755,7 @@ class AutomatedPriceCharger:
         
         # Get current conditions
         current_pv_power = abs(overproduction) if overproduction < 0 else 0
-        battery_capacity = 10.0  # kWh (configurable)
+        battery_capacity = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)
         charging_rate = 3.0  # kW (configurable)
         
         # Calculate energy needed to reach target SOC
@@ -785,7 +859,8 @@ class AutomatedPriceCharger:
 
     def _make_charging_decision(self, battery_soc: int, overproduction: int, grid_power: int,
                               grid_direction: str, current_price: Optional[float],
-                              cheapest_price: Optional[float], cheapest_hour: Optional[int]) -> Dict[str, any]:
+                              cheapest_price: Optional[float], cheapest_hour: Optional[int],
+                              price_data: Optional[Dict] = None) -> Dict[str, any]:
         """Make the final charging decision based on all factors"""
         
         # EMERGENCY: Battery below emergency threshold - always charge regardless of price
@@ -803,7 +878,52 @@ class AutomatedPriceCharger:
                 battery_soc, current_price, cheapest_price, cheapest_hour
             )
         
-        # AGGRESSIVE CHEAPEST PRICE CHARGING: Charge aggressively during cheapest price periods
+        # HIGH: PV overproduction - no need to charge from grid (check BEFORE aggressive charging)
+        if overproduction > self.overproduction_threshold:
+            return {
+                'should_charge': False,
+                'reason': f'PV overproduction ({overproduction}W > {self.overproduction_threshold}W) - no grid charging needed',
+                'priority': 'high',
+                'confidence': 0.9
+            }
+
+        # ENHANCED AGGRESSIVE CHEAPEST PRICE CHARGING: Use new smart logic
+        if self.enhanced_aggressive:
+            try:
+                # Get price forecast if available
+                forecast_data = None
+                try:
+                    from pse_price_forecast_collector import PSEPriceForecastCollector
+                    forecast_collector = PSEPriceForecastCollector(self.config)
+                    forecast_points = forecast_collector.fetch_price_forecast()
+                    if forecast_points:
+                        forecast_data = [{'price': p.forecasted_price_pln, 'time': p.time, 'confidence': p.confidence}
+                                       for p in forecast_points]
+                except Exception as e:
+                    logger.debug(f"Could not fetch forecast data: {e}")
+
+                # Make enhanced aggressive charging decision
+                decision = self.enhanced_aggressive.should_charge_aggressively(
+                    battery_soc=battery_soc,
+                    price_data=price_data if price_data else {'value': []},  # Pass actual price data
+                    forecast_data=forecast_data,
+                    current_data={'battery': {'soc_percent': battery_soc}}
+                )
+
+                if decision.should_charge:
+                    return {
+                        'should_charge': True,
+                        'reason': decision.reason,
+                        'priority': decision.priority,
+                        'confidence': decision.confidence,
+                        'target_soc': decision.target_soc,
+                        'price_category': decision.price_category.value
+                    }
+
+            except Exception as e:
+                logger.error(f"Error in enhanced aggressive charging: {e}")
+
+        # FALLBACK: Legacy aggressive charging logic
         if self._check_aggressive_cheapest_price_conditions(battery_soc, current_price, cheapest_price, cheapest_hour):
             return {
                 'should_charge': True,
@@ -811,8 +931,8 @@ class AutomatedPriceCharger:
                 'priority': 'high',
                 'confidence': 0.9
             }
-        
-        # HIGH: PV overproduction - no need to charge from grid
+
+        # HIGH: PV overproduction - no need to charge from grid (duplicated for fallback)
         if overproduction > self.overproduction_threshold:
             return {
                 'should_charge': False,
@@ -916,28 +1036,36 @@ class AutomatedPriceCharger:
     async def start_price_based_charging(self, price_data: Dict, force_start: bool = False) -> bool:
         """Start charging based on current electricity price or force start"""
         
+        # Get current battery SOC for logging
+        try:
+            battery_data = await self.goodwe_charger.get_battery_data()
+            battery_soc = battery_data.get('soc_percent', 'Unknown')
+        except Exception:
+            battery_soc = 'Unknown'
+        
         if self.is_charging:
-            logger.info("Already charging, skipping start request")
+            logger.info(f"Already charging at SOC {battery_soc}%, skipping start request")
             return True
         
         # Check price only if not forced to start (e.g., by master coordinator for critical battery)
         if not force_start and not self.should_start_charging(price_data):
-            logger.info("Current price is not optimal for charging")
+            logger.info(f"🚫 Charging blocked: Current price is not optimal (SOC: {battery_soc}%)")
+            logger.info(f"   Reason: Price threshold not met - waiting for better pricing conditions")
             return False
         
         if force_start:
-            logger.info("Starting charging due to emergency battery level (overriding price check)")
+            logger.info(f"⚡ Starting charging due to validated decision (SOC: {battery_soc}%, overriding price check)")
         else:
-            logger.info("Starting price-based charging...")
+            logger.info(f"⚡ Starting price-based charging at SOC {battery_soc}%...")
         
         # Start fast charging
         if await self.goodwe_charger.start_fast_charging():
             self.is_charging = True
             self.charging_start_time = datetime.now()
-            logger.info("Charging started successfully")
+            logger.info(f"✅ Charging started successfully at SOC {battery_soc}%")
             return True
         else:
-            logger.error("Failed to start charging")
+            logger.error(f"❌ Failed to start charging at SOC {battery_soc}%")
             return False
     
     async def stop_price_based_charging(self) -> bool:
@@ -1112,9 +1240,15 @@ class AutomatedPriceCharger:
             return
         
         print("\n" + "="*80)
-        print("TODAY'S ELECTRICITY PRICE SCHEDULE (with SC Component)")
+        print("TODAY'S ELECTRICITY PRICE SCHEDULE (Tariff-Aware)")
         print("="*80)
-        print(f"SC Component: {self.sc_component_net} PLN/kWh (Składnik cenotwórczy)")
+        if self.tariff_calculator:
+            tariff_info = self.tariff_calculator.get_tariff_info()
+            print(f"Tariff: {tariff_info['tariff_type'].upper()}")
+            print(f"SC Component: {tariff_info['sc_component']} PLN/kWh (Składnik cenotwórczy)")
+            print(f"Distribution: {tariff_info['distribution_type']}")
+        else:
+            print(f"SC Component: {self.sc_component_net} PLN/kWh (Legacy)")
         print("="*80)
         
         # Group prices by hour for better readability
@@ -1123,7 +1257,8 @@ class AutomatedPriceCharger:
             time_str = item['dtime']
             hour = time_str.split(' ')[1][:5]  # Extract HH:MM
             market_price = float(item['csdac_pln'])
-            final_price = self.calculate_final_price(market_price)
+            item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+            final_price = self.calculate_final_price(market_price, item_time)
             
             if hour not in hourly_prices:
                 hourly_prices[hour] = {'market': [], 'final': []}

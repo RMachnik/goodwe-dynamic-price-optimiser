@@ -39,7 +39,7 @@ class TestPVConsumptionAnalyzer(unittest.TestCase):
     
     def test_initialization(self):
         """Test PV consumption analyzer initialization"""
-        self.assertEqual(self.analyzer.battery_capacity_kwh, 10.0)
+        self.assertEqual(self.analyzer.battery_capacity_kwh, 20.0)
         self.assertEqual(self.analyzer.charging_rate_kw, 3.0)
         self.assertEqual(self.analyzer.pv_capacity_kw, 10.0)
         self.assertEqual(self.analyzer.pv_overproduction_threshold_w, 500)

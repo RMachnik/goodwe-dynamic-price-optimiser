@@ -1,6 +1,6 @@
 # GoodWe Dynamic Price Optimiser
 
-A comprehensive, intelligent energy management system that optimizes battery charging based on electricity prices, photovoltaic production, house consumption, and battery state for GoodWe inverters.
+A comprehensive, intelligent energy management system that optimizes battery charging based on electricity prices, photovoltaic production, house consumption, and battery state. **Now with support for multiple inverter brands through vendor-agnostic abstraction layer!**
 
 ## 🚀 **Project Overview**
 
@@ -10,7 +10,7 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **✅ RELIABLE**: Automates charging decisions using validated CSDAC-PLN API (100% uptime)
 - **✅ SMART**: Implements intelligent charging strategy with weather-aware PV forecasting and consumption analysis (1500W PV overproduction threshold)
 - **✅ INTELLIGENT**: Considers consumption patterns and price optimization opportunities
-- **✅ INTEGRATED**: Polish electricity pricing with SC component and G12 distribution tariff
+- **✅ INTEGRATED**: Polish electricity pricing with SC component and G13s seasonal distribution tariff (supports G11, G12, G12as, G12w, G13s, G14dynamic)
 - **✅ WEATHER-ENHANCED**: Real-time weather data from IMGW + Open-Meteo for accurate PV forecasting
 - **✅ NIGHT CHARGING**: Smart night charging for high price day preparation with battery discharge optimization
 - **✅ MULTI-SESSION**: Multiple daily charging sessions for maximum cost optimization
@@ -19,6 +19,40 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **✅ BATTERY SELLING**: Conservative battery energy selling generates ~260 PLN/year additional revenue
 - **✅ PRICE FORECASTS**: PSE price forecasts enable earlier and more accurate charging decisions (180-360 PLN/year savings)
 - **✅ PROVEN**: Saves money by charging during optimal price windows and avoiding grid charging during PV overproduction
+
+**For detailed implementation strategy, technical specifications, and current progress, see the [Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md).**
+
+## 🔌 **Supported Inverters**
+
+### Currently Supported
+- **GoodWe**: ET, ES, DT families (all models) ✅
+  - Full feature support: charging, discharging, data collection, operation modes
+  - Tested with GoodWe ET series inverters
+  - Uses [goodwe](https://pypi.org/project/goodwe/) Python library
+
+### Coming Soon
+- **Fronius**: Symo, Primo, Gen24 series 🔜
+- **SMA**: Sunny Boy, Sunny Tripower series 🔜
+- **Huawei**: SUN2000 series 🔜
+- **Solax**: X1, X3 series 🔜
+
+**Want to add support for your inverter?** See [Adding New Inverter Guide](docs/ADDING_NEW_INVERTER.md)
+
+## 🏗️ **Architecture**
+
+The system uses **Port and Adapter Pattern** (Hexagonal Architecture) to separate business logic from hardware integration:
+
+```
+Energy Algorithm → InverterPort Interface → Vendor Adapter → Inverter Hardware
+```
+
+This architecture enables:
+- ✅ Support for multiple inverter brands
+- ✅ Easy testing with mock adapters
+- ✅ Clean separation of concerns
+- ✅ Vendor-independent optimization algorithm
+
+See [Inverter Abstraction Documentation](docs/INVERTER_ABSTRACTION.md) for details.
 
 **For detailed implementation strategy, technical specifications, and current progress, see the [Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md).**
 
@@ -36,7 +70,46 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - **Cloud Archival**: Automated archival to AWS S3, Google Cloud, or Azure
 - **Advanced Analytics**: Complex data analysis and trend reporting
 
-## 🆕 **Latest Updates (September 2025)**
+## 🆕 **Latest Updates (October 2025)**
+
+### **Codebase Cleanup** 🧹
+- **Removed Unused Files**: Cleaned up `src/` directory by removing unused modules
+- **Removed**: `battery_selling_scheduler.py` (never integrated), `battery_selling_analytics.py` (test-only), `polish_electricity_analyzer.py` (superseded by tariff_pricing.py)
+- **Cleaned Database Directory**: Removed empty `src/database/` directory
+- **Updated Tests**: All tests passing (20 battery selling, 19 G13s, 2 structure tests)
+- **Updated Documentation**: Removed outdated references from README and test files
+
+### **G13s Seasonal Tariff Implementation** 🎉
+- **Default Tariff**: G13s now the default with full seasonal awareness
+- **Polish Holiday Detection**: Automatic detection of all Polish public holidays (fixed and movable)
+- **Day-Type Awareness**: Weekends and holidays use flat 0.110 PLN/kWh rate
+- **Seasonal Pricing**: Different time zones for summer (Apr-Sep) and winter (Oct-Mar)
+- **Optimal Rates**: Summer day off-peak as low as 0.100 PLN/kWh
+- **19 New Tests**: All passing, comprehensive coverage of all scenarios
+- **Zero Breaking Changes**: All existing tariffs (G11, G12, G12as, G12w, G14dynamic) still work
+- **See [G13s Implementation Summary](docs/G13S_IMPLEMENTATION_SUMMARY.md) for complete details**
+
+### **Multi-Inverter Support via Abstraction Layer** 🎉
+- **Vendor-Agnostic Architecture**: Port and Adapter pattern (hexagonal architecture) enables support for multiple inverter brands
+- **Currently Supported**: GoodWe (ET, ES, DT families) with full backward compatibility
+- **Easy Extension**: Simple framework to add Fronius, SMA, Huawei, and other inverter brands
+- **Flexible Configuration**: Specify inverter vendor in configuration file
+- **Comprehensive Testing**: 22 new tests for abstraction layer, all passing ✅
+- **Zero Regression**: All 473 existing tests still passing, no breaking changes
+- **See [Inverter Abstraction Documentation](docs/INVERTER_ABSTRACTION.md) for architecture details**
+- **See [Adding New Inverter Guide](docs/ADDING_NEW_INVERTER.md) for extending to other brands**
+
+### **SOC Display and Blocking Reason Enhancement**
+- **Prominent SOC Display**: Battery State of Charge now shown prominently for all charging decisions
+- **Color-Coded SOC Badges**: Visual indicators (⚡ for executed, 🔋 for blocked) with color coding (Red <20%, Yellow 20-50%, Green >50%)
+- **Detailed Blocking Reasons**: Enhanced explanation of why charging decisions were blocked (peak hours, price conditions, safety)
+- **Enhanced Logging**: All decision logs now include SOC at moment of decision for better debugging
+- **Kompas Peak Hours Details**: Clear indication when charging blocked due to grid reduction requirements
+- **Better User Experience**: Immediate visibility into battery state and decision context
+- **All Tests Passing**: 404/405 tests passing (99.75% pass rate) - All previously failing tests fixed
+- **See [SOC Display Enhancement Documentation](docs/SOC_DISPLAY_ENHANCEMENT.md) for complete details**
+
+## 🆕 **Updates (September 2025)**
 
 ### **Logging System Optimization**
 - **Eliminated Log Spam**: Implemented log deduplication to prevent repeated messages flooding systemd journal
@@ -107,6 +180,17 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - [Enhanced Dashboard Documentation](docs/ENHANCED_DASHBOARD.md)
 - [Battery Energy Selling Guide](docs/README_battery_selling.md)
 
+### **Enhanced Aggressive Charging (REVISED - NEW)**
+- **🎯 Smart Price Detection**: Compares to median/percentiles (not just cheapest price)
+- **📊 Price Categories**: Super cheap (<0.20), Very cheap (0.20-0.30), Cheap (0.30-0.40)
+- **📈 Percentage-Based**: Uses 10% threshold that adapts to market (not fixed 0.05 PLN)
+- **⏰ Period Detection**: Detects multi-hour cheap periods (not just ±1 hour window)
+- **🔮 D+1 Forecast**: Checks tomorrow's prices before charging (avoids missing better opportunities)
+- **🤝 Selling Coordination**: Reserves capacity for high-price battery selling
+- **✅ Verified**: Validated against [Gadek.pl API](https://www.gadek.pl/api) - [See Validation Report](docs/GADEK_VALIDATION_SUMMARY.md)
+- **💰 Impact**: 62.5% cost reduction + better selling revenue
+- **See**: [Enhanced Aggressive Charging Documentation](docs/ENHANCED_AGGRESSIVE_CHARGING.md)
+
 ### **PSE Price Forecasts (NEW)**
 - **Early Planning**: Price forecasts available before 12:42 CSDAC publication
 - **Enhanced Decisions**: Better timing with 24-hour price predictions
@@ -118,9 +202,9 @@ The system currently uses file-based JSON storage with in-memory data limited to
 ### **PSE Peak Hours (Kompas Energetyczny) (NEW)**
 - **Grid Status Awareness**: Real-time monitoring of Polish grid load status
 - **Smart Charging Decisions**: Adapts charging behavior based on grid conditions
-- **REQUIRED REDUCTION**: Blocks all grid charging when grid is overloaded
-- **RECOMMENDED SAVING**: Increases wait thresholds and limits charging power
-- **RECOMMENDED USAGE**: Relaxes charging conditions when grid has capacity
+- **WYMAGANE OGRANICZANIE**: Blocks all grid charging when grid is overloaded
+- **ZALECANE OSZCZĘDZANIE**: Increases wait thresholds and limits charging power
+- **ZALECANE / NORMALNE UŻYTKOWANIE**: Relaxes charging conditions when grid has capacity
 - **API Integration**: Official PSE pdgsz API for reliable grid status data
 - **Network Stability**: Supports Polish grid stability by avoiding charging during peak load
 
@@ -131,6 +215,7 @@ The system currently uses file-based JSON storage with in-memory data limited to
   - `src/price_window_analyzer.py::_should_wait_for_better_price`
   Guard clauses now return safe results without raising `ZeroDivisionError`.
 
+<<<<<<< HEAD
 ### **Battery Energy Selling (NEW)**
 - **Conservative Safety**: 80% min SOC, 50% safety margin for battery protection
 - **Revenue Generation**: ~260 PLN/year additional revenue from energy selling
@@ -139,12 +224,25 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - **GoodWe Integration**: Uses standard `eco_discharge` mode and grid export controls
 - **Performance Analytics**: Comprehensive revenue tracking and efficiency metrics
 - **Manual Control**: `sell_battery_now.py` script for manual selling with configurable target SOC
+=======
+### **Battery Energy Selling (NEW - Enhanced with Smart Timing)**
+- **🎯 Smart Timing**: Avoid selling too early - wait for peak prices using forecast analysis
+- **📈 Peak Detection**: Automatically identifies and waits for optimal selling times
+- **📊 Trend Analysis**: Detects rising/falling price trends for better decisions
+- **💰 Revenue Generation**: ~520 PLN/year additional revenue (improved with smart timing)
+- **⚡ Opportunity Cost**: Calculates revenue gains from waiting vs selling immediately
+- **🔒 Conservative Safety**: 80% min SOC, 50% safety margin for battery protection
+- **🔄 Multi-Session**: Plans multiple selling sessions throughout the day
+- **🛡️ Safety Monitoring**: Real-time safety checks and emergency stop capabilities
+- **🔌 GoodWe Integration**: Uses standard `eco_discharge` mode and grid export controls
+- **📊 Performance Analytics**: Comprehensive revenue tracking and efficiency metrics
+>>>>>>> master
 
 ### **Implementation Status**
 - **Overall Progress**: ~98% complete
 - **Advanced Optimization Rules**: ✅ Fully implemented and tested
 - **Smart Critical Charging**: ✅ Emergency (5% SOC) vs Critical (10% SOC) with price awareness
-- **Battery Energy Selling**: ✅ Fully implemented with conservative safety parameters
+- **Battery Energy Selling**: ✅ Fully implemented with smart timing to avoid selling too early
 - **Proactive Charging**: ✅ PV poor + battery <80% + low price + weather poor = charge
 - **Cost Optimization**: ✅ Real-world tested rules save up to 70% on charging costs
 - **Test Coverage**: ✅ 227/234 tests passing (97.0% pass rate)
@@ -158,7 +256,7 @@ The system currently uses file-based JSON storage with in-memory data limited to
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   GoodWe        │    │   Master        │    │   Multi-Factor  │
 │   Inverter      │◄──►│   Coordinator   │◄──►│   Decision      │
-│   (10 kWh)      │    │   (Central      │    │   Engine        │
+│   (20 kWh)      │    │   (Central      │    │   Engine        │
 │                 │    │   Orchestrator) │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
@@ -232,8 +330,12 @@ goodwe-dynamic-price-optimiser/
 │   ├── master_coordinator.py              # 🎯 Master Coordinator (Main Service)
 │   ├── enhanced_data_collector.py         # Enhanced data collection system
 │   ├── fast_charge.py                     # Core inverter control library
+<<<<<<< HEAD
 │   ├── sell_battery_now.py                # 🔋 Manual battery selling script
 │   ├── polish_electricity_analyzer.py     # Core price analysis library
+=======
+│   ├── tariff_pricing.py                  # Tariff-aware price calculation
+>>>>>>> master
 │   └── automated_price_charging.py        # Core automated charging application
 ├── config/                                 # Configuration files
 │   └── master_coordinator_config.yaml     # 🎯 Master Coordinator Configuration
@@ -294,7 +396,7 @@ docker compose -f docker-compose.simple.yml up --build
 ### **Prerequisites**
 - Python 3.8+
 - GoodWe inverter (tested with GW10KN-ET)
-- GoodWe Lynx-D battery system (LX-D5.0-10) - **Safety compliant**
+- GoodWe Lynx-D battery system (2x LX-D5.0-10 = 20 kWh) - **Safety compliant**
 - Network access to inverter (UDP port 8899 or TCP port 502)
 
 ### **Safety Compliance**
@@ -399,26 +501,26 @@ chmod +x scripts/ubuntu_setup.sh
      update_interval_minutes: 60                # Update every 60 minutes
      peak_hours_ahead: 24                     # Monitor 24 hours ahead
      
-     # Decision rules based on Peak Hours status
-     decision_rules:
-       # REQUIRED REDUCTION (usage_fcst = 3)
-       required_reduction:
-         block_charging: true                 # Block all grid charging
-         prefer_discharge_for_home: true      # Prefer battery discharge for home use
-         ignore_price_opportunities: true     # Ignore low price opportunities
-         
-       # RECOMMENDED SAVING (usage_fcst = 2)
-       recommended_saving:
-         increase_wait_threshold_percent: 10  # Increase min_savings_to_wait_percent by 10%
-         limit_charging_power_percent: 50    # Limit charging power to 50%
-         
-       # RECOMMENDED USAGE (usage_fcst = 1)
-       recommended_usage:
-         decrease_wait_threshold_percent: 5   # Decrease min_savings_to_wait_percent by 5%
-         
-       # NORMAL USAGE (usage_fcst = 0)
-       normal_usage:
-         default_logic: true                  # Use default charging logic
+    # Decision rules based on Peak Hours status
+    decision_rules:
+      # WYMAGANE OGRANICZANIE (usage_fcst = 3)
+      required_reduction:
+        block_charging: true                 # Block all grid charging
+        prefer_discharge_for_home: true      # Prefer battery discharge for home use
+        ignore_price_opportunities: true     # Ignore low price opportunities
+        
+      # ZALECANE OSZCZĘDZANIE (usage_fcst = 2)
+      recommended_saving:
+        increase_wait_threshold_percent: 10  # Increase min_savings_to_wait_percent by 10%
+        limit_charging_power_percent: 50    # Limit charging power to 50%
+        
+      # NORMALNE UŻYTKOWANIE (usage_fcst = 1)
+      recommended_usage:
+        decrease_wait_threshold_percent: 5   # Decrease min_savings_to_wait_percent by 5%
+        
+      # ZALECANE UŻYTKOWANIE (usage_fcst = 0)
+      normal_usage:
+        default_logic: true                  # Use default charging logic
          
      # Fallback configuration
      fallback:
@@ -571,14 +673,67 @@ python test/inverter_test.py
 # Test data collection
 python src/enhanced_data_collector.py --single
 
-# Test price analysis
-python src/polish_electricity_analyzer.py --date $(date +%Y-%m-%d)
+# Test master coordinator
+python src/master_coordinator.py
 
 # Test fast charging
 python src/fast_charge.py --status
 ```
 
 ## 🔧 **Configuration**
+
+### **Electricity Tariff Configuration**
+
+The system supports multiple Polish electricity tariffs with accurate distribution pricing:
+
+#### **Available Tariffs:**
+- **G11**: Single-zone (static distribution)
+- **G12**: Two-zone (time-based distribution, 07:00-22:00 peak)
+- **G12w**: Two-zone with wider night hours (time-based, 06:00-22:00 peak)
+- **G12as**: Two-zone with volume-based pricing (time-based, 07:00-13:00 peak)
+- **G14dynamic**: Dynamic tariff based on grid load (kompas-based)
+
+#### **Price Calculation Formula:**
+```
+Final Price = Market Price (CSDAC) + SC Component + Distribution Price
+```
+
+- **Market Price**: Variable (from PSE CSDAC API)
+- **SC Component**: Fixed at 0.0892 PLN/kWh for all tariffs
+- **Distribution Price**: Variable by tariff type
+
+#### **Configure Your Tariff:**
+
+Edit `config/master_coordinator_config.yaml`:
+
+```yaml
+electricity_tariff:
+  tariff_type: "g12"  # Options: g11, g12, g12as, g12w, g13, g14dynamic
+  sc_component_pln_kwh: 0.0892
+```
+
+Tip: For simple two-zone distribution with dynamic energy price (CSDAC), choose `g12`. See detailed tariff notes in `docs/TARIFF_CONFIGURATION.md`.
+
+#### **G14dynamic Special Requirements:**
+
+**⚠️ G14dynamic requires PSE Peak Hours (Kompas Energetyczny) to be enabled:**
+
+```yaml
+pse_peak_hours:
+  enabled: true  # REQUIRED for G14dynamic
+```
+
+Without PSE Peak Hours, the system cannot determine the dynamic distribution price and will fail to start.
+
+#### **Distribution Prices by Tariff:**
+
+| Tariff | Type | Distribution Price | Notes |
+|--------|------|-------------------|-------|
+| **G12w** | Time-based | 0.3566 PLN/kWh (peak)<br>0.0749 PLN/kWh (off-peak) | Peak: 06:00-22:00<br>Off-peak: 22:00-06:00 |
+| **G14dynamic** | Kompas-based | 0.0145 PLN/kWh (green)<br>0.0578 PLN/kWh (yellow)<br>0.4339 PLN/kWh (orange)<br>2.8931 PLN/kWh (red) | Varies by grid load status |
+| **G11** | Static | 0.3125 PLN/kWh | Same price 24/7 |
+
+See [TARIFF_CONFIGURATION.md](docs/TARIFF_CONFIGURATION.md) for detailed documentation.
 
 ### **Master Coordinator Configuration**
 The main configuration file is `config/master_coordinator_config.yaml`:
@@ -650,9 +805,10 @@ coordinator:
 - **☀️ Weather Integration**: Real-time weather data for accurate PV forecasting
 - **🛡️ Safety Compliant**: Full GoodWe Lynx-D safety monitoring
 - **🧠 Enhanced Scoring**: PV vs consumption analysis for intelligent decisions
-- **📊 227/234 Tests Passing**: Comprehensive test coverage with 97.0% success rate
+- **📊 392/393 Tests Passing**: Comprehensive test coverage with 99.7% success rate (isolated from production config)
 - **🔧 Configuration System**: Fixed critical config loading bug (December 2024)
 - **🛠️ Recent Fixes**: Price window analyzer timing, critical battery thresholds, test data formats
+- **✅ Test Isolation**: All tests use isolated configs - change your tariff without breaking tests!
 
 ## 🚀 **Getting Started**
 
@@ -699,5 +855,26 @@ python src/automated_price_charging.py --schedule-today
 - **[Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md)** - Complete roadmap and progress
 - **[Automated Charging Guide](docs/README_automated_charging.md)** - Smart charging setup
 - **[Fast Charging Guide](docs/README_fast_charge.md)** - Basic inverter control
+- **[Test Configuration Isolation](docs/TEST_CONFIGURATION_ISOLATION.md)** - How tests are isolated from production config
 
 🚀⚡🔋 **Validated, efficient, and ready to save you money!**
+
+---
+
+### 7-day charging effectiveness analysis
+
+Generate a 7-day analysis of charging vs prices and potential selling opportunities. This uses the dashboard API and writes results to `out/`:
+
+```bash
+python3 scripts/analyze_last_7_days.py \
+  --base-url http://192.168.33.10:8080 \
+  --days 7 \
+  --min-soc 0.2 \
+  --sell-soc-threshold 0.5
+```
+
+Outputs:
+- `out/charge_deferral_findings.csv` – candidate charge events above p25 with estimated savings
+- `out/sell_opportunity_findings.csv` – p80 price windows with SOC condition
+- `out/analysis_7d_summary.md` – concise summary
+
