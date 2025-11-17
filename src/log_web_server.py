@@ -1833,10 +1833,13 @@ class LogWebServer:
                                                 let blockReason = 'Unknown reason';
                                                 
                                                 // Check for specific blocking patterns with more detail
-                                                if (reasonLower.includes('kompas') && reasonLower.includes('required reduction')) {
-                                                    blockReason = `Kompas REQUIRED REDUCTION - Grid charging blocked during peak hours (${socText})`;
-                                                } else if (reasonLower.includes('kompas') && reasonLower.includes('recommended saving')) {
-                                                    blockReason = `Kompas RECOMMENDED SAVING - Deferred to reduce load (${socText})`;
+                                                const kompasRequired = reasonLower.includes('wymagane ogranicz') || reasonLower.includes('required reduction');
+                                                const kompasSaving = reasonLower.includes('zalecane oszcz') || reasonLower.includes('recommended saving');
+                                                
+                                                if (reasonLower.includes('kompas') && kompasRequired) {
+                                                    blockReason = `Kompas WYMAGANE OGRANICZANIE - Grid charging blocked during peak hours (${socText})`;
+                                                } else if (reasonLower.includes('kompas') && kompasSaving) {
+                                                    blockReason = `Kompas ZALECANE OSZCZĘDZANIE - Deferred to reduce load (${socText})`;
                                                 } else if (reasonLower.includes('peak hours') || reasonLower.includes('peak period')) {
                                                     blockReason = `Peak hours restriction - Charging blocked (${socText})`;
                                                 } else if (reasonLower.includes('emergency') || reasonLower.includes('safety')) {

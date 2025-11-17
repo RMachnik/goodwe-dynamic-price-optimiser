@@ -72,10 +72,10 @@ Day (14:00):
 **Distribution Prices by Kompas Status**:
 | Status | Color | Distribution Price | When |
 |--------|-------|-------------------|------|
-| RECOMMENDED USAGE | 🟢 Green | 0.0145 PLN/kWh | Low grid load - charging encouraged |
-| NORMAL USAGE | 🟡 Yellow | 0.0578 PLN/kWh | Normal grid load |
-| RECOMMENDED SAVING | 🟠 Orange | 0.4339 PLN/kWh | High grid load - reduce usage |
-| REQUIRED REDUCTION | 🔴 Red | 2.8931 PLN/kWh | Critical grid load - charging discouraged |
+| ZALECANE UŻYTKOWANIE | 🟢 Green | 0.0145 PLN/kWh | S1 / Low grid load - charging encouraged |
+| NORMALNE UŻYTKOWANIE | 🟡 Yellow | 0.0578 PLN/kWh | S2 / Normal grid load |
+| ZALECANE OSZCZĘDZANIE | 🟠 Orange | 0.4339 PLN/kWh | S3 / High grid load - reduce usage |
+| WYMAGANE OGRANICZANIE | 🔴 Red | 2.8931 PLN/kWh | S4 / Critical grid load - charging discouraged |
 
 **Configuration**:
 ```yaml

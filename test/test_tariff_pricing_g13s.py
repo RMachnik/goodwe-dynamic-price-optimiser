@@ -6,10 +6,17 @@ Tests seasonal, day-type-aware, and time-based distribution pricing
 for the Polish G13s electricity tariff.
 """
 
-import pytest
+import sys
+from pathlib import Path
 from datetime import datetime, date
-from src.tariff_pricing import TariffPricingCalculator
-from src.utils.polish_holidays import is_free_day, is_polish_holiday, is_weekend
+
+import pytest
+
+# Ensure src/ is importable
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+
+from tariff_pricing import TariffPricingCalculator
+from utils.polish_holidays import is_free_day, is_polish_holiday, is_weekend
 
 
 def create_g13s_config():
