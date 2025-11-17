@@ -13,7 +13,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass
-from database.sqlite_storage import SQLiteStorage
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +116,7 @@ class FileStorageBackend(DataAccessInterface):
                 return True
 
             # Save as JSON file with timestamp
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f"energy_data_{timestamp}.json"
             filepath = self.base_path / filename
 
@@ -162,20 +161,9 @@ class FileStorageBackend(DataAccessInterface):
                             # Filter by timestamp
                             filtered = []
                             for record in data:
-                                # normalize ISO timestamp strings (support trailing Z)
-                                ts = record.get('timestamp', '')
-                                try:
-                                    record_time = datetime.fromisoformat(ts.replace('Z', '+00:00')) if isinstance(ts, str) and ts else datetime.now()
-                                except Exception:
-                                    try:
-                                        record_time = datetime.fromisoformat(ts)
-                                    except Exception:
-                                        record_time = datetime.now()
-
+                                record_time = datetime.fromisoformat(record.get('timestamp', '').replace('Z', '+00:00'))
                                 if start_time <= record_time <= end_time:
                                     filtered.append(record)
-
-                            # add filtered records to the overall result
                             result.extend(filtered)
 
                 except Exception as e:
@@ -191,7 +179,7 @@ class FileStorageBackend(DataAccessInterface):
     async def save_system_state(self, state: Dict[str, Any]) -> bool:
         """Save system state to file"""
         try:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f"system_state_{timestamp}.json"
             filepath = self.base_path / filename
 
@@ -219,12 +207,9 @@ class FileStorageBackend(DataAccessInterface):
             # Sort by timestamp (newest first)
             def get_file_timestamp(filepath: Path) -> datetime:
                 try:
-                    timestamp_str = filepath.stem.split('_', 2)[-1]
-                    try:
-                        return datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S_%f')
-                    except Exception:
-                        return datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
-                except Exception:
+                    timestamp_str = filepath.stem.split('_')[-1]
+                    return datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
+                except:
                     return datetime.min
 
             files.sort(key=get_file_timestamp, reverse=True)
@@ -248,7 +233,7 @@ class FileStorageBackend(DataAccessInterface):
     async def save_decision(self, decision: Dict[str, Any]) -> bool:
         """Save decision to file"""
         try:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = f"decision_{timestamp}.json"
             filepath = self.base_path / filename
 
@@ -276,12 +261,8 @@ class FileStorageBackend(DataAccessInterface):
             for filepath in files:
                 try:
                     # Extract timestamp from filename
-                    # filename is like 'decision_YYYYmmdd_HHMMSS' -> extract everything after first underscore
-                    timestamp_str = filepath.stem.partition('_')[2]
-                    try:
-                        file_time = datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S_%f')
-                    except Exception:
-                        file_time = datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
+                    timestamp_str = filepath.stem.split('_')[-1]
+                    file_time = datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
 
                     # Only load files within time range
                     if start_time <= file_time <= end_time:
@@ -310,45 +291,31 @@ class FileStorageBackend(DataAccessInterface):
 class DatabaseStorageBackend(DataAccessInterface):
     """Database-backed storage implementation"""
 
-    def __init__(self, config: Dict[str, Any], existing_storage: Optional['SQLiteStorage'] = None):
+    def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        from database.storage_interface import StorageConfig
+        from .database.sqlite_storage import SQLiteStorage
+        from .database.storage_interface import StorageConfig
 
-        # Debugging statement to verify existing_storage
-        if existing_storage:
-            print(f"Reusing existing SQLiteStorage instance: {existing_storage}")
+        # Create database config from backend config
+        db_config = StorageConfig(
+            db_path=config.get('db_path', 'goodwe_energy.db'),
+            max_retries=config.get('max_retries', 3),
+            retry_delay=config.get('retry_delay', 0.1),
+            connection_pool_size=config.get('connection_pool_size', 5),
+            batch_size=config.get('batch_size', 10),
+            enable_fallback=config.get('enable_fallback', True),
+            fallback_to_file=config.get('fallback_to_file', True)
+        )
 
-        if existing_storage:
-            self.db_storage = existing_storage
-        else:
-            db_config = StorageConfig(
-                db_path=config.get('db_path', 'goodwe_energy.db'),
-                max_retries=config.get('max_retries', 3),
-                retry_delay=config.get('retry_delay', 0.1),
-                connection_pool_size=config.get('connection_pool_size', 5),
-                batch_size=config.get('batch_size', 10),
-                enable_fallback=config.get('enable_fallback', True),
-                fallback_to_file=config.get('fallback_to_file', True)
-            )
-            self.db_storage = SQLiteStorage(db_config)
+        self.db_storage = SQLiteStorage(db_config)
 
     async def connect(self) -> bool:
         """Connect to database"""
-        result = await self.db_storage.connect()
-        try:
-            self.is_connected = bool(result)
-        except Exception:
-            pass
-        return result
+        return await self.db_storage.connect()
 
     async def disconnect(self) -> bool:
         """Disconnect from database"""
-        result = await self.db_storage.disconnect()
-        try:
-            self.is_connected = False
-        except Exception:
-            pass
-        return result
+        return await self.db_storage.disconnect()
 
     async def save_energy_data(self, data: List[Dict[str, Any]]) -> bool:
         """Save energy data to database"""
@@ -367,7 +334,7 @@ class DatabaseStorageBackend(DataAccessInterface):
         return await self.db_storage.get_system_state(limit)
 
     async def save_decision(self, decision: Dict[str, Any]) -> bool:
-        """Save coordinator decision"""
+        """Save decision to database"""
         return await self.db_storage.save_decision(decision)
 
     async def get_decisions(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
@@ -401,14 +368,7 @@ class DataAccessLayer:
         """Connect to the configured storage backend"""
         if not self.backend:
             await self._initialize_backend()
-        result = await self.backend.connect() if self.backend else False
-        # reflect connection state on the DAL wrapper
-        if hasattr(self.backend, 'is_connected'):
-            try:
-                self.backend.is_connected = bool(result)
-            except Exception:
-                pass
-        return result
+        return await self.backend.connect() if self.backend else False
 
     async def disconnect(self) -> bool:
         """Disconnect from storage backend"""
@@ -440,78 +400,8 @@ class DataAccessLayer:
 
     def switch_backend(self, mode: str):
         """Switch storage backend at runtime"""
-        prev_backend = self.backend
-        prev_mode = self.config.mode
         self.config.mode = mode
         logger.info(f"Switching storage backend to: {mode}")
-
-        # Track the database backend state
-        if prev_mode == 'database' and isinstance(prev_backend, DatabaseStorageBackend):
-            self._cached_db_storage = prev_backend.db_storage
-
-        # Reuse the cached database storage when switching back
-        if mode == 'database' and hasattr(self, '_cached_db_storage'):
-            logger.info("Reusing cached database storage")
-            self.backend = DatabaseStorageBackend(self.config.database_config, existing_storage=self._cached_db_storage)
-            return
-
-        # If switching from database -> file, try to snapshot DB records into
-        # file backend so the file backend can see historical data immediately.
-        try:
-            if prev_mode == 'database' and mode == 'file' and prev_backend is not None:
-                # extract DB entries synchronously if available
-                db_entries = []
-                try:
-                    if hasattr(prev_backend, 'db_storage') and hasattr(prev_backend.db_storage, '_energy'):
-                        for r in prev_backend.db_storage._energy:
-                            rec = dict(r)
-                            ts = rec.get('timestamp')
-                            if isinstance(ts, datetime):
-                                rec['timestamp'] = ts.isoformat()
-                            db_entries.append(rec)
-                except Exception:
-                    db_entries = []
-
-                # initialize file backend
-                self._initialize_backend()
-
-                # If no explicit file_config was provided, create a unique temp
-                # directory for this DAL instance so we don't read unrelated files
-                try:
-                    if not getattr(self.config, 'file_config', None):
-                        import tempfile
-                        from pathlib import Path
-                        tmp_dir = Path(tempfile.mkdtemp(prefix='dal_files_'))
-                        # set the backend base_path to this unique dir
-                        if hasattr(self.backend, 'base_path'):
-                            self.backend.base_path = tmp_dir
-
-                except Exception:
-                    logger.exception('Failed to create temp file backend directory')
-
-                # write a single snapshot file into the file backend path
-                try:
-                    base = getattr(self.backend, 'base_path', None)
-                    if db_entries and base is not None:
-                        base.mkdir(parents=True, exist_ok=True)
-                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                        filename = f"energy_data_{timestamp}_db_snapshot.json"
-                        filepath = base / filename
-                        metadata = {
-                            'file_timestamp': timestamp,
-                            'created_at': datetime.now().isoformat(),
-                            'record_count': len(db_entries),
-                            'data': db_entries
-                        }
-                        with open(filepath, 'w', encoding='utf-8') as f:
-                            json.dump(metadata, f, indent=2, ensure_ascii=False, default=str)
-                except Exception:
-                    logger.exception('Failed to snapshot DB entries to file backend')
-                return
-        except Exception:
-            logger.exception('Error during backend switch')
-
-        # fallback: just initialize the requested backend
         self._initialize_backend()
 
     def get_backend_mode(self) -> str:

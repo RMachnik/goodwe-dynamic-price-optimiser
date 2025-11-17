@@ -299,6 +299,4 @@ async def main():
         traceback.print_exc()
 
 if __name__ == "__main__":
-    print("This demo has been moved to `examples/demo_data_access_layer.py`. Run that file for the full demo.")
-    # Keep a no-op main to avoid pytest collection issues when imported.
-    # The working demo lives in `examples/`.
+    asyncio.run(main())

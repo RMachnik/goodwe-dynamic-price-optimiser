@@ -373,4 +373,5 @@ class TestDataAccessLayer:
         # Cleanup
         assert await dal.disconnect()
 
-# Tests are implemented as pytest test functions; remove script-style runner.
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

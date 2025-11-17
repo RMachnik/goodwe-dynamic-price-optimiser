@@ -1,0 +1,99 @@
+# Sample Master Coordinator Configuration with Data Storage Abstraction
+
+# Data Storage Configuration
+# Choose between "file" (default) or "database" backends
+data_storage:
+  # Switch between storage modes: "file" or "database"
+  mode: "file"  # Change to "database" to use SQLite backend
+
+  # File-based storage configuration
+  file:
+    base_path: "out/energy_data"  # Directory for JSON files
+
+  # Database-backed storage configuration
+  database:
+    db_path: "goodwe_energy.db"         # SQLite database file path
+    max_retries: 3                      # Retry failed operations
+    retry_delay: 0.1                    # Delay between retries (seconds)
+    connection_pool_size: 5             # Max concurrent connections
+    batch_size: 10                      # Batch size for bulk operations
+    enable_fallback: true               # Fallback to file if DB fails
+    fallback_to_file: true              # Save to JSON as backup
+
+# Individual component storage override examples:
+#
+# To use database for energy monitoring but files for decisions:
+#
+# data_storage:
+#   energy_monitoring: "database"
+#   decision_logging: "file"
+#   battery_analytics: "database"
+#
+# Or to use database globally:
+#
+# data_storage:
+#   mode: "database"
+#   database:
+#     db_path: "/opt/goodwe-dynamic-price-optimiser/data/goodwe_energy.db"
+#     max_retries: 3
+#     retry_delay: 1.0
+#     connection_pool_size: 10
+#     batch_size: 100
+#     enable_fallback: true
+
+# Rest of the master coordinator configuration remains unchanged...
+goodwe_inverter:
+  ip_address: "192.168.33.6"
+  model: "ET"
+  retry_attempts: 3
+  timeout_seconds: 10
+
+price_analsysis:
+  data_source: "pse"
+  update_interval_minutes: 15
+  cache_ttl_seconds: 900
+
+charging_coordinator:
+  default_algorithm: "aggressive"
+  battery_min_soc: 10
+  battery_max_soc: 95
+  price_sensitivity: 0.8
+
+battery_selling:
+  enabled: true
+  min_revenue_threshold: 2.0
+  max_daily_sessions: 4
+  revenue_optimization: "dynamic_soc"
+  safety_margin_soc: 15
+  shutdown_timeout_minutes: 30
+
+logging:
+  level: "INFO"
+  file: "logs/master_coordinator.log"
+  max_size_mb: 10
+  backup_count: 3
+
+# Phased migration approach:
+#
+# Phase 1: File-based (current, default)
+# data_storage:
+#   mode: "file"
+#
+# Phase 2: Dual mode (run both, test compatibility)
+# data_storage:
+#   mode: "file"  # Primary: JSON files
+#   # database config available for testing
+#
+# Phase 3: Database primary, files as backup
+# data_storage:
+#   mode: "database"
+#   database:
+#     # ... db config ...
+#     enable_fallback: true
+#     fallback_to_file: true
+#
+# Phase 4: Database only (no fallbacks)
+# data_storage:
+#   mode: "database"
+#   database:
+#     enable_fallback: false
