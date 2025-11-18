@@ -109,6 +109,11 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - **All Tests Passing**: 404/405 tests passing (99.75% pass rate) - All previously failing tests fixed
 - **See [SOC Display Enhancement Documentation](docs/SOC_DISPLAY_ENHANCEMENT.md) for complete details**
 
+### **Dynamic SOC Threshold Update (November 2025)**
+- **Peak Hour Flexibility**: `battery_selling.smart_timing.dynamic_soc_thresholds.require_peak_hours` is now `false`, letting premium price windows trigger selling outside `[17, 21]` when SoC thresholds are met.
+- **Recharge Forecast Advisory**: `require_recharge_forecast` is also `false`, so recharge forecasts no longer block premium selling but remain part of advisory logic.
+- **Config Reference**: Update lives in `config/master_coordinator_config.yaml`; no other files require changes for this behavior shift.
+
 ## 🆕 **Updates (September 2025)**
 
 ### **Logging System Optimization**

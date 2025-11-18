@@ -559,8 +559,8 @@ battery_selling:
       very_high_min_soc: 70                # Allow selling from 70% SOC during very high prices
       high_price_threshold: 0.7            # 0.7-0.8 PLN/kWh = high prices
       high_min_soc: 80                     # Standard 80% SOC for high prices
-      require_peak_hours: true             # Only allow lower SOC during peak hours (17-21)
-      require_recharge_forecast: true      # Require forecast showing recharge opportunity within 12h (advisory for premium prices >=0.9 PLN/kWh, required for lower prices)
+      require_peak_hours: false            # Allow selling outside traditional peak hours
+      require_recharge_forecast: false     # Make recharge forecast advisory only
     
     # Enhanced percentile-based selling (Phase 1)
     percentile_thresholds:
