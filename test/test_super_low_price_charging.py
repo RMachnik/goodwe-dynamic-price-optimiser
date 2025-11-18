@@ -40,7 +40,7 @@ def test_configuration_loading():
     assert optimization_rules.get('super_low_price_min_duration_hours') == 1.0, f"Super low price min duration incorrect: {optimization_rules.get('super_low_price_min_duration_hours')}"
     
     logger.info("✓ Super low price configuration loading test passed!")
-    return True
+    # Test functions should not return values when run under pytest
 
 def test_super_low_price_logic():
     """Test the super low price charging logic"""
@@ -172,7 +172,7 @@ def test_super_low_price_logic():
         logger.info(f"✓ Test passed: {scenario['name']}")
     
     logger.info("✓ Super low price charging logic tests passed!")
-    return True
+    # Test functions should not return values when run under pytest
 
 def test_real_world_scenario():
     """Test a real-world scenario based on your requirements"""
@@ -230,7 +230,7 @@ def test_real_world_scenario():
     assert target_soc == 100, f"Expected target SOC 100% but got: {target_soc}"
     
     logger.info("✓ Real-world scenario test passed - system would now charge fully from grid at super low price!")
-    return True
+    # Test functions should not return values when run under pytest
 
 def test_economic_benefit():
     """Test the economic benefit of super low price charging"""
@@ -256,7 +256,7 @@ def test_economic_benefit():
     assert savings_percent > 50, f"Expected >50% savings but got {savings_percent:.1f}%"
     
     logger.info("✓ Economic benefit test passed - significant savings achieved!")
-    return True
+    # Test functions should not return values when run under pytest
 
 if __name__ == "__main__":
     try:

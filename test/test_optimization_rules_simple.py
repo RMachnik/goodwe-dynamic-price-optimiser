@@ -42,7 +42,7 @@ def test_configuration_loading():
     assert optimization_rules.get('max_proactive_price_pln') == 0.7, f"Max proactive price incorrect: {optimization_rules.get('max_proactive_price_pln')}"
     
     logger.info("✓ Configuration loading test passed!")
-    return True
+    # Test functions should not return values when run under pytest
 
 def test_optimization_logic():
     """Test the optimization logic without instantiating the full class"""
@@ -96,7 +96,7 @@ def test_optimization_logic():
     assert rule2_result == "charge", "Rule 2 should trigger proactive charging when all conditions met"
     
     logger.info("✓ Optimization logic tests passed!")
-    return True
+    # Test functions should not return values when run under pytest
 
 def test_real_world_scenario():
     """Test the real-world scenario from your charging session"""
@@ -127,7 +127,7 @@ def test_real_world_scenario():
     
     assert result == "wait", "Real-world scenario should wait for better price"
     logger.info("✓ Real-world scenario test passed!")
-    return True
+    # Test functions should not return values when run under pytest
 
 if __name__ == "__main__":
     try:
