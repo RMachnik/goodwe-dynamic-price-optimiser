@@ -316,7 +316,7 @@ hybrid_charging:
 
 # Logging Configuration (unified)
 logging:
-  level: "DEBUG"                # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"                # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
   file: "/opt/goodwe-dynamic-price-optimiser/logs/master_coordinator.log"
   max_file_size: "10MB"        # Maximum log file size
   backup_count: 5              # Number of backup log files
