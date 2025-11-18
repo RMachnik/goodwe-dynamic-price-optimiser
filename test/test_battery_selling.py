@@ -372,6 +372,4 @@ class TestBatterySellingMonitor:
         assert 'configuration' in status
 
 
-if __name__ == "__main__":
-    # Run tests
-    pytest.main([__file__, "-v"])
+# Tests are executed via pytest; do not run as a script.

@@ -1,14 +1,12 @@
-name: Validate with hassfest
+name: Validate with hassfest (disabled)
 
-on:
-  push:
-  pull_request:
-  schedule:
-    - cron: "0 0 * * *"
+# This workflow previously ran Home Assistant's hassfest action.
+# The project is no longer linked to Home Assistant; disable triggers.
+on: []
 
 jobs:
-  validate:
-    runs-on: "ubuntu-latest"
+  disabled:
+    runs-on: ubuntu-latest
     steps:
-      - uses: "actions/checkout@v2"
-      - uses: home-assistant/actions/hassfest@master
+      - name: Disabled
+        run: echo "hassfest disabled for this repository"

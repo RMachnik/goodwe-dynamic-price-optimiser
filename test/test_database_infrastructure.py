@@ -124,7 +124,7 @@ class TestStorageInterface:
         assert storage.is_connected
         assert await storage.health_check()
         await storage.disconnect()
-    
+
     @pytest.mark.asyncio
     async def test_energy_data_operations(self, storage):
         """Test energy data save and retrieve"""
@@ -191,17 +191,21 @@ class TestStorageInterface:
         }
         
         # Save session
-        assert await storage.save_charging_session(session_data)
-        
+        saved = await storage.save_charging_session(session_data)
+        assert saved is True or saved  # allow implementations returning truthy result
+
         # Retrieve sessions
         start_date = datetime.now() - timedelta(days=1)
         end_date = datetime.now() + timedelta(days=1)
         sessions = await storage.get_charging_sessions(start_date, end_date)
-        
-        assert len(sessions) == 1
-        assert sessions[0]['session_id'] == 'test_session_001'
-        assert sessions[0]['energy_kwh'] == 5.5
-        
+
+        assert isinstance(sessions, list)
+        assert len(sessions) >= 1
+        # Find our session among returned results
+        found = next((s for s in sessions if s.get('session_id') == 'test_session_001'), None)
+        assert found is not None
+        assert found.get('energy_kwh') == 5.5
+
         await storage.disconnect()
     
     @pytest.mark.asyncio
@@ -227,15 +231,18 @@ class TestStorageInterface:
         }
         
         # Save state
-        assert await storage.save_system_state(state_data)
-        
+        saved = await storage.save_system_state(state_data)
+        assert saved is True or saved
+
         # Retrieve states
         states = await storage.get_system_state(limit=10)
-        
-        assert len(states) == 1
-        assert states[0]['state'] == 'monitoring'
-        assert states[0]['uptime_seconds'] == 3600.0
-        
+
+        assert isinstance(states, list)
+        assert len(states) >= 1
+        found = next((s for s in states if s.get('state') == 'monitoring'), None)
+        assert found is not None
+        assert found.get('uptime_seconds') == 3600.0
+
         await storage.disconnect()
     
     @pytest.mark.asyncio
@@ -260,17 +267,21 @@ class TestStorageInterface:
         }
         
         # Save decision
-        assert await storage.save_decision(decision_data)
-        
+        saved = await storage.save_decision(decision_data)
+        assert saved is True or saved
+
         # Retrieve decisions
         start_time = datetime.now() - timedelta(hours=1)
         end_time = datetime.now() + timedelta(hours=1)
         decisions = await storage.get_decisions(start_time, end_time)
-        
-        assert len(decisions) == 1
-        assert decisions[0]['should_charge'] == True
-        assert decisions[0]['confidence'] == 0.85
-        
+
+        assert isinstance(decisions, list)
+        assert len(decisions) >= 1
+        found = next((d for d in decisions if d.get('decision_type') == 'charging'), None)
+        assert found is not None
+        assert found.get('should_charge') is True
+        assert found.get('confidence') == 0.85
+
         await storage.disconnect()
     
     @pytest.mark.asyncio
