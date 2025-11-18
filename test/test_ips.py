@@ -5,8 +5,13 @@ Tests common IP addresses where inverters might be located
 """
 
 import asyncio
-import goodwe
+import os
 import ipaddress
+import pytest
+
+# Integration/network tests are disabled by default. Set `RUN_EXTERNAL_TESTS=1`
+# in the environment to enable scanning real IPs and contacting hardware.
+RUN_EXTERNAL_TESTS = bool(os.getenv("RUN_EXTERNAL_TESTS"))
 
 async def check_ip_address(ip):
     """Test if a specific IP responds to GoodWe protocol"""
@@ -72,7 +77,14 @@ def test_ip_script():
     """Test that the IP testing script can be imported and run"""
     # This is a placeholder test to ensure the script doesn't break pytest
     # The actual IP testing should be run manually with: python test/test_ips.py
-    assert True
+    if not RUN_EXTERNAL_TESTS:
+        pytest.skip("External IP tests are disabled (set RUN_EXTERNAL_TESTS=1 to enable)")
+
+    # If enabled, run the scanner (may take time and require network access)
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        pytest.fail(f"IP scan failed: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())

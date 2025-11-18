@@ -8,18 +8,24 @@ This script tests the GoodWe inverter connection using the correct goodwe.connec
 import sys
 import asyncio
 import logging
+import os
+import pytest
 from pathlib import Path
 
 # Add src directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+# Integration tests that contact hardware are disabled by default in CI. Set
+# RUN_EXTERNAL_TESTS=1 in the environment to enable these tests.
+if not bool(os.getenv("RUN_EXTERNAL_TESTS")):
+    pytest.skip("Inverter integration tests disabled (set RUN_EXTERNAL_TESTS=1 to enable)", allow_module_level=True)
+
 try:
     import goodwe
     from goodwe import InverterError
 except ImportError as e:
-    print(f"Error importing goodwe library: {e}")
-    print("Make sure you're running this from the project root directory")
-    sys.exit(1)
+    # If the dependency is missing, skip the module rather than exiting
+    pytest.skip(f"goodwe library not installed: {e}", allow_module_level=True)
 
 
 class FixedInverterConnectionTester:
