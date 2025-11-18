@@ -231,18 +231,4 @@ def test_configuration_loading():
     
     logger.info("✓ Configuration loading test passed!")
 
-if __name__ == "__main__":
-    try:
-        test_configuration_loading()
-        test_smart_critical_charging()
-        logger.info("\n🎉 All tests completed successfully!")
-        logger.info("\nSmart Critical Charging Implementation Summary:")
-        logger.info("- Emergency threshold: 5% SOC (always charge)")
-        logger.info("- Critical threshold: 10% SOC (price-aware)")
-        logger.info("- Max critical price: 0.35 PLN/kWh")
-        logger.info("- Max wait time: 6 hours")
-        logger.info("- Min savings: 30%")
-        
-    except Exception as e:
-        logger.error(f"Test failed: {e}")
-        sys.exit(1)
+# Tests are implemented as functions and picked up by pytest; removed direct runner.

@@ -129,19 +129,4 @@ def test_real_world_scenario():
     logger.info("✓ Real-world scenario test passed!")
     # Test functions should not return values when run under pytest
 
-if __name__ == "__main__":
-    try:
-        test_configuration_loading()
-        test_optimization_logic()
-        test_real_world_scenario()
-        
-        logger.info("\n🎉 All advanced optimization rule tests passed!")
-        logger.info("\nAdvanced Optimization Rules Summary:")
-        logger.info("Rule 1: At 10% SOC with high price (>0.8 PLN/kWh) → Always wait")
-        logger.info("Rule 2: PV poor (<200W) + battery <80% + price ≤0.7 PLN/kWh + weather poor → Proactive charge")
-        logger.info("\nYour scenario (18% SOC, 1.577 PLN/kWh) would now wait for 0.468 PLN/kWh at 23:00!")
-        logger.info(f"This would save you {((1.577 - 0.468) / 1.577) * 100:.1f}% on charging costs!")
-        
-    except Exception as e:
-        logger.error(f"Test failed: {e}")
-        sys.exit(1)
+# Tests are implemented as pytest functions; removed script-style runner.

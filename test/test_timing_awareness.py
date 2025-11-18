@@ -344,5 +344,4 @@ class TestTimingAwareness(unittest.TestCase):
             self.assertIn('total_score', decision)
 
 
-if __name__ == '__main__':
-    unittest.main()
+# Tests are implemented via unittest.TestCase and collected by pytest; removed direct runner.
