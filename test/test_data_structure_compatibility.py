@@ -186,6 +186,6 @@ class TestDataStructureCompatibility:
         assert normalized_current_data['inverter']['inverter_model'] == 'GW5000'
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+
+# Tests are implemented as pytest functions; script-style runner removed.
 

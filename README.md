@@ -1,5 +1,7 @@
 # GoodWe Dynamic Price Optimiser
 
+> See `docs/MAINTENANCE_NOTES.md` for recent CI and test housekeeping details.
+
 A comprehensive, intelligent energy management system that optimizes battery charging based on electricity prices, photovoltaic production, house consumption, and battery state. **Now with support for multiple inverter brands through vendor-agnostic abstraction layer!**
 
 ## 🚀 **Project Overview**
