@@ -626,11 +626,16 @@ class MasterCoordinator:
                     prices = []
                     for item in current_price_data['value']:
                         market_price = float(item['csdac_pln'])
-                        final_price = self.charging_controller.calculate_final_price(market_price)
+                        item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                        final_price = self.charging_controller.calculate_final_price(market_price, item_time)
                         final_price_kwh = final_price / 1000  # Convert PLN/MWh to PLN/kWh
-                        prices.append((final_price_kwh, datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M').hour))
+                        prices.append((final_price_kwh, item_time.hour))
                     if prices:
                         cheapest_price, cheapest_hour = min(prices, key=lambda x: x[0])
+                        # Calculate daily average for savings reference
+                        daily_avg_price = sum(p[0] for p in prices) / len(prices)
+                    else:
+                        daily_avg_price = 0.4  # Fallback default
                         
                 except Exception as e:
                     logger.warning(f"Failed to extract price data: {e}")
@@ -654,8 +659,8 @@ class MasterCoordinator:
                     # current_price is already in PLN/kWh (converted on line 623)
                     estimated_cost_pln = energy_kwh * current_price
                     
-                    # Calculate savings compared to reference price (400 PLN/MWh = 0.4 PLN/kWh)
-                    reference_price = 400.0 / 1000.0  # 0.4 PLN/kWh
+                    # Calculate savings compared to daily average price (smart vs dumb charging)
+                    reference_price = daily_avg_price if 'daily_avg_price' in locals() and daily_avg_price > 0 else 0.60
                     reference_cost = energy_kwh * reference_price
                     estimated_savings_pln = max(0, reference_cost - estimated_cost_pln)
             
@@ -688,7 +693,7 @@ class MasterCoordinator:
         except Exception as e:
             logger.error(f"Failed to save decision to file: {e}")
     
-    async def _save_battery_selling_decision(self, selling_opportunity, current_price_pln: float):
+    async def _save_battery_selling_decision(self, selling_opportunity, current_price_pln: float, success: bool = True, error_msg: str = None):
         """Save battery selling decision data to file for dashboard consumption"""
         try:
             import json
@@ -722,7 +727,9 @@ class MasterCoordinator:
                 'house_consumption': self.current_data.get('house_consumption', {}).get('current_power_w', 0),
                 'energy_sold_kwh': selling_opportunity.estimated_duration_hours * (selling_opportunity.selling_power_w / 1000),
                 'revenue_per_kwh_pln': current_price_pln,
-                'safety_status': self.current_data.get('battery_selling_safety', {}).get('overall_status', 'unknown')
+                'safety_status': self.current_data.get('battery_selling_safety', {}).get('overall_status', 'unknown'),
+                'execution_success': success,
+                'execution_error': error_msg
             }
             
             # Save to file
@@ -887,7 +894,23 @@ class MasterCoordinator:
             
             # Save battery selling decision if selling occurred
             if selling_opportunity.decision.value == "start_selling":
-                await self._save_battery_selling_decision(selling_opportunity, current_price_pln)
+                # Determine success based on whether session was started
+                # If we are here, we tried to start. Check if session was added.
+                # Note: This logic assumes _handle_battery_selling_logic is called sequentially
+                success = False
+                error_msg = None
+                
+                # Check if a session was just added
+                # This is a bit heuristic but works for now
+                if self.battery_selling_engine.active_sessions:
+                    latest_session = self.battery_selling_engine.active_sessions[-1]
+                    if (datetime.now() - latest_session.start_time).total_seconds() < 60:
+                        success = True
+                
+                if not success:
+                    error_msg = "Inverter command failed or safety check blocked execution"
+                
+                await self._save_battery_selling_decision(selling_opportunity, current_price_pln, success, error_msg)
             
         except Exception as e:
             logger.error(f"Failed to handle battery selling logic: {e}")
