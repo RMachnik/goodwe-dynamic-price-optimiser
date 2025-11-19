@@ -528,6 +528,7 @@ weather_aware_decisions:
 battery_selling:
   enabled: true                    # Enable battery energy selling functionality
   min_selling_price_pln: 0.50     # Minimum price to start selling (PLN/kWh)
+  revenue_factor: 0.8             # Revenue factor (e.g., 0.8 for 80% return on sold energy)
   # Selling trigger aligned to analysis: sell at ≥ p80 with SOC > 50%
   use_percentile_trigger: true     # Enable percentile-based trigger
   sell_percentile_threshold: 80    # p80 (top 20% prices)

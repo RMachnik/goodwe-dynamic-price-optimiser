@@ -122,7 +122,12 @@ class BatterySellingEngine:
         # Conservative safety parameters (from project plan analysis)
         self.min_selling_soc = selling_config.get('min_battery_soc', 80.0)  # 80% minimum SOC (default)
         self.safety_margin_soc = selling_config.get('safety_margin_soc', 50.0)  # 50% safety margin
+        # Selling thresholds
         self.min_selling_price_pln = selling_config.get('min_selling_price_pln', 0.50)  # 0.50 PLN/kWh
+        
+        # Revenue factor (e.g., 0.8 for 80% return)
+        self.revenue_factor = selling_config.get('revenue_factor', 1.0)
+        
         self.max_daily_cycles = selling_config.get('max_daily_cycles', 2)  # Max 2 cycles per day
         self.peak_hours = selling_config.get('peak_hours', [17, 18, 19, 20, 21])  # 5-9 PM
         self.grid_export_limit_w = selling_config.get('grid_export_limit_w', 5000)  # 5kW max export
@@ -430,7 +435,8 @@ class BatterySellingEngine:
         """Calculate expected revenue from selling session"""
         selling_power_kw = self.grid_export_limit_w / 1000
         energy_sold_kwh = selling_power_kw * selling_duration_hours * self.discharge_efficiency
-        return energy_sold_kwh * current_price_pln
+        # Apply revenue factor (e.g., 0.8 for 80% return)
+        return energy_sold_kwh * current_price_pln * self.revenue_factor
     
     def _check_safety_conditions(self, current_data: Dict[str, Any], forecast_confidence: float = 0.7) -> Tuple[bool, str]:
         """

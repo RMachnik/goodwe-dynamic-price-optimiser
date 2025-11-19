@@ -30,6 +30,9 @@ class DailySnapshotManager:
         self.snapshots_dir = project_root / "out" / "daily_snapshots"
         self.snapshots_dir.mkdir(parents=True, exist_ok=True)
         
+        self.monthly_snapshots_dir = project_root / "out" / "monthly_snapshots"
+        self.monthly_snapshots_dir.mkdir(parents=True, exist_ok=True)
+        
         logger.info(f"Snapshot manager initialized. Snapshots dir: {self.snapshots_dir}")
     
     def get_snapshot_path(self, target_date: date) -> Path:
@@ -53,7 +56,10 @@ class DailySnapshotManager:
         
         # Find all decision files for this date
         date_str = target_date.strftime('%Y%m%d')
-        decision_files = list(self.energy_data_dir.glob(f"charging_decision_{date_str}_*.json"))
+        charging_files = list(self.energy_data_dir.glob(f"charging_decision_{date_str}_*.json"))
+        selling_files = list(self.energy_data_dir.glob(f"battery_selling_decision_{date_str}_*.json"))
+        
+        decision_files = charging_files + selling_files
         
         if not decision_files:
             logger.info(f"No decision files found for {target_date}")
@@ -93,10 +99,14 @@ class DailySnapshotManager:
         # Categorize decisions
         charging_decisions = []
         wait_decisions = []
+        selling_decisions = []
         
         for decision in decisions:
             action = decision.get('action', '')
-            if action in ['charge', 'charging', 'start_pv_charging', 'start_grid_charging']:
+            # Check for battery selling
+            if action == 'battery_selling' or decision.get('decision') == 'battery_selling' or 'battery_selling' in str(decision.get('filename', '')):
+                selling_decisions.append(decision)
+            elif action in ['charge', 'charging', 'start_pv_charging', 'start_grid_charging']:
                 charging_decisions.append(decision)
             elif action == 'wait':
                 wait_decisions.append(decision)
@@ -105,9 +115,23 @@ class DailySnapshotManager:
         
         # Calculate aggregated metrics
         total_decisions = len(decisions)
+        
+        # Charging metrics
         total_energy_charged = sum(d.get('energy_kwh', 0) for d in charging_decisions)
-        total_cost = sum(d.get('estimated_cost_pln', 0) for d in charging_decisions)
-        total_savings = sum(d.get('estimated_savings_pln', 0) for d in charging_decisions)
+        charging_cost = sum(d.get('estimated_cost_pln', 0) for d in charging_decisions)
+        charging_savings = sum(d.get('estimated_savings_pln', 0) for d in charging_decisions)
+        
+        # Selling metrics
+        # Map fields: energy_sold_kwh -> energy, expected_revenue_pln -> savings (revenue)
+        total_energy_sold = sum(d.get('energy_sold_kwh', d.get('energy_kwh', 0)) for d in selling_decisions)
+        selling_revenue = sum(d.get('expected_revenue_pln', d.get('estimated_savings_pln', 0)) for d in selling_decisions)
+        
+        # Total metrics (Net)
+        # Cost is charging cost (positive). Revenue reduces net cost.
+        # Savings is charging savings + selling revenue.
+        total_cost = charging_cost
+        total_savings = charging_savings + selling_revenue
+        
         avg_confidence = sum(d.get('confidence', 0) for d in decisions) / total_decisions if total_decisions > 0 else 0
         
         # Calculate source breakdown
@@ -116,7 +140,11 @@ class DailySnapshotManager:
             source = decision.get('charging_source', 'unknown')
             source_breakdown[source] = source_breakdown.get(source, 0) + 1
         
-        # Price statistics
+        # Add selling to breakdown
+        if selling_decisions:
+            source_breakdown['battery_selling'] = len(selling_decisions)
+        
+        # Price statistics (from charging decisions only for now, as selling has different price logic)
         prices = [d.get('current_price', 0) for d in charging_decisions if d.get('current_price', 0) > 0]
         min_price = min(prices) if prices else 0
         max_price = max(prices) if prices else 0
@@ -128,9 +156,12 @@ class DailySnapshotManager:
             'total_decisions': total_decisions,
             'charging_count': len(charging_decisions),
             'wait_count': len(wait_decisions),
+            'selling_count': len(selling_decisions),
             'total_energy_kwh': round(total_energy_charged, 2),
+            'total_energy_sold_kwh': round(total_energy_sold, 2),
             'total_cost_pln': round(total_cost, 2),
             'total_savings_pln': round(total_savings, 2),
+            'selling_revenue_pln': round(selling_revenue, 2),
             'avg_confidence': round(avg_confidence, 4),
             'avg_cost_per_kwh': round(total_cost / total_energy_charged, 4) if total_energy_charged > 0 else 0,
             'source_breakdown': source_breakdown,
@@ -165,8 +196,12 @@ class DailySnapshotManager:
             logger.error(f"Error loading snapshot from {snapshot_path}: {e}")
             return None
     
+    def get_monthly_snapshot_path(self, year: int, month: int) -> Path:
+        """Get the path for a monthly snapshot file"""
+        return self.monthly_snapshots_dir / f"monthly_snapshot_{year}{month:02d}.json"
+
     def get_monthly_summary(self, year: int, month: int) -> Dict[str, Any]:
-        """Get aggregated summary for a given month using daily snapshots
+        """Get aggregated summary for a given month using snapshots
         
         Args:
             year: Year (e.g., 2025)
@@ -175,6 +210,20 @@ class DailySnapshotManager:
         Returns:
             Monthly summary dictionary
         """
+        # Check if this is a past month
+        today = date.today()
+        is_past_month = (year < today.year) or (year == today.year and month < today.month)
+        
+        # If past month, try to load from monthly snapshot first
+        if is_past_month:
+            monthly_snapshot_path = self.get_monthly_snapshot_path(year, month)
+            if monthly_snapshot_path.exists():
+                try:
+                    with open(monthly_snapshot_path, 'r') as f:
+                        return json.load(f)
+                except Exception as e:
+                    logger.error(f"Error loading monthly snapshot {monthly_snapshot_path}: {e}")
+        
         logger.info(f"Calculating monthly summary for {year}-{month:02d}")
         
         # Calculate date range for the month
@@ -185,9 +234,6 @@ class DailySnapshotManager:
             end_date = date(year + 1, 1, 1) - timedelta(days=1)
         else:
             end_date = date(year, month + 1, 1) - timedelta(days=1)
-        
-        # Get today's date to determine which days need live processing
-        today = date.today()
         
         # Collect daily summaries
         daily_summaries = []
@@ -223,7 +269,19 @@ class DailySnapshotManager:
             logger.info(f"Created {len(missing_snapshots)} missing snapshots")
         
         # Aggregate monthly totals
-        return self._aggregate_summaries(daily_summaries, year, month)
+        summary = self._aggregate_summaries(daily_summaries, year, month)
+        
+        # If it's a past month and we have data, save the monthly snapshot
+        if is_past_month and summary['total_decisions'] > 0:
+            try:
+                monthly_snapshot_path = self.get_monthly_snapshot_path(year, month)
+                with open(monthly_snapshot_path, 'w') as f:
+                    json.dump(summary, f, indent=2)
+                logger.info(f"Saved monthly snapshot to {monthly_snapshot_path}")
+            except Exception as e:
+                logger.error(f"Error saving monthly snapshot: {e}")
+                
+        return summary
     
     def _get_today_summary(self) -> Optional[Dict[str, Any]]:
         """Get summary for today (live calculation, not from snapshot)"""
@@ -277,9 +335,12 @@ class DailySnapshotManager:
         total_decisions = sum(s['total_decisions'] for s in daily_summaries)
         charging_count = sum(s['charging_count'] for s in daily_summaries)
         wait_count = sum(s['wait_count'] for s in daily_summaries)
+        selling_count = sum(s.get('selling_count', 0) for s in daily_summaries)
         total_energy = sum(s['total_energy_kwh'] for s in daily_summaries)
+        total_energy_sold = sum(s.get('total_energy_sold_kwh', 0) for s in daily_summaries)
         total_cost = sum(s['total_cost_pln'] for s in daily_summaries)
         total_savings = sum(s['total_savings_pln'] for s in daily_summaries)
+        selling_revenue = sum(s.get('selling_revenue_pln', 0) for s in daily_summaries)
         
         # Calculate weighted average confidence
         confidence_sum = sum(s['avg_confidence'] * s['total_decisions'] for s in daily_summaries)
@@ -302,9 +363,12 @@ class DailySnapshotManager:
             'total_decisions': total_decisions,
             'charging_count': charging_count,
             'wait_count': wait_count,
+            'selling_count': selling_count,
             'total_energy_kwh': round(total_energy, 2),
+            'total_energy_sold_kwh': round(total_energy_sold, 2),
             'total_cost_pln': round(total_cost, 2),
             'total_savings_pln': round(total_savings, 2),
+            'selling_revenue_pln': round(selling_revenue, 2),
             'avg_cost_per_kwh': round(avg_cost_per_kwh, 4),
             'savings_percentage': round(savings_percentage, 1),
             'avg_confidence': round(avg_confidence, 4),

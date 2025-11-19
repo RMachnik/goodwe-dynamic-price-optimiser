@@ -369,13 +369,31 @@ class LogWebServer:
         def get_monthly_comparison():
             """Get current month vs previous month comparison"""
             try:
+                # Get comparison month from query params
+                comp_year = request.args.get('year', type=int)
+                comp_month = request.args.get('month', type=int)
+                
+                now = datetime.now()
+                current_year = now.year
+                current_month = now.month
+                
+                # Calculate previous month if not specified
+                if comp_year is None or comp_month is None:
+                    if current_month == 1:
+                        comp_year = current_year - 1
+                        comp_month = 12
+                    else:
+                        comp_year = current_year
+                        comp_month = current_month - 1
+                
                 # Check cache first (60s TTL)
-                cached_data = self._get_cached_data('monthly_comparison', ttl=60)
+                cache_key = f'monthly_comparison_{comp_year}_{comp_month}'
+                cached_data = self._get_cached_data(cache_key, ttl=60)
                 if cached_data:
                     return jsonify(cached_data)
                 
-                comparison = self._get_monthly_comparison()
-                self._set_cached_data('monthly_comparison', comparison)
+                comparison = self._get_monthly_comparison(comp_year, comp_month)
+                self._set_cached_data(cache_key, comparison)
                 return jsonify(comparison)
             except Exception as e:
                 logger.error(f"Error getting monthly comparison: {e}")
@@ -422,24 +440,35 @@ class LogWebServer:
         return ['journalctl', '-u', 'goodwe-master-coordinator', '-n', str(lines), '--no-pager', '--output=short-iso']
     
     def _get_log_lines(self, log_path: Path, lines: int, level: str = '') -> Response:
-        """Get last N lines from log file"""
+        """Get last N lines from log file using efficient shell commands"""
         try:
-            with open(log_path, 'r') as f:
-                all_lines = f.readlines()
+            import subprocess
             
-            # Filter by level if specified
+            # If filtering by level, use grep | tail
             if level:
-                filtered_lines = [line for line in all_lines if level in line.upper()]
+                # Use grep to filter, then tail to get last N lines
+                # We use -a to handle potential binary characters safely
+                cmd = f"grep -a '{level.upper()}' '{log_path}' | tail -n {lines}"
             else:
-                filtered_lines = all_lines
+                # Just tail the file
+                cmd = f"tail -n {lines} '{log_path}'"
             
-            # Get last N lines
-            recent_lines = filtered_lines[-lines:] if len(filtered_lines) > lines else filtered_lines
+            # Execute command
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, errors='replace')
+            
+            if result.returncode != 0 and result.stderr:
+                return jsonify({'error': f"Command failed: {result.stderr}"}), 500
+                
+            recent_lines = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            # Get total line count (approximate for speed or skip if too slow)
+            # For performance, we'll skip exact total count on large files
+            total_lines = -1 
             
             return jsonify({
                 'log_file': log_path.name,
-                'total_lines': len(all_lines),
-                'filtered_lines': len(filtered_lines),
+                'total_lines': total_lines,
+                'filtered_lines': -1, # Unknown without reading all
                 'returned_lines': len(recent_lines),
                 'level_filter': level,
                 'lines': [line.rstrip() for line in recent_lines]
@@ -1224,7 +1253,15 @@ class LogWebServer:
                 </div>
                 
                 <div class="card">
-                    <h3>Cost & Savings <span style="font-size: 0.8em; color: #888;">(Current Month)</span></h3>
+                    <h3 style="margin-bottom: 10px;">Cost & Savings</h3>
+                    <div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid var(--accent-primary);">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <label for="comparison-month" style="font-size: 12px; color: var(--text-secondary);">View Month:</label>
+                            <select id="comparison-month" onchange="loadMonthlyComparison()" style="padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border-light); flex-grow: 1;">
+                                <!-- Options populated by JS -->
+                            </select>
+                        </div>
+                    </div>
                     <div id="cost-savings">Loading...</div>
                 </div>
             </div>
@@ -1587,8 +1624,48 @@ class LogWebServer:
                 });
         }
         
-        function loadCostSavings() {
-            fetch('/metrics')
+        function populateMonthSelector() {
+            const selector = document.getElementById('comparison-month');
+            if (!selector) return;
+            
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            const currentMonth = now.getMonth(); // 0-11
+            
+            // Clear existing options
+            selector.innerHTML = '';
+            
+            // Add current month first
+            let currentOption = document.createElement('option');
+            let currentMonthName = now.toLocaleString('default', { month: 'long' });
+            currentOption.value = `${currentYear}-${currentMonth + 1}`;
+            currentOption.textContent = `${currentMonthName} ${currentYear} (Current)`;
+            currentOption.selected = true;
+            selector.appendChild(currentOption);
+            
+            // Add last 12 months
+            for (let i = 1; i <= 12; i++) {
+                let d = new Date(currentYear, currentMonth - i, 1);
+                let year = d.getFullYear();
+                let month = d.getMonth() + 1; // 1-12
+                let monthName = d.toLocaleString('default', { month: 'long' });
+                
+                let option = document.createElement('option');
+                option.value = `${year}-${month}`;
+                option.textContent = `${monthName} ${year}`;
+                
+                selector.appendChild(option);
+            }
+        }
+
+        function loadMonthlyComparison() {
+            const selector = document.getElementById('comparison-month');
+            if (!selector || !selector.value) return;
+            
+            const [year, month] = selector.value.split('-');
+            
+            // Use monthly-summary endpoint instead of comparison
+            fetch(`/monthly-summary?year=${year}&month=${month}`)
                 .then(response => response.json())
                 .then(data => {
                     if (data.error) {
@@ -1596,157 +1673,74 @@ class LogWebServer:
                         return;
                     }
                     
-                    // Check if there are any charging decisions
-                    const hasChargingDecisions = data.charging_count > 0;
-                    const hasAnyDecisions = data.total_count > 0;
+                    const summary = data;
                     
-                    if (!hasAnyDecisions) {
-                        // No decisions at all
+                    if (summary.total_decisions === 0) {
                         document.getElementById('cost-savings').innerHTML = `
-                            <div class="no-data-state">
-                                <div class="no-data-icon">⏳</div>
-                                <div class="no-data-message">
-                                    <h4>System Starting Up</h4>
-                                    <p>Waiting for first decision data...</p>
-                                </div>
+                            <div style="padding: 20px; text-align: center; color: var(--text-secondary);">
+                                <div style="font-size: 2em; margin-bottom: 10px;">📅</div>
+                                <h4>No Data Available</h4>
+                                <p>No charging or selling decisions recorded for ${summary.month_name} ${summary.year}.</p>
                             </div>
                         `;
                         return;
                     }
                     
-                    if (!hasChargingDecisions) {
-                        // Only wait decisions - show waiting state
-                        // Get current state context
-                        fetch('/current-state')
-                            .then(response => response.json())
-                            .then(currentState => {
-                                const batteryLevel = currentState.battery_soc || 'Unknown';
-                                const pvPower = currentState.pv_power || 0;
-                                const currentPrice = currentState.pricing?.current_price_pln_kwh || 0;
-                                const cheapestPrice = currentState.pricing?.cheapest_price_pln_kwh || 0;
+                    const html = `
+                        <div style="padding: 10px;">
+                            <h4 style="margin: 0 0 15px 0; color: var(--accent-primary); text-align: center;">${summary.month_name} ${summary.year} Overview</h4>
+                            
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px;">
+                                <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color);">
+                                    <div style="font-size: 0.9em; color: var(--text-secondary); margin-bottom: 5px;">Total Cost</div>
+                                    <div style="font-size: 1.4em; font-weight: bold; color: var(--text-primary);">${summary.total_cost_pln.toFixed(2)} PLN</div>
+                                </div>
                                 
-                                let waitingReason = 'Looking for better conditions';
-                                if (currentPrice > 0 && cheapestPrice > 0) {
-                                    if (currentPrice > cheapestPrice * 1.2) {
-                                        waitingReason = `Current price (${currentPrice.toFixed(2)} PLN/kWh) is high - waiting for lower prices`;
-                                    } else {
-                                        waitingReason = `Monitoring price trends (current: ${currentPrice.toFixed(2)} PLN/kWh)`;
-                                    }
-                                } else if (pvPower > 0) {
-                                    waitingReason = `PV generating ${pvPower}W - waiting for optimal charging conditions`;
-                                } else if (batteryLevel < 20) {
-                                    waitingReason = `Battery low (${batteryLevel}%) - waiting for optimal charging conditions`;
-                                }
+                                <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color);">
+                                    <div style="font-size: 0.9em; color: var(--text-secondary); margin-bottom: 5px;">Total Savings</div>
+                                    <div style="font-size: 1.4em; font-weight: bold; color: #28a745;">${summary.total_savings_pln.toFixed(2)} PLN</div>
+                                </div>
                                 
-                                document.getElementById('cost-savings').innerHTML = `
-                                    <div class="waiting-state">
-                                        <div class="waiting-icon">🔍</div>
-                                        <div class="waiting-message">
-                                            <h4>Monitoring Mode</h4>
-                                            <p>System is waiting for optimal charging conditions</p>
-                                            <div class="waiting-details">
-                                                <span class="waiting-count">${data.wait_count} wait decisions</span>
-                                                <span class="waiting-reason">${waitingReason}</span>
-                                                <div class="current-conditions">
-                                                    <small>Battery: ${batteryLevel}% | PV: ${pvPower}W | Price: ${currentPrice.toFixed(2)} PLN/kWh</small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                <div class="waiting-metrics">
-                                    <div class="metric" title="Total energy charged from grid or PV during charging decisions">
-                                        <span class="metric-label">Total Energy Charged</span>
-                                        <span class="metric-value waiting">0 kWh</span>
-                                    </div>
-                                    <div class="metric" title="Total cost of all charging operations in PLN">
-                                        <span class="metric-label">Total Cost</span>
-                                        <span class="metric-value waiting">0 PLN</span>
-                                    </div>
-                                    <div class="metric" title="Total savings compared to charging at average market price">
-                                        <span class="metric-label">Total Savings</span>
-                                        <span class="metric-value waiting">0 PLN</span>
-                                    </div>
-                                    <div class="metric" title="Percentage of savings compared to baseline pricing">
-                                        <span class="metric-label">Savings %</span>
-                                        <span class="metric-value waiting">0%</span>
-                                    </div>
-                                    <div class="metric" title="Average cost per kilowatt-hour of charged energy">
-                                        <span class="metric-label">Avg Cost/kWh</span>
-                                        <span class="metric-value waiting">N/A</span>
-                                    </div>
+                                <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color);">
+                                    <div style="font-size: 0.9em; color: var(--text-secondary); margin-bottom: 5px;">Energy Charged</div>
+                                    <div style="font-size: 1.4em; font-weight: bold; color: var(--accent-primary);">${summary.total_energy_kwh.toFixed(2)} kWh</div>
+                                </div>
+                                
+                                <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color);">
+                                    <div style="font-size: 0.9em; color: var(--text-secondary); margin-bottom: 5px;">Avg Cost/kWh</div>
+                                    <div style="font-size: 1.4em; font-weight: bold; color: var(--text-primary);">${summary.avg_cost_per_kwh.toFixed(4)} PLN</div>
                                 </div>
                             </div>
-                        `;
-                            })
-                            .catch(error => {
-                                // Fallback if current state fetch fails
-                                document.getElementById('cost-savings').innerHTML = `
-                                    <div class="waiting-state">
-                                        <div class="waiting-icon">🔍</div>
-                                        <div class="waiting-message">
-                                            <h4>Monitoring Mode</h4>
-                                            <p>System is waiting for optimal charging conditions</p>
-                                            <div class="waiting-details">
-                                                <span class="waiting-count">${data.wait_count} wait decisions</span>
-                                                <span class="waiting-reason">Looking for better prices or PV conditions</span>
-                                            </div>
-                                        </div>
-                                        <div class="waiting-metrics">
-                                            <div class="metric" title="Total energy charged from grid or PV during charging decisions">
-                                                <span class="metric-label">Total Energy Charged</span>
-                                                <span class="metric-value waiting">0 kWh</span>
-                                            </div>
-                                            <div class="metric" title="Total cost of all charging operations in PLN">
-                                                <span class="metric-label">Total Cost</span>
-                                                <span class="metric-value waiting">0 PLN</span>
-                                            </div>
-                                            <div class="metric" title="Total savings compared to charging at average market price">
-                                                <span class="metric-label">Total Savings</span>
-                                                <span class="metric-value waiting">0 PLN</span>
-                                            </div>
-                                            <div class="metric" title="Percentage of savings compared to baseline pricing">
-                                                <span class="metric-label">Savings %</span>
-                                                <span class="metric-value waiting">0%</span>
-                                            </div>
-                                            <div class="metric" title="Average cost per kilowatt-hour of charged energy">
-                                                <span class="metric-label">Avg Cost/kWh</span>
-                                                <span class="metric-value waiting">N/A</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                `;
-                            });
-                        return;
-                    }
-                    
-                    // Normal state with charging decisions
-                    const savingsClass = data.total_savings_pln >= 0 ? 'savings-positive' : 'savings-negative';
-                    const savingsHtml = `
-                        <div class="metric" title="Total energy charged from grid or PV during charging decisions">
-                            <span class="metric-label">Total Energy Charged</span>
-                            <span class="metric-value">${data.total_energy_charged_kwh} kWh</span>
-                        </div>
-                        <div class="metric" title="Total cost of all charging operations in PLN">
-                            <span class="metric-label">Total Cost</span>
-                            <span class="metric-value">${data.total_cost_pln} PLN</span>
-                        </div>
-                        <div class="metric" title="Total savings compared to charging at average market price">
-                            <span class="metric-label">Total Savings</span>
-                            <span class="metric-value ${savingsClass}">${data.total_savings_pln} PLN</span>
-                        </div>
-                        <div class="metric" title="Percentage of savings compared to baseline pricing">
-                            <span class="metric-label">Savings %</span>
-                            <span class="metric-value ${savingsClass}">${data.savings_percentage}%</span>
-                        </div>
-                        <div class="metric" title="Average cost per kilowatt-hour of charged energy">
-                            <span class="metric-label">Avg Cost/kWh</span>
-                            <span class="metric-value">${data.avg_cost_per_kwh_pln} PLN</span>
+                            
+                            ${summary.selling_revenue_pln > 0 ? `
+                            <div style="margin-top: 20px; padding: 15px; background: rgba(39, 174, 96, 0.1); border-radius: 8px; border: 1px solid #27ae60;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span style="font-weight: bold; color: #27ae60;">Battery Selling Revenue (Net 80%)</span>
+                                    <span style="font-weight: bold; font-size: 1.2em; color: #27ae60;">+${summary.selling_revenue_pln.toFixed(2)} PLN</span>
+                                </div>
+                                <div style="font-size: 0.9em; color: var(--text-secondary); margin-top: 8px; display: flex; justify-content: space-between;">
+                                    <span>Energy Sold: <strong>${summary.total_energy_sold_kwh.toFixed(2)} kWh</strong></span>
+                                    <span>Sessions: <strong>${summary.selling_count}</strong></span>
+                                </div>
+                            </div>
+                            ` : ''}
+                            
+                            <div style="margin-top: 15px; font-size: 0.85em; color: var(--text-muted); text-align: center;">
+                                Based on ${summary.total_decisions} decisions (${summary.charging_count} charging, ${summary.wait_count} waiting)
+                            </div>
                         </div>
                     `;
-                    document.getElementById('cost-savings').innerHTML = savingsHtml;
+                    
+                    document.getElementById('cost-savings').innerHTML = html;
                 })
                 .catch(error => {
-                    document.getElementById('cost-savings').innerHTML = `<p>Error loading cost data: ${error.message}</p>`;
+                    document.getElementById('cost-savings').innerHTML = `<p>Error loading summary: ${error.message}</p>`;
                 });
+        }
+        
+        function loadCostSavings() {
+            // Redirect to new comparison function
+            loadMonthlyComparison();
         }
         
         function loadDecisions() {
@@ -1823,6 +1817,18 @@ class LogWebServer:
                                             const energy = decision.energy_kwh || 0;
                                             const cost = decision.estimated_cost_pln || 0;
                                             const savings = decision.estimated_savings_pln || 0;
+                                            
+                                            // Check explicit execution status if available (new format)
+                                            if (decision.execution_success === false) {
+                                                const errorMsg = decision.execution_error || 'Execution failed';
+                                                return { 
+                                                    status: 'FAILED', 
+                                                    color: '#dc3545', 
+                                                    icon: '❌',
+                                                    reason: `${errorMsg} (${socText})`,
+                                                    soc: batterySoc
+                                                };
+                                            }
                                             
                                             // If all values are 0, likely not executed - determine why
                                             if (energy === 0 && cost === 0 && savings === 0) {
@@ -2560,6 +2566,9 @@ class LogWebServer:
             initializeTheme();
             setupOSThemeListener();
             
+            // Initialize month selector
+            populateMonthSelector();
+            
             // Add event listeners for decision filters
             const timeRangeSelect = document.getElementById('time-range');
             const refreshButton = document.getElementById('refresh-decisions');
@@ -2587,22 +2596,31 @@ class LogWebServer:
         return log_files
     
     def read_log_file(self, log_name: str, lines: int = 100) -> str:
-        """Read content from a log file"""
+        """Read content from a log file using tail for performance"""
         try:
             # Handle both full paths and log names
             if os.path.exists(log_name):
-                # It's a full path
                 log_path = Path(log_name)
             else:
-                # It's a log name, get the path
                 log_path = self._get_log_file(log_name)
             
             if not log_path or not log_path.exists():
                 return None
             
-            with open(log_path, 'r', encoding='utf-8') as f:
-                all_lines = f.readlines()
-                return ''.join(all_lines[-lines:]) if lines > 0 else ''.join(all_lines)
+            # Use tail command for efficient reading of large files
+            import subprocess
+            cmd = ['tail', '-n', str(lines), str(log_path)]
+            result = subprocess.run(cmd, capture_output=True, text=True, errors='replace')
+            
+            if result.returncode == 0:
+                return result.stdout
+            else:
+                # Fallback to python read if tail fails
+                logger.warning(f"Tail command failed, falling back to python read: {result.stderr}")
+                with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                    all_lines = f.readlines()
+                    return ''.join(all_lines[-lines:]) if lines > 0 else ''.join(all_lines)
+                    
         except Exception as e:
             logger.error(f"Error reading log file {log_name}: {e}")
             return None
@@ -2813,8 +2831,10 @@ class LogWebServer:
             decisions = []
             
             # Load charging decisions
-            charging_files = list(energy_data_dir.glob("charging_decision_*.json"))
-            for file_path in sorted(charging_files, key=lambda x: x.stat().st_mtime, reverse=True)[:max_files]:
+            # Optimization: Sort by filename (contains timestamp) instead of mtime to avoid stat() calls on thousands of files
+            charging_files = sorted(energy_data_dir.glob("charging_decision_*.json"), key=lambda x: x.name, reverse=True)
+            
+            for file_path in charging_files[:max_files]:
                 try:
                     with open(file_path, 'r') as f:
                         decision_data = json.load(f)
@@ -2834,8 +2854,10 @@ class LogWebServer:
                     logger.warning(f"Failed to read charging decision file {file_path}: {e}")
             
             # Load battery selling decisions
-            selling_files = list(energy_data_dir.glob("battery_selling_decision_*.json"))
-            for file_path in sorted(selling_files, key=lambda x: x.stat().st_mtime, reverse=True)[:max_files]:
+            # Optimization: Sort by filename instead of mtime
+            selling_files = sorted(energy_data_dir.glob("battery_selling_decision_*.json"), key=lambda x: x.name, reverse=True)
+            
+            for file_path in selling_files[:max_files]:
                 try:
                     with open(file_path, 'r') as f:
                         decision_data = json.load(f)
@@ -2848,6 +2870,15 @@ class LogWebServer:
                         # Add filename and decision type for battery selling
                         decision_data['filename'] = file_path.name
                         decision_data['action'] = 'battery_selling'
+                        
+                        # Map battery selling fields to standard fields for frontend
+                        if 'energy_sold_kwh' in decision_data:
+                            decision_data['energy_kwh'] = decision_data['energy_sold_kwh']
+                        if 'expected_revenue_pln' in decision_data:
+                            decision_data['estimated_savings_pln'] = decision_data['expected_revenue_pln']
+                            # Cost is negative revenue (profit)
+                            decision_data['estimated_cost_pln'] = -decision_data['expected_revenue_pln']
+                            
                         decisions.append(decision_data)
                 except Exception as e:
                     logger.warning(f"Failed to read battery selling decision file {file_path}: {e}")
@@ -3278,7 +3309,43 @@ class LogWebServer:
             if cached_data:
                 return cached_data
             
-            # Try to get real-time data directly from the inverter
+            # OPTIMIZATION: Try to read from coordinator state file FIRST
+            # This avoids slow inverter connections if the coordinator is running and updating state
+            project_root = Path(__file__).parent.parent
+            try:
+                # Find latest state file
+                # Optimization: Sort by filename (contains timestamp) to avoid stat() calls
+                data_files = sorted(list((project_root / "out").glob("coordinator_state_*.json")), 
+                                  key=lambda x: x.name, reverse=True)
+                
+                if data_files:
+                    latest_file = data_files[0]
+                    # Check if file is fresh (less than 2 minutes old)
+                    # We still need one stat call here, but it's just one
+                    file_age = time.time() - latest_file.stat().st_mtime
+                    
+                    if file_age < 120:  # 2 minutes freshness
+                        with open(latest_file, 'r') as f:
+                            real_data = json.load(f)
+                        
+                        # Extract relevant data
+                        current_data = real_data.get('current_data', {})
+                        
+                        # Convert to dashboard format
+                        dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
+                        
+                        if dashboard_data:
+                            # Cache the result
+                            self._set_cached_data('real_inverter_data', dashboard_data)
+                            
+                            if self._should_log_message("Loaded fresh data from coordinator state file"):
+                                logger.info(f"Loaded fresh data from {latest_file.name} (age: {file_age:.1f}s)")
+                            
+                            return dashboard_data
+            except Exception as e:
+                logger.warning(f"Failed to read coordinator state file: {e}")
+
+            # If no fresh file, try to get real-time data directly from the inverter
             try:
                 # Add src directory to path if not already there
                 import sys
@@ -3891,9 +3958,13 @@ class LogWebServer:
             logger.error(f"Error getting monthly summary for {year}-{month}: {e}")
             return {'error': str(e)}
     
-    def _get_monthly_comparison(self) -> Dict[str, Any]:
+    def _get_monthly_comparison(self, prev_year: int = None, prev_month: int = None) -> Dict[str, Any]:
         """Get current month vs previous month comparison
         
+        Args:
+            prev_year: Year to compare against (optional)
+            prev_month: Month to compare against (optional)
+            
         Returns:
             Comparison dictionary with current and previous month data
         """
@@ -3902,13 +3973,14 @@ class LogWebServer:
             current_year = now.year
             current_month = now.month
             
-            # Calculate previous month
-            if current_month == 1:
-                prev_year = current_year - 1
-                prev_month = 12
-            else:
-                prev_year = current_year
-                prev_month = current_month - 1
+            # Calculate previous month if not provided
+            if prev_year is None or prev_month is None:
+                if current_month == 1:
+                    prev_year = current_year - 1
+                    prev_month = 12
+                else:
+                    prev_year = current_year
+                    prev_month = current_month - 1
             
             # Get both months' summaries
             current_summary = self.snapshot_manager.get_monthly_summary(current_year, current_month)

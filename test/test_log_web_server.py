@@ -1182,10 +1182,11 @@ class TestTimeSeriesFunctionality(unittest.TestCase):
     def test_time_series_performance(self):
         """Test performance of time series data generation"""
         server = LogWebServer(host=self.test_host, port=self.test_port, log_dir=self.logs_dir)
-        
-        with patch('log_web_server.Path') as mock_path:
+    
+        with patch('log_web_server.Path') as mock_path, \
+             patch.object(server, '_get_real_inverter_data', return_value=None):
             mock_path.return_value.parent.parent = Path(self.temp_dir)
-            
+    
             # Test performance
             start_time = time.time()
             data = server._get_historical_time_series_data()
