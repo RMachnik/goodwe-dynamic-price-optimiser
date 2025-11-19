@@ -17,6 +17,7 @@ Usage:
 
 import asyncio
 import logging
+import traceback
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
@@ -732,7 +733,8 @@ class BatterySellingEngine:
             
             # Calculate selling parameters
             power_deficit = consumption - pv_power
-            selling_power_w = min(power_deficit, self.grid_export_limit_w)
+            # For selling, we want to export max allowed power, not just cover deficit
+            selling_power_w = self.grid_export_limit_w
             
             # Calculate duration based on available energy
             available_energy_kwh = (battery_soc - self.safety_margin_soc) / 100 * self.battery_capacity_kwh
@@ -1003,12 +1005,12 @@ class BatterySellingEngine:
             # Set inverter to eco_discharge mode
             await inverter.set_operation_mode(
                 OperationMode.ECO_DISCHARGE,
-                opportunity.selling_power_w,  # Power limit
-                self.safety_margin_soc  # Min SOC (safety margin)
+                int(opportunity.selling_power_w),  # Power limit (ensure int)
+                int(self.safety_margin_soc)  # Min SOC (safety margin) (ensure int)
             )
             
             # Enable grid export
-            await inverter.set_grid_export_limit(opportunity.selling_power_w)
+            await inverter.set_grid_export_limit(int(opportunity.selling_power_w))
             await inverter.set_ongrid_battery_dod(self.battery_dod_limit)
             
             # Add to active sessions
@@ -1025,9 +1027,11 @@ class BatterySellingEngine:
             
         except InverterError as e:
             self.logger.error(f"GoodWe inverter error starting selling session: {e}")
+            self.logger.error(traceback.format_exc())
             return False
         except Exception as e:
             self.logger.error(f"Error starting selling session: {e}")
+            self.logger.error(traceback.format_exc())
             return False
     
     async def stop_selling_session(self, inverter: Inverter, session_id: str) -> bool:
