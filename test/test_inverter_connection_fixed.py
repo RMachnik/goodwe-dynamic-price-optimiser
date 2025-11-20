@@ -28,17 +28,23 @@ class DummyTester:
         self.timeout = timeout
         self.retries = retries
 
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_connection(self):
         # Use the module-level `goodwe` so the test patch can inject a mock
         inverter = await goodwe.connect(host=self.ip_address, family=self.family, timeout=self.timeout, retries=self.retries)
         return inverter
 
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_runtime_data(self, inverter):
         if not inverter:
             return False
         runtime_data = await inverter.read_runtime_data()
         return bool(runtime_data)
 
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_different_families(self):
         families_to_test = ["ET", "ES", "DT", None]
         for family in families_to_test:
@@ -119,6 +125,8 @@ class FixedInverterConnectionTester:
         )
         return logging.getLogger(__name__)
     
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_connection(self):
         """Test inverter connection using goodwe.connect()"""
         print(f"\n=== Testing Connection with goodwe.connect() ===")
@@ -149,6 +157,8 @@ class FixedInverterConnectionTester:
             print(f"✗ Unexpected error: {e}")
             return None
     
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_runtime_data(self, inverter):
         """Test runtime data reading"""
         if not inverter:
@@ -187,6 +197,8 @@ class FixedInverterConnectionTester:
             print(f"✗ Error reading runtime data: {e}")
             return False
     
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_different_families(self):
         """Test different inverter families"""
         print(f"\n=== Testing Different Inverter Families ===")
@@ -211,6 +223,8 @@ class FixedInverterConnectionTester:
         
         return None
     
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_different_timeouts(self):
         """Test different timeout values"""
         print(f"\n=== Testing Different Timeouts ===")

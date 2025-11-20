@@ -264,6 +264,7 @@ class TestGoodWeAdapter:
             asyncio.run(adapter.get_status())
     
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_connect_with_mock(self, adapter):
         """Test connection with mocked goodwe library."""
         # Mock the goodwe.connect function
@@ -288,6 +289,7 @@ class TestGoodWeAdapter:
             assert adapter.serial_number == "12345678"
     
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_disconnect(self, adapter):
         """Test disconnecting from inverter."""
         await adapter.disconnect()

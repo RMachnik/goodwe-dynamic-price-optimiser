@@ -21,7 +21,6 @@ from pathlib import Path as _Path
 
 from database.storage_interface import StorageConfig
 from database.sqlite_storage import SQLiteStorage
-from database.schema import DatabaseSchema
 
 
 @pytest.fixture
@@ -54,13 +53,10 @@ def storage_config(temp_db):
 
 
 @pytest.fixture
-def storage(storage_config, temp_db):
-	"""Create a SQLiteStorage instance with schema prepared."""
-	schema = DatabaseSchema(temp_db)
-	assert schema.connect()
-	assert schema.create_tables()
-	assert schema.create_indexes()
-	schema.disconnect()
-
+async def storage(storage_config):
+	"""Create a SQLiteStorage instance."""
 	s = SQLiteStorage(storage_config)
-	return s
+	await s.connect()
+	yield s
+	await s.disconnect()
+

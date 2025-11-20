@@ -66,31 +66,25 @@ class ConnectionPool:
             self.active_connections.clear()
 
     async def get_connection(self) -> FakeConnection:
-        async with self._lock:
-            if self.connections:
-                conn = self.connections.pop()
-                self.active_connections.append(conn)
-                self.stats.active_connections = len(self.active_connections)
-                return conn
+        while self._is_running:
+            async with self._lock:
+                if self.connections:
+                    conn = self.connections.pop()
+                    self.active_connections.append(conn)
+                    self.stats.active_connections = len(self.active_connections)
+                    return conn
 
-            if len(self.active_connections) < self.max_connections:
-                conn = FakeConnection()
-                self.active_connections.append(conn)
-                self.stats.total_connections += 1
-                self.stats.active_connections = len(self.active_connections)
-                return conn
+                if len(self.active_connections) < self.max_connections:
+                    conn = FakeConnection()
+                    self.active_connections.append(conn)
+                    self.stats.total_connections += 1
+                    self.stats.active_connections = len(self.active_connections)
+                    return conn
 
-            # wait briefly for a connection
-            while not self.connections and len(self.active_connections) >= self.max_connections:
-                await asyncio.sleep(0.01)
-
-            if self.connections:
-                conn = self.connections.pop()
-                self.active_connections.append(conn)
-                self.stats.active_connections = len(self.active_connections)
-                return conn
-
-            raise Exception("Failed to get database connection")
+            # wait briefly for a connection outside the lock
+            await asyncio.sleep(0.01)
+            
+        raise Exception("Connection pool stopped or not running")
 
     async def return_connection(self, conn: FakeConnection):
         async with self._lock:
