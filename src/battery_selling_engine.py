@@ -18,10 +18,12 @@ Usage:
 import asyncio
 import logging
 import traceback
+import json
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 try:
     import goodwe
@@ -228,6 +230,14 @@ class BatterySellingEngine:
         self.sell_then_buy_enabled = config.get('battery_selling', {}).get('sell_then_buy_prevention', {}).get('enabled', False)  # Disabled by default for backward compatibility
         self.future_analysis_hours = config.get('battery_selling', {}).get('sell_then_buy_prevention', {}).get('analysis_hours', 12)
         self.min_savings_ratio = config.get('battery_selling', {}).get('sell_then_buy_prevention', {}).get('min_savings_ratio', 1.5)  # Revenue/cost ratio
+        
+        # Protection mechanisms (Phase: Buy-back protection)
+        self.emergency_sell_threshold = config.get('battery_selling', {}).get('emergency_sell_price_threshold', 1.50)
+        self.max_soc_drop_per_session = config.get('battery_selling', {}).get('max_soc_drop_per_session', 20)
+        self.max_soc_drop_per_day = config.get('battery_selling', {}).get('max_soc_drop_per_day', 40)
+        self.profit_margin_multiplier = config.get('battery_selling', {}).get('min_profit_margin_multiplier', 1.5)
+        self.daily_tracking_file = Path(config.get('battery_selling', {}).get('daily_tracking_file', 'data/daily_soc_drops.json'))
+        self.daily_soc_drop_tracking = self._load_daily_tracking()
 
         try:
             from pv_consumption_analyzer import PVConsumptionAnalyzer
@@ -245,7 +255,10 @@ class BatterySellingEngine:
         self.logger.info(f"  - Net sellable energy: {self.net_sellable_energy:.2f} kWh")
         self.logger.info(f"  - Smart timing: {'Enabled' if self.timing_engine else 'Disabled'}")
         self.logger.info(f"  - Tariff pricing: {'Enabled' if self.tariff_calculator else 'SC-only'}")
-        self.logger.info(f"  - Sell-then-buy prevention: {'Enabled' if self.consumption_forecaster else 'Disabled'}")
+        self.logger.info(f"  - Sell-then-buy prevention: {'Enabled' if self.sell_then_buy_enabled else 'Disabled'}")
+        self.logger.info(f"  - Emergency sell threshold: {self.emergency_sell_threshold:.2f} PLN/kWh")
+        self.logger.info(f"  - Max SOC drop per session: {self.max_soc_drop_per_session}%")
+        self.logger.info(f"  - Max SOC drop per day: {self.max_soc_drop_per_day}%")
         self.logger.info(f"  - Phase 2 Dynamic SOC: {'Enabled' if self.dynamic_soc_enabled else 'Disabled'}")
         if self.dynamic_soc_enabled:
             self.logger.info(f"    * Super premium (>{self.super_premium_price_threshold} PLN/kWh): {self.super_premium_min_soc}% SOC")
@@ -260,6 +273,53 @@ class BatterySellingEngine:
             self.daily_cycles = 0
             self.last_cycle_reset = today
             self.logger.info("Daily cycle counter reset for new day")
+    
+    def _load_daily_tracking(self) -> Dict[str, float]:
+        """Load daily SOC drop tracking from file, clean old data (>7 days)"""
+        try:
+            if not self.daily_tracking_file.exists():
+                self.logger.info("Daily tracking file does not exist, starting fresh")
+                return {}
+            
+            with open(self.daily_tracking_file, 'r') as f:
+                data = json.load(f)
+            
+            # Clean old entries (>7 days)
+            cutoff_date = datetime.now().date() - timedelta(days=7)
+            cleaned_data = {
+                date_str: value 
+                for date_str, value in data.items()
+                if datetime.strptime(date_str, '%Y-%m-%d').date() >= cutoff_date
+            }
+            
+            if len(cleaned_data) < len(data):
+                self.logger.info(f"Cleaned {len(data) - len(cleaned_data)} old tracking entries")
+            
+            return cleaned_data
+        except Exception as e:
+            self.logger.warning(f"Failed to load daily tracking: {e}, starting fresh")
+            return {}
+    
+    def _save_daily_tracking(self):
+        """Atomically save daily SOC drop tracking to file"""
+        try:
+            # Ensure directory exists
+            self.daily_tracking_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Write to temp file first, then atomic rename
+            temp_file = self.daily_tracking_file.with_suffix('.tmp')
+            with open(temp_file, 'w') as f:
+                json.dump(self.daily_soc_drop_tracking, f, indent=2)
+            
+            temp_file.replace(self.daily_tracking_file)
+            self.logger.debug("Daily tracking saved successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to save daily tracking: {e}")
+    
+    def _get_today_soc_drop(self) -> float:
+        """Get total SOC drop for today"""
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        return self.daily_soc_drop_tracking.get(today_str, 0.0)
     
     def _is_peak_hour(self) -> bool:
         """Check if current hour is a peak selling hour"""
@@ -654,6 +714,14 @@ class BatterySellingEngine:
             pv_power = current_data.get('pv', {}).get('power_w', 0)
             consumption = current_data.get('consumption', {}).get('power_w', 0)
             current_price_pln = price_data.get('current_price_pln', 0)
+            
+            # EMERGENCY MODE: Bypass protections for extremely high prices
+            emergency_mode = current_price_pln >= self.emergency_sell_threshold
+            if emergency_mode:
+                self.logger.info(
+                    f"⚡ EMERGENCY SELL MODE: Price {current_price_pln:.3f} PLN/kWh exceeds threshold "
+                    f"{self.emergency_sell_threshold:.2f} — bypassing buy-back and profit protections for optimal revenue"
+                )
 
             # Check safety conditions first
             safety_ok, safety_reason = self._check_safety_conditions(current_data)
@@ -668,20 +736,46 @@ class BatterySellingEngine:
                     safety_checks_passed=False,
                     risk_level="high"
                 )
-
-            # CRITICAL: Check "sell-then-buy" prevention before proceeding
-            sell_then_buy_analysis = self._analyze_sell_then_buy_risk(current_data, price_data, price_forecast)
-            if not sell_then_buy_analysis.get('safe_to_sell', True):
+            
+            # Check daily cumulative SOC drop limit
+            today_drop = self._get_today_soc_drop()
+            if today_drop >= self.max_soc_drop_per_day:
+                self.logger.info(
+                    f"🛡️ BLOCKED: Daily SOC drop limit reached — used {today_drop:.1f}% of "
+                    f"{self.max_soc_drop_per_day}% maximum (protects battery health)"
+                )
                 return SellingOpportunity(
                     decision=SellingDecision.WAIT,
                     confidence=0.0,
                     expected_revenue_pln=0.0,
                     selling_power_w=0,
                     estimated_duration_hours=0.0,
-                    reasoning=f"Sell-then-buy prevention: {sell_then_buy_analysis.get('reason', 'Risk detected')}",
+                    reasoning=f"Daily SOC drop limit reached: {today_drop:.1f}% of {self.max_soc_drop_per_day}% max",
                     safety_checks_passed=True,
                     risk_level="high"
                 )
+
+            # CRITICAL: Check "sell-then-buy" prevention before proceeding (skip in emergency mode)
+            if not emergency_mode:
+                sell_then_buy_analysis = self._analyze_sell_then_buy_risk(current_data, price_data, price_forecast)
+                if not sell_then_buy_analysis.get('safe_to_sell', True):
+                    self.logger.info(
+                        f"🛡️ BLOCKED: Sell-then-buy protection — {sell_then_buy_analysis.get('reason', 'Risk detected')} | "
+                        f"Current: {current_price_pln:.3f} PLN/kWh"
+                    )
+                    return SellingOpportunity(
+                        decision=SellingDecision.WAIT,
+                        confidence=0.0,
+                        expected_revenue_pln=0.0,
+                        selling_power_w=0,
+                        estimated_duration_hours=0.0,
+                        reasoning=f"Sell-then-buy prevention: {sell_then_buy_analysis.get('reason', 'Risk detected')}",
+                        safety_checks_passed=True,
+                        risk_level="high"
+                    )
+            else:
+                self.logger.info("⚡ Emergency mode: Skipping sell-then-buy analysis (price justifies risk)")
+            
             
             # Phase 2: Get dynamic minimum SOC based on price magnitude
             min_soc_required = self._get_dynamic_min_soc(current_price_pln, price_forecast)
@@ -728,6 +822,26 @@ class BatterySellingEngine:
                     risk_level="low"
                 )
             
+            # Check profit margin (skip in emergency mode)
+            if not emergency_mode:
+                min_profitable_price = self.min_selling_price_pln * self.profit_margin_multiplier
+                if current_price_pln < min_profitable_price:
+                    self.logger.info(
+                        f"🛡️ BLOCKED: Insufficient profit margin — Price {current_price_pln:.3f} < "
+                        f"{min_profitable_price:.3f} PLN/kWh ({self.profit_margin_multiplier}x threshold)"
+                    )
+                    return SellingOpportunity(
+                        decision=SellingDecision.WAIT,
+                        confidence=0.0,
+                        expected_revenue_pln=0.0,
+                        selling_power_w=0,
+                        estimated_duration_hours=0.0,
+                        reasoning=f"Price {current_price_pln:.3f} below profitable threshold {min_profitable_price:.3f} PLN/kWh",
+                        safety_checks_passed=True,
+                        risk_level="medium"
+                    )
+            
+            
             # Check if PV is insufficient (prefer PV over battery)
             if pv_power >= consumption:
                 return SellingOpportunity(
@@ -750,6 +864,41 @@ class BatterySellingEngine:
             available_energy_kwh = (battery_soc - self.safety_margin_soc) / 100 * self.battery_capacity_kwh
             estimated_duration_hours = available_energy_kwh / (selling_power_w / 1000)
             
+            # Apply SOC drop limits (per session and daily)
+            today_drop = self._get_today_soc_drop()
+            remaining_daily = self.max_soc_drop_per_day - today_drop
+            max_allowed_soc_drop = min(
+                battery_soc - self.safety_margin_soc,  # Available above safety margin
+                self.max_soc_drop_per_session,          # Per-session limit
+                remaining_daily                         # Remaining daily budget
+            )
+            
+            if max_allowed_soc_drop <= 0:
+                self.logger.info(
+                    f"🛡️ BLOCKED: No SOC drop budget remaining (session: {self.max_soc_drop_per_session}%, "
+                    f"daily remaining: {remaining_daily:.1f}%)"
+                )
+                return SellingOpportunity(
+                    decision=SellingDecision.WAIT,
+                    confidence=0.0,
+                    expected_revenue_pln=0.0,
+                    selling_power_w=0,
+                    estimated_duration_hours=0.0,
+                    reasoning=f"SOC drop budget exhausted (daily remaining: {remaining_daily:.1f}%)",
+                    safety_checks_passed=True,
+                    risk_level="medium"
+                )
+            
+            # Cap energy to allowed SOC drop
+            max_allowed_energy_kwh = (max_allowed_soc_drop / 100) * self.battery_capacity_kwh
+            if available_energy_kwh > max_allowed_energy_kwh:
+                available_energy_kwh = max_allowed_energy_kwh
+                estimated_duration_hours = available_energy_kwh / (selling_power_w / 1000)
+                self.logger.info(
+                    f"🛡️ LIMITING SALE: Capping to {max_allowed_soc_drop:.1f}% SOC drop | "
+                    f"Session limit: {self.max_soc_drop_per_session}%, Daily remaining: {remaining_daily:.1f}%"
+                )
+            
             # Calculate expected revenue
             expected_revenue = self._calculate_expected_revenue(current_price_pln, estimated_duration_hours)
             
@@ -763,6 +912,10 @@ class BatterySellingEngine:
             if confidence >= 0.7 and expected_revenue >= 1.0:  # At least 1 PLN revenue
                 decision = SellingDecision.START_SELLING
                 reasoning = f"Good selling opportunity: {battery_soc}% SOC, {current_price_pln:.3f} PLN/kWh, {expected_revenue:.2f} PLN revenue"
+                
+                # Prefix with emergency indicator if in emergency mode
+                if emergency_mode:
+                    reasoning = f"⚡ EMERGENCY: {reasoning}"
             else:
                 decision = SellingDecision.WAIT
                 reasoning = f"Not optimal: confidence {confidence:.2f}, revenue {expected_revenue:.2f} PLN"
@@ -1029,6 +1182,14 @@ class BatterySellingEngine:
                 status="active"
             )
             
+            # Get current SOC for tracking
+            try:
+                current_soc = await inverter.get_battery_soc()
+                session.start_soc = current_soc
+            except Exception as e:
+                self.logger.warning(f"Could not get battery SOC: {e}")
+                session.start_soc = 0
+            
             # Set inverter to eco_discharge mode
             # Note: ECO_DISCHARGE mode expects power in % (0-100), not Watts
             # We set 100% here and rely on set_grid_export_limit to cap the actual export
@@ -1083,6 +1244,22 @@ class BatterySellingEngine:
             
             # Update session status
             session.status = "completed"
+            
+            # Track SOC drop for daily limit enforcement
+            try:
+                end_soc = await inverter.get_battery_soc()
+                if session.start_soc > 0:  # Only track if we have valid start SOC
+                    soc_drop = session.start_soc - end_soc
+                    if soc_drop > 0:  # Only track actual drops
+                        today_str = datetime.now().strftime('%Y-%m-%d')
+                        self.daily_soc_drop_tracking[today_str] = self.daily_soc_drop_tracking.get(today_str, 0.0) + soc_drop
+                        self._save_daily_tracking()
+                        self.logger.info(
+                            f"Session {session_id} SOC drop: {soc_drop:.1f}% "
+                            f"(daily total: {self.daily_soc_drop_tracking[today_str]:.1f}%)"
+                        )
+            except Exception as e:
+                self.logger.warning(f"Could not track SOC drop: {e}")
             
             # Remove from active sessions
             self.active_sessions = [s for s in self.active_sessions if s.session_id != session_id]

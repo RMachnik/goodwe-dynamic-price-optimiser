@@ -533,12 +533,23 @@ battery_selling:
   use_percentile_trigger: true     # Enable percentile-based trigger
   sell_percentile_threshold: 80    # p80 (top 20% prices)
   min_battery_soc: 50              # Minimum SOC to start selling (%)
+  max_soc_drop_per_session: 20     # Max 20% SOC drop per selling session
+  max_soc_drop_per_day: 40         # Max 40% cumulative SOC drop per day
+  emergency_sell_price_threshold: 1.50  # Above 1.50 PLN/kWh bypass protections
+  min_profit_margin_multiplier: 1.5     # Selling price must be 1.5x min_selling_price
+  daily_tracking_file: "data/daily_soc_drops.json"  # Persist daily SOC drop tracking
   safety_margin_soc: 50            # Safety margin SOC - never discharge below this (%)
   max_daily_cycles: 2              # Maximum discharge cycles per day
   peak_hours: [17, 18, 19, 20, 21] # High price selling hours (5-9 PM)
   operation_mode: "eco_discharge"   # GoodWe operation mode for selling
   grid_export_limit_w: 5000        # Max export power (5kW)
   battery_dod_limit: 50            # Max discharge depth (50% = 50% SOC min)
+  
+  # Sell-then-buy prevention (protects against expensive buy-back scenarios)
+  sell_then_buy_prevention:
+    enabled: true                  # Enable buy-back cost analysis
+    analysis_hours: 12             # Analyze next 12 hours for buy-back risk
+    min_savings_ratio: 1.5         # Selling revenue must be 1.5x buy-back cost
   
   # Smart Timing Configuration (Avoid Selling Too Early)
   smart_timing:
@@ -553,15 +564,15 @@ battery_selling:
     dynamic_soc_thresholds:
       enabled: true                        # Enable dynamic SOC thresholds
       super_premium_price_threshold: 1.2   # >1.2 PLN/kWh = super premium (rare but highly profitable)
-      super_premium_min_soc: 50            # Allow selling from 50% SOC during super premium prices
+      super_premium_min_soc: 70            # Conservative: 70% SOC minimum during super premium prices
       premium_price_threshold: 0.9         # 0.9-1.2 PLN/kWh = premium prices
-      premium_min_soc: 60                  # Allow selling from 60% SOC during premium prices
+      premium_min_soc: 75                  # Conservative: 75% SOC minimum during premium prices
       very_high_price_threshold: 0.8       # 0.8-0.9 PLN/kWh = very high prices
-      very_high_min_soc: 70                # Allow selling from 70% SOC during very high prices
+      very_high_min_soc: 80                # Conservative: 80% SOC minimum during very high prices
       high_price_threshold: 0.7            # 0.7-0.8 PLN/kWh = high prices
       high_min_soc: 80                     # Standard 80% SOC for high prices
       require_peak_hours: false            # Allow selling outside traditional peak hours
-      require_recharge_forecast: false     # Make recharge forecast advisory only
+      require_recharge_forecast: true      # MANDATORY: Require confirmed recharge opportunity
     
     # Enhanced percentile-based selling (Phase 1)
     percentile_thresholds:
