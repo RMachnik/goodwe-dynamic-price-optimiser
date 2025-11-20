@@ -1,5 +1,7 @@
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+from abc import ABC, abstractmethod
+from datetime import datetime
 
 class ConnectionError(Exception):
     pass
@@ -13,4 +15,68 @@ class StorageConfig:
     batch_size: int = 100
     enable_fallback: bool = True
     fallback_to_file: bool = False
+
+class DataStorageInterface(ABC):
+    """Abstract base class for data storage implementations."""
+    
+    @abstractmethod
+    async def connect(self) -> bool:
+        """Establish connection to the storage backend."""
+        pass
+    
+    @abstractmethod
+    async def disconnect(self) -> None:
+        """Close connection to the storage backend."""
+        pass
+        
+    @abstractmethod
+    async def health_check(self) -> bool:
+        """Check if storage is healthy and accessible."""
+        pass
+
+    @abstractmethod
+    async def save_energy_data(self, data: List[Dict[str, Any]]) -> bool:
+        """Save a batch of energy readings."""
+        pass
+
+    @abstractmethod
+    async def get_energy_data(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        """Retrieve historical energy data."""
+        pass
+
+    @abstractmethod
+    async def save_system_state(self, state: Dict[str, Any]) -> bool:
+        """Save MasterCoordinator state."""
+        pass
+
+    @abstractmethod
+    async def get_system_state(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Retrieve recent system states."""
+        pass
+
+    @abstractmethod
+    async def get_system_state_range(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        """Retrieve system states within a time range."""
+        pass
+
+    @abstractmethod
+    async def save_decision(self, decision: Dict[str, Any]) -> bool:
+        """Save charging/discharging decisions."""
+        pass
+
+    @abstractmethod
+    async def get_decisions(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        """Retrieve historical decisions."""
+        pass
+        
+    @abstractmethod
+    async def save_charging_session(self, session: Dict[str, Any]) -> bool:
+        """Save or update a charging session."""
+        pass
+        
+    @abstractmethod
+    async def get_charging_sessions(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        """Retrieve charging sessions."""
+        pass
+
 

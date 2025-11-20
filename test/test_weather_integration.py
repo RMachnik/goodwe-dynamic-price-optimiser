@@ -21,7 +21,7 @@ from pv_forecasting import PVForecaster
 from master_coordinator import MasterCoordinator, MultiFactorDecisionEngine
 
 
-class TestWeatherDataCollector(unittest.TestCase):
+class TestWeatherDataCollector(unittest.IsolatedAsyncioTestCase):
     """Test weather data collector functionality"""
     
     def setUp(self):
@@ -54,14 +54,18 @@ class TestWeatherDataCollector(unittest.TestCase):
         }
         self.weather_collector = WeatherDataCollector(self.config)
     
-    def test_initialization(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_initialization(self):
         """Test weather collector initialization"""
         self.assertTrue(self.weather_collector.enabled)
         self.assertEqual(self.weather_collector.location['latitude'], 50.1)
         self.assertEqual(self.weather_collector.location['longitude'], 19.7)
         self.assertEqual(self.weather_collector.imgw_station, 'krakow')
     
-    def test_parse_imgw_data(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_parse_imgw_data(self):
         """Test IMGW data parsing"""
         imgw_data = {
             'stacja': 'Kraków',
@@ -85,7 +89,9 @@ class TestWeatherDataCollector(unittest.TestCase):
         self.assertEqual(parsed['pressure'], 1013.2)
         self.assertIn('cloud_cover_estimated', parsed)
     
-    def test_parse_openmeteo_data(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_parse_openmeteo_data(self):
         """Test Open-Meteo data parsing"""
         openmeteo_data = {
             'hourly': {
@@ -108,7 +114,9 @@ class TestWeatherDataCollector(unittest.TestCase):
         self.assertEqual(parsed['solar_irradiance']['ghi'][0], 800)
         self.assertEqual(parsed['cloud_cover']['total'][0], 25)
     
-    def test_estimate_cloud_cover(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_estimate_cloud_cover(self):
         """Test cloud cover estimation from IMGW data"""
         # Clear conditions
         clear_data = {
@@ -128,7 +136,9 @@ class TestWeatherDataCollector(unittest.TestCase):
         cloud_cover = self.weather_collector._estimate_cloud_cover_from_conditions(cloudy_data)
         self.assertGreater(cloud_cover, 50)
     
-    def test_assess_data_quality(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_assess_data_quality(self):
         """Test data quality assessment"""
         current_data = {'temperature': 15.2, 'humidity': 65.0}
         forecast_data = {
@@ -142,7 +152,9 @@ class TestWeatherDataCollector(unittest.TestCase):
         self.assertGreater(quality['confidence'], 0.5)
         self.assertEqual(len(quality['issues']), 0)
     
-    def test_get_solar_irradiance_forecast(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_get_solar_irradiance_forecast(self):
         """Test solar irradiance forecast generation"""
         # Set up mock forecast data
         self.weather_collector.weather_forecast = {
@@ -171,7 +183,9 @@ class TestWeatherDataCollector(unittest.TestCase):
         self.assertEqual(forecast[2]['ghi'], 800)
         self.assertEqual(forecast[2]['cloud_cover_total'], 75)
     
-    def test_cache_validation(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_cache_validation(self):
         """Test cache validation logic"""
         # No cache initially
         self.assertFalse(self.weather_collector._is_cache_valid())
@@ -184,52 +198,77 @@ class TestWeatherDataCollector(unittest.TestCase):
         self.weather_collector.last_update = datetime.now() - timedelta(minutes=45)
         self.assertFalse(self.weather_collector._is_cache_valid())
     
-    @patch('aiohttp.ClientSession')
+    @patch('aiohttp.ClientSession', autospec=True)
     @pytest.mark.asyncio
-    async def test_fetch_imgw_data_success(self, mock_session):
+    @pytest.mark.timeout(10)
+    async def test_fetch_imgw_data_success(self, mock_client_session):
         """Test successful IMGW data fetching"""
-        # Mock response
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={
-            'stacja': 'Kraków',
-            'temperatura': '15.2',
-            'wilgotnosc_wzgledna': '65.0'
-        })
-        
-        mock_session.return_value.__aenter__.return_value.get.return_value.__aenter__.return_value = mock_response
-        
+        # Setup async context manager for session and response
+        class MockResponse:
+            status = 200
+            async def json(self):
+                return {
+                    'stacja': 'Kraków',
+                    'temperatura': '15.2',
+                    'wilgotnosc_wzgledna': '65.0'
+                }
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+        class MockSession:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+            def get(self, *args, **kwargs):
+                return MockResponse()
+
+        mock_client_session.return_value = MockSession()
+
         result = await self.weather_collector._fetch_imgw_data()
-        
         self.assertEqual(result['source'], 'IMGW')
         self.assertEqual(result['station'], 'Kraków')
         self.assertEqual(result['temperature'], 15.2)
     
-    @patch('aiohttp.ClientSession')
+    @patch('aiohttp.ClientSession', autospec=True)
     @pytest.mark.asyncio
-    async def test_fetch_openmeteo_data_success(self, mock_session):
+    @pytest.mark.timeout(10)
+    async def test_fetch_openmeteo_data_success(self, mock_client_session):
         """Test successful Open-Meteo data fetching"""
-        # Mock response
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={
-            'hourly': {
-                'time': ['2025-01-15T12:00'],
-                'shortwave_radiation': [800],
-                'cloudcover': [25]
-            }
-        })
-        
-        mock_session.return_value.__aenter__.return_value.get.return_value.__aenter__.return_value = mock_response
-        
+        class MockResponse:
+            status = 200
+            async def json(self):
+                return {
+                    'hourly': {
+                        'time': ['2025-01-15T12:00'],
+                        'shortwave_radiation': [800],
+                        'cloudcover': [25]
+                    }
+                }
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+        class MockSession:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+            def get(self, *args, **kwargs):
+                return MockResponse()
+
+        mock_client_session.return_value = MockSession()
+
         result = await self.weather_collector._fetch_openmeteo_data()
-        
         self.assertEqual(result['source'], 'Open-Meteo')
         self.assertEqual(len(result['solar_irradiance']['ghi']), 1)
         self.assertEqual(result['solar_irradiance']['ghi'][0], 800)
 
 
-class TestWeatherEnhancedPVForecasting(unittest.TestCase):
+class TestWeatherEnhancedPVForecasting(unittest.IsolatedAsyncioTestCase):
     """Test weather-enhanced PV forecasting"""
     
     def setUp(self):
@@ -249,7 +288,9 @@ class TestWeatherEnhancedPVForecasting(unittest.TestCase):
         self.mock_weather_collector = Mock()
         self.pv_forecaster.set_weather_collector(self.mock_weather_collector)
     
-    def test_ghi_to_pv_power_conversion(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_ghi_to_pv_power_conversion(self):
         """Test GHI to PV power conversion"""
         # Clear sky conditions
         pv_power = self.pv_forecaster._ghi_to_pv_power(1000, 0)  # 1000 W/m², 0% clouds
@@ -264,7 +305,9 @@ class TestWeatherEnhancedPVForecasting(unittest.TestCase):
         pv_power_none = self.pv_forecaster._ghi_to_pv_power(0, 0)
         self.assertEqual(pv_power_none, 0)
     
-    def test_weather_confidence_calculation(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_weather_confidence_calculation(self):
         """Test weather-based confidence calculation"""
         # Clear sky
         confidence = self.pv_forecaster._calculate_weather_confidence(10)
@@ -282,7 +325,9 @@ class TestWeatherEnhancedPVForecasting(unittest.TestCase):
         confidence = self.pv_forecaster._calculate_weather_confidence(90)
         self.assertEqual(confidence, 0.6)
     
-    def test_weather_based_forecast(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_weather_based_forecast(self):
         """Test weather-based PV forecasting"""
         # Mock solar forecast data
         mock_solar_forecast = [
@@ -318,17 +363,21 @@ class TestWeatherEnhancedPVForecasting(unittest.TestCase):
         self.assertEqual(forecasts[0]['cloud_cover_percent'], 25)
         self.assertGreater(forecasts[0]['forecasted_power_kw'], 0)
     
-    def test_fallback_to_historical(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_fallback_to_historical(self):
         """Test fallback to historical forecasting when weather data unavailable"""
         # No weather collector
         self.pv_forecaster.weather_collector = None
         
-        forecasts = self.pv_forecaster.forecast_pv_production(2)
+        forecasts = await self.pv_forecaster.forecast_pv_production(2)
         
         self.assertEqual(len(forecasts), 2)
         self.assertIn(forecasts[0]['method'], ['historical_pattern', 'time_based_pattern'])
     
-    def test_weather_forecast_with_no_data(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_weather_forecast_with_no_data(self):
         """Test weather forecasting when no solar data available"""
         self.mock_weather_collector.get_solar_irradiance_forecast.return_value = []
         
@@ -337,7 +386,7 @@ class TestWeatherEnhancedPVForecasting(unittest.TestCase):
         self.assertEqual(len(forecasts), 0)
 
 
-class TestWeatherEnhancedDecisionEngine(unittest.TestCase):
+class TestWeatherEnhancedDecisionEngine(unittest.IsolatedAsyncioTestCase):
     """Test weather-enhanced decision engine"""
     
     def setUp(self):
@@ -363,7 +412,9 @@ class TestWeatherEnhancedDecisionEngine(unittest.TestCase):
         
         self.decision_engine = MultiFactorDecisionEngine(self.config, self.mock_charging_controller)
     
-    def test_weather_pv_score_calculation(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_weather_pv_score_calculation(self):
         """Test weather-enhanced PV scoring"""
         weather_data = {
             'forecast': {
@@ -388,7 +439,9 @@ class TestWeatherEnhancedDecisionEngine(unittest.TestCase):
             score = self.decision_engine._calculate_weather_pv_score(weather_data)
             self.assertLessEqual(score, 50)  # Should be neutral or low for no data
     
-    def test_weather_enhanced_pv_score(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_weather_enhanced_pv_score(self):
         """Test weather-enhanced PV scoring with blending"""
         current_data = {
             'photovoltaic': {
@@ -411,7 +464,9 @@ class TestWeatherEnhancedDecisionEngine(unittest.TestCase):
             score = self.decision_engine._calculate_weather_enhanced_pv_score(current_data)
             self.assertGreaterEqual(score, 20)  # Should be enhanced by weather data (base score is low due to low PV power)
     
-    def test_weather_enhanced_decision_making(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_weather_enhanced_decision_making(self):
         """Test weather-enhanced decision making"""
         current_data = {
             'battery': {
@@ -456,9 +511,10 @@ class TestWeatherEnhancedDecisionEngine(unittest.TestCase):
             mock_decision.start_time = datetime.now()
             mock_decision.end_time = datetime.now() + timedelta(hours=2)
             
-            mock_hybrid.analyze_and_decide.return_value = mock_decision
+            # Use AsyncMock for async method
+            mock_hybrid.analyze_and_decide = AsyncMock(return_value=mock_decision)
             
-            decision = self.decision_engine._analyze_and_decide_with_timing(
+            decision = await self.decision_engine._analyze_and_decide_with_timing(
                 current_data, price_data, []
             )
             
@@ -468,7 +524,7 @@ class TestWeatherEnhancedDecisionEngine(unittest.TestCase):
             self.assertIn(decision['action'], ['start_charging', 'none'])
 
 
-class TestWeatherIntegrationIntegration(unittest.TestCase):
+class TestWeatherIntegrationIntegration(unittest.IsolatedAsyncioTestCase):
     """Integration tests for weather functionality"""
     
     def setUp(self):
@@ -487,46 +543,87 @@ class TestWeatherIntegrationIntegration(unittest.TestCase):
             'timing_awareness_enabled': True
         }
     
-    @patch('aiohttp.ClientSession')
+
+    @patch('aiohttp.ClientSession', autospec=True)
     @pytest.mark.asyncio
-    async def test_full_weather_data_collection(self, mock_session):
+    @pytest.mark.timeout(10)
+    async def test_full_weather_data_collection(self, mock_client_session):
         """Test complete weather data collection flow"""
         # Mock IMGW response
-        imgw_response = AsyncMock()
-        imgw_response.status = 200
-        imgw_response.json = AsyncMock(return_value={
-            'stacja': 'Kraków',
-            'temperatura': '15.2',
-            'wilgotnosc_wzgledna': '65.0',
-            'cisnienie': '1013.2'
-        })
-        
+        class MockResponseIMGW:
+            status = 200
+            async def json(self):
+                return {
+                    'stacja': 'Kraków',
+                    'temperatura': '15.2',
+                    'wilgotnosc_wzgledna': '65.0',
+                    'cisnienie': '1013.2'
+                }
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
         # Mock Open-Meteo response
-        openmeteo_response = AsyncMock()
-        openmeteo_response.status = 200
-        openmeteo_response.json = AsyncMock(return_value={
-            'hourly': {
-                'time': ['2025-01-15T12:00', '2025-01-15T13:00'],
-                'shortwave_radiation': [800, 900],
-                'cloudcover': [25, 30]
-            }
-        })
-        
-        # Configure mock session to return different responses
-        mock_session.return_value.__aenter__.return_value.get.return_value.__aenter__.side_effect = [
-            imgw_response, openmeteo_response
-        ]
-        
+        class MockResponseOpenMeteo:
+            status = 200
+            async def json(self):
+                return {
+                    'hourly': {
+                        'time': ['2025-01-15T12:00', '2025-01-15T13:00'],
+                        'shortwave_radiation': [800, 900],
+                        'cloudcover': [25, 30]
+                    }
+                }
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+
+        class MockSession:
+            def __init__(self):
+                self.call_count = 0
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc, tb):
+                pass
+            def get(self, *args, **kwargs):
+                # Alternate between IMGW and Open-Meteo responses
+                if self.call_count == 0:
+                    self.call_count += 1
+                    return MockResponseIMGW()
+                else:
+                    return MockResponseOpenMeteo()
+
+        mock_client_session.return_value = MockSession()
+
+        # Now run the actual test logic
+        from weather_data_collector import WeatherDataCollector
+        weather_collector = WeatherDataCollector(self.config['weather_integration'])
+        imgw_data = await weather_collector._fetch_imgw_data()
+        openmeteo_data = await weather_collector._fetch_openmeteo_data()
+        # Compose sources dict as expected by the test
+        sources = {
+            'imgw_available': imgw_data.get('source') == 'IMGW',
+            'openmeteo_available': openmeteo_data.get('source') == 'Open-Meteo'
+        }
+        # Simulate weather_data dict for assertion
+        weather_data = {'sources': sources}
+        self.assertTrue(weather_data['sources']['imgw_available'])
+        self.assertTrue(weather_data['sources']['openmeteo_available'])
+
         weather_collector = WeatherDataCollector(self.config)
         weather_data = await weather_collector.collect_weather_data()
-        
+
         self.assertIn('current_conditions', weather_data)
         self.assertIn('forecast', weather_data)
         self.assertIn('data_quality', weather_data)
         self.assertTrue(weather_data['sources']['imgw_available'])
         self.assertTrue(weather_data['sources']['openmeteo_available'])
     
-    def test_weather_summary_generation(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_weather_summary_generation(self):
         """Test weather summary generation"""
         weather_collector = WeatherDataCollector(self.config)
         
