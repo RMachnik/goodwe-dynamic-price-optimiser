@@ -923,6 +923,13 @@ class MasterCoordinator:
                 
                 await self._save_battery_selling_decision(selling_opportunity, current_price_pln, success, error_msg)
             
+            # Ensure inverter returns to safe defaults when not actively selling
+            if not self.battery_selling_engine.active_sessions:
+                try:
+                    await self.battery_selling_engine.ensure_safe_state(self.charging_controller.goodwe_charger.inverter)
+                except Exception as ensure_exc:
+                    logger.warning(f"Failed to reset inverter safe state after selling: {ensure_exc}")
+ 
         except Exception as e:
             logger.error(f"Failed to handle battery selling logic: {e}")
     

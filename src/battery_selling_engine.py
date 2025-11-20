@@ -164,6 +164,10 @@ class BatterySellingEngine:
         self.usable_energy_per_cycle = self.battery_capacity_kwh * (self.min_selling_soc - self.safety_margin_soc) / 100
         self.net_sellable_energy = round(self.usable_energy_per_cycle * self.discharge_efficiency, 2)
         
+        # Default DOD for normal operation (restore after selling)
+        critical_soc = config.get('battery_management', {}).get('soc_thresholds', {}).get('critical', 10)
+        self.default_dod = 100 - critical_soc
+        
         # Session tracking
         self.active_sessions: List[SellingSession] = []
         self.daily_cycles = 0
@@ -808,8 +812,13 @@ class BatterySellingEngine:
         confidence += peak_factor
         
         # Safety margin factor (more margin = higher confidence)
-        margin_factor = (battery_soc - self.safety_margin_soc) / (self.min_selling_soc - self.safety_margin_soc)
-        margin_factor = min(margin_factor, 1.0)
+        margin_delta = self.min_selling_soc - self.safety_margin_soc
+        if margin_delta <= 0:
+            # When min_selling equals safety margin, avoid division by zero
+            margin_factor = 1.0 if battery_soc >= self.min_selling_soc else 0.0
+        else:
+            margin_factor = (battery_soc - self.safety_margin_soc) / margin_delta
+        margin_factor = max(0.0, min(margin_factor, 1.0))
         confidence += margin_factor * 0.1
         
         return min(confidence, 1.0)
@@ -986,11 +995,12 @@ class BatterySellingEngine:
             return self.min_selling_price_pln
     
     async def ensure_safe_state(self, inverter: Inverter) -> bool:
-        """Ensure inverter is in safe state (General mode, no export) on startup"""
+        """Ensure inverter is in safe state (General mode, no export, default DOD) on startup"""
         try:
-            self.logger.info("Ensuring inverter is in safe state (General mode)...")
+            self.logger.info(f"Ensuring inverter is in safe state (General mode, DOD {self.default_dod}%)...")
             await inverter.set_operation_mode(OperationMode.GENERAL)
             await inverter.set_grid_export_limit(0)
+            await inverter.set_ongrid_battery_dod(self.default_dod)
             return True
         except Exception as e:
             self.logger.error(f"Failed to ensure safe state: {e}")
@@ -1067,6 +1077,9 @@ class BatterySellingEngine:
             
             # Disable grid export
             await inverter.set_grid_export_limit(0)
+            
+            # Restore default DOD
+            await inverter.set_ongrid_battery_dod(self.default_dod)
             
             # Update session status
             session.status = "completed"
