@@ -1009,9 +1009,11 @@ class BatterySellingEngine:
             )
             
             # Set inverter to eco_discharge mode
+            # Note: ECO_DISCHARGE mode expects power in % (0-100), not Watts
+            # We set 100% here and rely on set_grid_export_limit to cap the actual export
             await inverter.set_operation_mode(
                 OperationMode.ECO_DISCHARGE,
-                int(opportunity.selling_power_w),  # Power limit (ensure int)
+                100,  # Power limit % (100% = max discharge)
                 int(self.safety_margin_soc)  # Min SOC (safety margin) (ensure int)
             )
             
