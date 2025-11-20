@@ -238,6 +238,7 @@ class TestDynamicSOCThresholds:
             assert min_soc == 80
     
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_selling_blocked_at_72_soc_normal_price(self, engine_dynamic):
         """Test selling blocked at 72% SOC with normal price"""
         current_data = {
@@ -260,6 +261,7 @@ class TestDynamicSOCThresholds:
             assert "threshold" in opportunity.reasoning.lower()
     
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_selling_allowed_at_72_soc_super_premium(self, engine_dynamic):
         """Test selling allowed at 52% SOC with super premium price (50% threshold)"""
         current_data = {
@@ -291,6 +293,7 @@ class TestDynamicSOCThresholds:
                 assert opportunity.decision != SellingDecision.WAIT or "below" not in opportunity.reasoning.lower()
     
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_safety_margin_never_breached(self, engine_dynamic):
         """Test that 50% safety margin is never breached regardless of dynamic SOC"""
         current_data = {
@@ -356,6 +359,7 @@ class TestDynamicSOCIntegration:
         return BatterySellingEngine(config_integrated)
     
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_scenario_evening_peak_spike(self, engine_integrated):
         """Test scenario: Evening price spike to 1.5 PLN/kWh during peak hours"""
         current_data = {
@@ -388,6 +392,7 @@ class TestDynamicSOCIntegration:
                     assert opportunity.selling_power_w > 0  # Should have selling power
     
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_scenario_premium_price_no_recharge(self, engine_integrated):
         """Test scenario: Premium price allows selling even without recharge opportunity"""
         current_data = {
@@ -420,6 +425,7 @@ class TestDynamicSOCIntegration:
                     assert "below" not in opportunity.reasoning.lower() or "60" not in opportunity.reasoning
     
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_scenario_outside_peak_hours_blocks_low_soc(self, engine_integrated):
         """Test scenario: Super premium price but outside peak hours"""
         current_data = {

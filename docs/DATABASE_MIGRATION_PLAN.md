@@ -45,6 +45,29 @@
 - Dodanie `pydantic>=2.0.0` - walidacja danych
 - Dodanie `backoff>=2.2.0` - retry logic dla operacji bazodanowych
 
+## 1.4 Composite Storage Architecture (New)
+
+**Cel**: Zapewnienie bezpieczeństwa danych i kompatybilności wstecznej
+
+- **Composite Pattern**: Implementacja `CompositeStorage`, która zapisuje dane jednocześnie do wielu backendów (SQLite + Pliki).
+- **Read Fallback Strategy**:
+  1. Próba odczytu z SQLite (Primary).
+  2. W przypadku błędu lub braku danych -> odczyt z plików JSON (Fallback).
+  3. Logowanie ostrzeżenia przy użyciu fallbacku.
+- **Korzyści**:
+  - Bezpieczeństwo: Awaria bazy nie zatrzymuje systemu.
+  - Migracja: Możliwość stopniowego przenoszenia danych.
+  - Debugging: Pliki JSON pozostają dostępne do łatwego podglądu.
+
+## 1.5 Storage Factory
+
+- Utworzenie `src/database/storage_factory.py`
+- Odpowiedzialność: Tworzenie odpowiedniej instancji storage na podstawie konfiguracji.
+- Obsługa trybów:
+  - `file_only`: Tylko pliki (Legacy)
+  - `db_only`: Tylko baza (Target)
+  - `composite`: Baza + Pliki (Transition/Safe Mode)
+
 ## 2. Implementacja narzędzia migracji danych
 
 **Cel**: Przeniesienie istniejących danych z JSON do bazy

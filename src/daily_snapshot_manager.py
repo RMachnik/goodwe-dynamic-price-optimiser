@@ -6,9 +6,11 @@ Creates and manages daily summaries of charging decisions to avoid recalculating
 
 import json
 import logging
+import asyncio
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+from database.storage_factory import StorageFactory
 
 logger = logging.getLogger(__name__)
 
@@ -16,22 +18,31 @@ logger = logging.getLogger(__name__)
 class DailySnapshotManager:
     """Manages daily snapshots of charging metrics"""
     
-    def __init__(self, project_root: Optional[Path] = None):
+    def __init__(self, project_root: Optional[Path] = None, config: Dict[str, Any] = None):
         """Initialize the snapshot manager
         
         Args:
             project_root: Root directory of the project. If None, auto-detect.
+            config: Application configuration
         """
         if project_root is None:
             project_root = Path(__file__).parent.parent
         
         self.project_root = project_root
+        self.config = config or {}
         self.energy_data_dir = project_root / "out" / "energy_data"
         self.snapshots_dir = project_root / "out" / "daily_snapshots"
         self.snapshots_dir.mkdir(parents=True, exist_ok=True)
         
         self.monthly_snapshots_dir = project_root / "out" / "monthly_snapshots"
         self.monthly_snapshots_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize storage
+        self.storage = None
+        try:
+            self.storage = StorageFactory.create_storage(self.config)
+        except Exception as e:
+            logger.error(f"Failed to create storage: {e}")
         
         logger.info(f"Snapshot manager initialized. Snapshots dir: {self.snapshots_dir}")
     
@@ -54,27 +65,50 @@ class DailySnapshotManager:
         """
         logger.info(f"Creating daily snapshot for {target_date}")
         
-        # Find all decision files for this date
-        date_str = target_date.strftime('%Y%m%d')
-        charging_files = list(self.energy_data_dir.glob(f"charging_decision_{date_str}_*.json"))
-        selling_files = list(self.energy_data_dir.glob(f"battery_selling_decision_{date_str}_*.json"))
-        
-        decision_files = charging_files + selling_files
-        
-        if not decision_files:
-            logger.info(f"No decision files found for {target_date}")
-            return None
-        
-        # Process all decisions for this day
         decisions = []
-        for file_path in sorted(decision_files):
+        
+        # Try to fetch from storage first
+        if self.storage:
             try:
-                with open(file_path, 'r') as f:
-                    decision_data = json.load(f)
-                    decisions.append(decision_data)
+                async def _fetch_decisions():
+                    if not await self.storage.connect():
+                        return []
+                    
+                    start_time = datetime.combine(target_date, datetime.min.time())
+                    end_time = datetime.combine(target_date, datetime.max.time())
+                    
+                    data = await self.storage.get_decisions(start_time, end_time)
+                    await self.storage.disconnect()
+                    return data
+                
+                decisions = asyncio.run(_fetch_decisions())
+                if decisions:
+                    logger.info(f"Retrieved {len(decisions)} decisions from storage for {target_date}")
             except Exception as e:
-                logger.warning(f"Error reading decision file {file_path}: {e}")
-                continue
+                logger.error(f"Failed to fetch decisions from storage: {e}")
+        
+        # Fallback to file system if no decisions found in storage
+        if not decisions:
+            # Find all decision files for this date
+            date_str = target_date.strftime('%Y%m%d')
+            charging_files = list(self.energy_data_dir.glob(f"charging_decision_{date_str}_*.json"))
+            selling_files = list(self.energy_data_dir.glob(f"battery_selling_decision_{date_str}_*.json"))
+            
+            decision_files = charging_files + selling_files
+            
+            if not decision_files:
+                logger.info(f"No decision files found for {target_date}")
+                return None
+            
+            # Process all decisions for this day
+            for file_path in sorted(decision_files):
+                try:
+                    with open(file_path, 'r') as f:
+                        decision_data = json.load(f)
+                        decisions.append(decision_data)
+                except Exception as e:
+                    logger.warning(f"Error reading decision file {file_path}: {e}")
+                    continue
         
         if not decisions:
             return None

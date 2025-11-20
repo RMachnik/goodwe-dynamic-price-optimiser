@@ -283,9 +283,15 @@ data_storage:
     system_state_dir: "/opt/goodwe-dynamic-price-optimiser/out/system_state"
     retention_days: 7          # Keep only 7 days in files (reduced from 24h in-memory)
   
-  # Future database storage (ready for implementation)
+  # Database storage configuration
   database_storage:
-    enabled: false             # Set to true when databases are configured
+    enabled: true              # Enable database storage
+    sqlite:
+      path: "/opt/goodwe-dynamic-price-optimiser/data/goodwe_energy.db"
+      connection_pool_size: 5
+      timeout: 30.0
+    
+    # Future expansion
     timeseries_db:
       type: "influxdb"         # or "timescaledb"
       enabled: false

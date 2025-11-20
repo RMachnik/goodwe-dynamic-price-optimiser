@@ -117,6 +117,7 @@ class TestEnhancedDataCollector(unittest.TestCase):
     @patch('enhanced_data_collector.goodwe')
     @pytest.mark.asyncio
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_data_collector_initialization(self, mock_goodwe):
         """Test data collector initialization"""
         # Mock GoodWe inverter
@@ -135,6 +136,7 @@ class TestEnhancedDataCollector(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_data_collection_success(self, mock_goodwe):
         """Test successful data collection"""
         # Mock GoodWe inverter
@@ -165,6 +167,7 @@ class TestEnhancedDataCollector(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_data_validation(self, mock_goodwe):
         """Test data validation and processing"""
         # Mock GoodWe inverter with invalid data
@@ -196,6 +199,7 @@ class TestEnhancedDataCollector(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_data_storage(self, mock_goodwe):
         """Test data storage functionality"""
         # Mock GoodWe inverter
@@ -225,6 +229,7 @@ class TestEnhancedDataCollector(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_historical_data_retrieval(self, mock_goodwe):
         """Test historical data retrieval"""
         # Mock GoodWe inverter
@@ -254,6 +259,7 @@ class TestEnhancedDataCollector(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_error_handling_connection_failure(self, mock_goodwe):
         """Test error handling for connection failures"""
         # Mock connection failure
@@ -268,6 +274,7 @@ class TestEnhancedDataCollector(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_error_handling_data_collection_failure(self, mock_goodwe):
         """Test error handling for data collection failures"""
         # Mock GoodWe inverter with data collection failure
@@ -287,6 +294,7 @@ class TestEnhancedDataCollector(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_data_collection_performance(self, mock_goodwe):
         """Test data collection performance"""
         # Mock GoodWe inverter
@@ -322,6 +330,7 @@ class TestEnhancedDataCollector(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_data_aggregation(self, mock_goodwe):
         """Test data aggregation and statistics"""
         # Mock GoodWe inverter
@@ -357,6 +366,7 @@ class TestEnhancedDataCollector(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_data_export_functionality(self, mock_goodwe):
         """Test data export functionality"""
         # Mock GoodWe inverter
@@ -389,6 +399,7 @@ class TestEnhancedDataCollector(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_data_cleanup_and_retention(self, mock_goodwe):
         """Test data cleanup and retention policies"""
         # Mock GoodWe inverter
@@ -447,6 +458,7 @@ class TestEnhancedDataCollector(unittest.TestCase):
     
     @patch('enhanced_data_collector.goodwe')
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_concurrent_data_collection(self, mock_goodwe):
         """Test concurrent data collection"""
         # Mock GoodWe inverter

@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
 import sys
 import os
+import pytest
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -19,7 +20,7 @@ from price_window_analyzer import PriceWindowAnalyzer
 from hybrid_charging_logic import HybridChargingLogic
 
 
-class TestTimingAwareness(unittest.TestCase):
+class TestTimingAwareness(unittest.IsolatedAsyncioTestCase):
     """Test timing-aware charging decisions"""
     
     def setUp(self):
@@ -103,7 +104,9 @@ class TestTimingAwareness(unittest.TestCase):
             ]
         }
     
-    def test_critical_scenario_low_price_insufficient_pv_timing(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_critical_scenario_low_price_insufficient_pv_timing(self):
         """Test the critical scenario: Low price window + insufficient PV timing"""
         
         with patch('master_coordinator.datetime') as mock_datetime:
@@ -184,7 +187,7 @@ class TestTimingAwareness(unittest.TestCase):
                         )
                         
                         # Test the decision
-                        decision = self.decision_engine.analyze_and_decide(
+                        decision = await self.decision_engine.analyze_and_decide(
                             self.mock_current_data,
                             self.mock_price_data,
                             []
@@ -199,7 +202,9 @@ class TestTimingAwareness(unittest.TestCase):
                         self.assertEqual(decision['timing_analysis']['grid_contribution_kwh'], 1.5)
                         self.assertIn('hybrid', decision['reasoning'].lower())
     
-    def test_pv_charging_when_timing_sufficient(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_pv_charging_when_timing_sufficient(self):
         """Test PV charging when PV timing is sufficient"""
         
         with patch('master_coordinator.datetime') as mock_datetime:
@@ -266,7 +271,7 @@ class TestTimingAwareness(unittest.TestCase):
                             grid_contribution_kwh=0.0
                         )
                         
-                        decision = self.decision_engine.analyze_and_decide(
+                        decision = await self.decision_engine.analyze_and_decide(
                             self.mock_current_data,
                             self.mock_price_data,
                             []
@@ -277,7 +282,9 @@ class TestTimingAwareness(unittest.TestCase):
                         self.assertEqual(decision['timing_analysis']['pv_contribution_kwh'], 3.0)
                         self.assertEqual(decision['timing_analysis']['grid_contribution_kwh'], 0.0)
     
-    def test_emergency_charging_critical_battery(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_emergency_charging_critical_battery(self):
         """Test emergency charging for critical battery level"""
         
         # Set battery to critical level
@@ -306,7 +313,7 @@ class TestTimingAwareness(unittest.TestCase):
                     grid_contribution_kwh=4.5
                 )
                 
-                decision = self.decision_engine.analyze_and_decide(
+                decision = await self.decision_engine.analyze_and_decide(
                     critical_data,
                     self.mock_price_data,
                     []
@@ -316,7 +323,9 @@ class TestTimingAwareness(unittest.TestCase):
                 self.assertEqual(decision['timing_analysis']['charging_source'], 'grid')
                 self.assertIn('critical', decision['reasoning'].lower())
     
-    def test_legacy_mode_fallback(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_legacy_mode_fallback(self):
         """Test fallback to legacy mode when timing awareness is disabled"""
         
         # Disable timing awareness
@@ -331,7 +340,7 @@ class TestTimingAwareness(unittest.TestCase):
             mock_datetime.strptime = datetime.strptime
             mock_datetime.timedelta = timedelta
             
-            decision = legacy_engine.analyze_and_decide(
+            decision = await legacy_engine.analyze_and_decide(
                 self.mock_current_data,
                 self.mock_price_data,
                 []

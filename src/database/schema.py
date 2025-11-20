@@ -1,84 +1,137 @@
-from datetime import datetime
-from typing import Any
 
-class DatabaseSchema:
-    """Very small in-memory-like schema placeholder used by tests.
-    It fakes table creation and connection behavior expected by tests.
-    """
-    def __init__(self, db_path: str):
-        self.db_path = db_path
-        self.connected = False
-        self.tables_created = False
+# SQL Schema Definitions for GoodWe Dynamic Price Optimiser
 
-    def connect(self) -> bool:
-        self.connected = True
-        return True
+SCHEMA_VERSION = 1
 
-    def disconnect(self) -> None:
-        self.connected = False
+# Table: energy_data
+# Stores high-frequency energy readings (every 5 mins or less)
+CREATE_ENERGY_DATA_TABLE = """
+CREATE TABLE IF NOT EXISTS energy_data (
+    timestamp TEXT PRIMARY KEY,
+    battery_soc REAL,
+    pv_power INTEGER,
+    grid_power INTEGER,
+    house_consumption INTEGER,
+    battery_power INTEGER,
+    grid_voltage REAL,
+    grid_frequency REAL,
+    battery_voltage REAL,
+    battery_current REAL,
+    battery_temperature REAL,
+    price_pln REAL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+"""
 
-    def create_tables(self) -> bool:
-        if not self.connected:
-            return False
-        self.tables_created = True
-        return True
+# Table: system_state
+# Stores the state of the MasterCoordinator
+CREATE_SYSTEM_STATE_TABLE = """
+CREATE TABLE IF NOT EXISTS system_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    state TEXT,
+    uptime REAL,
+    active_modules TEXT,
+    last_error TEXT,
+    metrics TEXT,  -- JSON stored as text
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+"""
 
-    def create_indexes(self) -> bool:
-        if not self.tables_created:
-            return False
-        return True
+# Table: coordinator_decisions
+# Stores decisions made by the system (charging, discharging, idle)
+CREATE_DECISIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS coordinator_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL,
+    decision_type TEXT,
+    action TEXT,
+    reason TEXT,
+    parameters TEXT, -- JSON stored as text
+    source_module TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+"""
 
-    def verify_schema(self) -> bool:
-        return self.tables_created
+# Table: charging_sessions
+# Stores planned and executed charging sessions
+CREATE_CHARGING_SESSIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS charging_sessions (
+    session_id TEXT PRIMARY KEY,
+    start_time TEXT NOT NULL,
+    end_time TEXT,
+    target_soc INTEGER,
+    energy_kwh REAL,
+    cost_pln REAL,
+    status TEXT,
+    avg_price REAL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+"""
 
-# Placeholder datatypes used in some tests (simple dict-like)
-class EnergyData(dict):
-    pass
+# Table: battery_selling_sessions
+# Stores battery selling events
+CREATE_SELLING_SESSIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS battery_selling_sessions (
+    session_id TEXT PRIMARY KEY,
+    start_time TEXT NOT NULL,
+    end_time TEXT,
+    energy_sold_kwh REAL,
+    revenue_pln REAL,
+    avg_price REAL,
+    status TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+"""
 
-class ChargingSession(dict):
-    pass
+# Table: weather_data
+# Stores weather observations and forecasts
+CREATE_WEATHER_DATA_TABLE = """
+CREATE TABLE IF NOT EXISTS weather_data (
+    timestamp TEXT NOT NULL,
+    source TEXT NOT NULL,
+    temperature REAL,
+    humidity REAL,
+    pressure REAL,
+    wind_speed REAL,
+    cloud_cover REAL,
+    solar_irradiance REAL,
+    precipitation REAL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (timestamp, source)
+);
+"""
 
-class SystemState(dict):
-    pass
-from datetime import datetime
-from typing import Any
+# Table: price_forecasts
+# Stores electricity price forecasts
+CREATE_PRICE_FORECASTS_TABLE = """
+CREATE TABLE IF NOT EXISTS price_forecasts (
+    timestamp TEXT NOT NULL,
+    forecast_date TEXT NOT NULL,
+    price_pln REAL,
+    source TEXT,
+    confidence REAL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (timestamp, source)
+);
+"""
 
-class DatabaseSchema:
-    """Very small in-memory-like schema placeholder used by tests.
-    It fakes table creation and connection behavior expected by tests.
-    """
-    def __init__(self, db_path: str):
-        self.db_path = db_path
-        self.connected = False
-        self.tables_created = False
+# Indexes for performance
+CREATE_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_energy_timestamp ON energy_data(timestamp);",
+    "CREATE INDEX IF NOT EXISTS idx_state_timestamp ON system_state(timestamp);",
+    "CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON coordinator_decisions(timestamp);",
+    "CREATE INDEX IF NOT EXISTS idx_sessions_start ON charging_sessions(start_time);",
+    "CREATE INDEX IF NOT EXISTS idx_weather_timestamp ON weather_data(timestamp);",
+    "CREATE INDEX IF NOT EXISTS idx_price_timestamp ON price_forecasts(timestamp);"
+]
 
-    def connect(self) -> bool:
-        self.connected = True
-        return True
-
-    def disconnect(self) -> None:
-        self.connected = False
-
-    def create_tables(self) -> bool:
-        if not self.connected:
-            return False
-        self.tables_created = True
-        return True
-
-    def create_indexes(self) -> bool:
-        if not self.tables_created:
-            return False
-        return True
-
-    def verify_schema(self) -> bool:
-        return self.tables_created
-
-# Placeholder datatypes used in some tests (simple dict-like)
-class EnergyData(dict):
-    pass
-
-class ChargingSession(dict):
-    pass
-
-class SystemState(dict):
-    pass
+ALL_TABLES = [
+    CREATE_ENERGY_DATA_TABLE,
+    CREATE_SYSTEM_STATE_TABLE,
+    CREATE_DECISIONS_TABLE,
+    CREATE_CHARGING_SESSIONS_TABLE,
+    CREATE_SELLING_SESSIONS_TABLE,
+    CREATE_WEATHER_DATA_TABLE,
+    CREATE_PRICE_FORECASTS_TABLE
+]

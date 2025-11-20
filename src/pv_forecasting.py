@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, time
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 import math
+from database.storage_factory import StorageFactory
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,13 @@ class PVForecaster:
         self.config = config
         self.data_dir = Path(config.get('data_directory', 'out/energy_data'))
         self.data_dir.mkdir(exist_ok=True)
+        
+        # Initialize storage
+        self.storage = None
+        try:
+            self.storage = StorageFactory.create_storage(self.config)
+        except Exception as e:
+            logger.error(f"Failed to create storage: {e}")
         
         # PV system configuration
         self.pv_capacity_kw = config.get('pv_capacity_kw', 10.0)  # Default 10kW system
@@ -66,7 +74,7 @@ class PVForecaster:
         self.weather_collector = weather_collector
         logger.info("Weather collector set for PV forecasting")
     
-    def forecast_pv_production(self, hours_ahead: int = None) -> List[Dict[str, Any]]:
+    async def forecast_pv_production(self, hours_ahead: int = None) -> List[Dict[str, Any]]:
         """
         Forecast PV production for the next N hours
         
@@ -88,7 +96,7 @@ class PVForecaster:
                 return weather_forecast
         
         # Fallback to historical pattern-based forecast
-        return self._forecast_pv_production_historical(hours_ahead)
+        return await self._forecast_pv_production_historical(hours_ahead)
     
     def forecast_pv_production_with_weather(self, hours_ahead: int = None) -> List[Dict[str, Any]]:
         """
@@ -147,12 +155,12 @@ class PVForecaster:
         logger.info(f"Generated {len(forecasts)} weather-based PV production forecasts")
         return forecasts
     
-    def _forecast_pv_production_historical(self, hours_ahead: int) -> List[Dict[str, Any]]:
+    async def _forecast_pv_production_historical(self, hours_ahead: int) -> List[Dict[str, Any]]:
         """Original historical pattern-based PV production forecast"""
         logger.info(f"Using historical pattern-based PV forecasting for next {hours_ahead} hours")
         
         # Get historical data for pattern analysis
-        historical_data = self._load_historical_data()
+        historical_data = await self._load_historical_data()
         
         # Get current conditions
         current_time = datetime.now()
@@ -184,11 +192,51 @@ class PVForecaster:
         logger.info(f"Generated {len(forecasts)} historical pattern-based PV production forecasts")
         return forecasts
     
-    def _load_historical_data(self) -> List[Dict[str, Any]]:
+    async def _load_historical_data(self) -> List[Dict[str, Any]]:
         """Load historical PV production data for pattern analysis"""
         historical_data = []
         
         try:
+            # Try to load from storage first
+            if self.storage:
+                try:
+                    if not await self.storage.connect():
+                        logger.warning("Failed to connect to storage for historical data")
+                    else:
+                        # Calculate date range
+                        end_date = datetime.now()
+                        start_date = end_date - timedelta(days=self.historical_days)
+                        
+                        # Fetch system states
+                        states = await self.storage.get_system_state_range(start_date, end_date)
+                        await self.storage.disconnect()
+                        
+                        for state in states:
+                            try:
+                                timestamp = datetime.fromisoformat(state['timestamp'])
+                                current_data = state.get('current_data', {})
+                                if isinstance(current_data, str):
+                                    current_data = json.loads(current_data)
+                                    
+                                if 'photovoltaic' in current_data:
+                                    pv_data = current_data['photovoltaic']
+                                    historical_data.append({
+                                        'date': timestamp.strftime('%Y-%m-%d'),
+                                        'hour': timestamp.hour,
+                                        'power_kw': pv_data.get('current_power_kw', 0) or (pv_data.get('current_power_w', 0) / 1000.0),
+                                        'daily_production_kwh': pv_data.get('daily_production_kwh', 0),
+                                        'efficiency_percent': pv_data.get('efficiency_percent', 0)
+                                    })
+                            except Exception as e:
+                                continue
+                                
+                        if historical_data:
+                            logger.info(f"Loaded {len(historical_data)} historical PV data points from storage")
+                            return historical_data
+                except Exception as e:
+                    logger.error(f"Error loading historical data from storage: {e}")
+
+            # Fallback to file system
             # Look for historical data files
             for days_back in range(1, self.historical_days + 1):
                 date = datetime.now() - timedelta(days=days_back)
@@ -214,7 +262,7 @@ class PVForecaster:
                                 'efficiency_percent': pv_data.get('efficiency_percent', 0)
                             })
             
-            logger.info(f"Loaded {len(historical_data)} historical PV data points")
+            logger.info(f"Loaded {len(historical_data)} historical PV data points from files")
             
         except Exception as e:
             logger.warning(f"Failed to load historical data: {e}")

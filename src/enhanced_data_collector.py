@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 import statistics
+import yaml
 
 # Import the GoodWe fast charging functionality
 import sys
@@ -26,6 +27,7 @@ current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
 from fast_charge import GoodWeFastCharger
+from database.storage_factory import StorageFactory
 
 # Setup logging
 import os
@@ -46,11 +48,17 @@ class EnhancedDataCollector:
         """Initialize the enhanced data collector"""
         self.config_path = config_path
         self.goodwe_charger = GoodWeFastCharger(config_path)
-        # Create out directory for data storage
-        out_dir = Path(__file__).parent.parent / "out"
-        out_dir.mkdir(exist_ok=True)
-        self.data_storage_path = out_dir / "energy_data"
-        self.data_storage_path.mkdir(exist_ok=True)
+        
+        # Load config to initialize storage
+        try:
+            with open(config_path, 'r') as f:
+                self.config = yaml.safe_load(f)
+        except Exception as e:
+            logger.error(f"Failed to load config: {e}")
+            self.config = {}
+
+        # Initialize storage via factory
+        self.storage = StorageFactory.create_storage(self.config.get('data_storage', {}))
         
         # Data storage
         self.current_data: Dict[str, Any] = {}
@@ -64,6 +72,11 @@ class EnhancedDataCollector:
     async def initialize(self) -> bool:
         """Initialize the system and connect to inverter"""
         logger.info("Initializing GoodWe Dynamic Price Optimiser...")
+        
+        # Connect to storage
+        if not await self.storage.connect():
+            logger.error("Failed to connect to data storage")
+            # We continue even if storage fails, as we might have fallback or just in-memory
         
         # Connect to GoodWe inverter
         if not await self.goodwe_charger.connect_inverter():
@@ -405,30 +418,23 @@ class EnhancedDataCollector:
         except Exception as e:
             logger.error(f"Failed to update daily stats: {e}")
     
-    def save_data_to_file(self):
-        """Save collected data to files"""
+    async def save_data_to_file(self):
+        """Save collected data to storage"""
         try:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            
-            # Save current data
-            current_file = self.data_storage_path / f"current_data_{timestamp}.json"
-            with open(current_file, 'w', encoding='utf-8') as f:
-                json.dump(self.current_data, f, indent=2, ensure_ascii=False)
-            
-            # Save daily stats
-            stats_file = self.data_storage_path / f"daily_stats_{datetime.now().strftime('%Y%m%d')}.json"
-            with open(stats_file, 'w', encoding='utf-8') as f:
-                json.dump(self.daily_stats, f, indent=2, ensure_ascii=False)
-            
-            # Save historical data (last 100 points to avoid huge files)
-            historical_file = self.data_storage_path / f"historical_data_{timestamp}.json"
-            with open(historical_file, 'w', encoding='utf-8') as f:
-                json.dump(self.historical_data[-100:], f, indent=2, ensure_ascii=False)
-            
-            logger.info(f"Data saved to files: {current_file}, {stats_file}, {historical_file}")
+            # Prepare data for storage
+            if self.current_data:
+                # Add timestamp if missing
+                if 'timestamp' not in self.current_data:
+                    self.current_data['timestamp'] = datetime.now().isoformat()
+                
+                # Flatten structure for DB if needed, or pass as is
+                # The storage interface expects a list of dicts
+                await self.storage.save_energy_data([self.current_data])
+                
+            logger.info("Data saved to storage")
             
         except Exception as e:
-            logger.error(f"Failed to save data to files: {e}")
+            logger.error(f"Failed to save data to storage: {e}")
     
     def get_current_data(self) -> Dict[str, Any]:
         """Get current system data"""
