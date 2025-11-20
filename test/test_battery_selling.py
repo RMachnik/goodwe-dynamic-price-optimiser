@@ -224,6 +224,34 @@ class TestBatterySellingEngine:
         assert 'annual_revenue_pln' in estimate
         assert estimate['annual_revenue_pln'] > 0
 
+    @pytest.mark.asyncio
+    async def test_update_active_sessions(self, engine):
+        """Test updating active sessions"""
+        # Mock inverter
+        mock_inverter = AsyncMock()
+        
+        # Create a dummy session
+        session = Mock()
+        session.session_id = "test_session"
+        session.target_soc = 50.0
+        engine.active_sessions.append(session)
+        
+        # Test session not completed (SOC > target)
+        current_data = {'battery': {'soc_percent': 60}}
+        completed = await engine.update_active_sessions(mock_inverter, current_data)
+        assert len(completed) == 0
+        assert len(engine.active_sessions) == 1
+        mock_inverter.set_operation_mode.assert_not_called()
+        
+        # Test session completed (SOC <= target + 1.0)
+        current_data = {'battery': {'soc_percent': 51.0}}
+        completed = await engine.update_active_sessions(mock_inverter, current_data)
+        assert len(completed) == 1
+        assert completed[0] == "test_session"
+        assert len(engine.active_sessions) == 0
+        mock_inverter.set_operation_mode.assert_called_once()
+
+
 
 class TestBatterySellingMonitor:
     """Test battery selling safety monitor"""

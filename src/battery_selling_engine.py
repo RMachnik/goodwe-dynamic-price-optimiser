@@ -985,6 +985,17 @@ class BatterySellingEngine:
             self.logger.error(f"Error extracting current price: {e}")
             return self.min_selling_price_pln
     
+    async def ensure_safe_state(self, inverter: Inverter) -> bool:
+        """Ensure inverter is in safe state (General mode, no export) on startup"""
+        try:
+            self.logger.info("Ensuring inverter is in safe state (General mode)...")
+            await inverter.set_operation_mode(OperationMode.GENERAL)
+            await inverter.set_grid_export_limit(0)
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to ensure safe state: {e}")
+            return False
+
     async def start_selling_session(self, inverter: Inverter, opportunity: SellingOpportunity) -> bool:
         """Start a battery selling session using GoodWe inverter"""
         try:
@@ -1073,6 +1084,20 @@ class BatterySellingEngine:
             self.logger.error(f"Error stopping selling session: {e}")
             return False
     
+    async def update_active_sessions(self, inverter: Inverter, current_data: Dict[str, Any]) -> List[str]:
+        """Update active sessions and stop completed ones"""
+        completed_sessions = []
+        # Create a copy of active_sessions to iterate over
+        for session in list(self.active_sessions):
+            # Check if target SOC reached
+            current_soc = current_data.get('battery', {}).get('soc_percent', 0)
+            # Add small buffer (1%) to ensure we stop when we hit the target
+            if current_soc <= session.target_soc + 1.0:
+                self.logger.info(f"Session {session.session_id} target SOC reached ({current_soc}% <= {session.target_soc + 1.0}%)")
+                await self.stop_selling_session(inverter, session.session_id)
+                completed_sessions.append(session.session_id)
+        return completed_sessions
+
     def get_selling_status(self) -> Dict[str, Any]:
         """Get current selling status and statistics"""
         self._reset_daily_cycles()

@@ -254,6 +254,12 @@ class MasterCoordinator:
                 self.battery_selling_engine = BatterySellingEngine(battery_selling_config)
                 self.battery_selling_monitor = BatterySellingMonitor(battery_selling_config)
                 logger.info("Battery Selling Engine initialized successfully")
+                
+                # Ensure inverter is in safe state on startup
+                if self.charging_controller and self.charging_controller.goodwe_charger.inverter:
+                    await self.battery_selling_engine.ensure_safe_state(
+                        self.charging_controller.goodwe_charger.inverter
+                    )
             else:
                 logger.info("Battery selling disabled in configuration")
             
@@ -818,6 +824,11 @@ class MasterCoordinator:
                         normalized_current_data['inverter']['error_codes'] = []
                     except Exception:
                         pass
+            
+            # Update active sessions (stop if completed)
+            await self.battery_selling_engine.update_active_sessions(
+                self.charging_controller.goodwe_charger.inverter, normalized_current_data
+            )
             
             # Check safety conditions first
             safety_report = await self.battery_selling_monitor.check_safety_conditions(
