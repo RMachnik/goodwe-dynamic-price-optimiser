@@ -115,8 +115,8 @@ class FileStorageBackend(DataAccessInterface):
             if not data:
                 return True
 
-            # Save as JSON file with timestamp
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            # Save as JSON file with timestamp (including microseconds to avoid collisions)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
             filename = f"energy_data_{timestamp}.json"
             filepath = self.base_path / filename
 
@@ -207,7 +207,8 @@ class FileStorageBackend(DataAccessInterface):
             # Sort by timestamp (newest first)
             def get_file_timestamp(filepath: Path) -> datetime:
                 try:
-                    timestamp_str = filepath.stem.split('_')[-1]
+                    parts = filepath.stem.split('_')
+                    timestamp_str = '_'.join(parts[-2:])  # Join last two parts: date_time
                     return datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
                 except:
                     return datetime.min
@@ -261,7 +262,8 @@ class FileStorageBackend(DataAccessInterface):
             for filepath in files:
                 try:
                     # Extract timestamp from filename
-                    timestamp_str = filepath.stem.split('_')[-1]
+                    parts = filepath.stem.split('_')
+                    timestamp_str = '_'.join(parts[-2:])  # Join last two parts: date_time
                     file_time = datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S')
 
                     # Only load files within time range
@@ -293,8 +295,8 @@ class DatabaseStorageBackend(DataAccessInterface):
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        from .database.sqlite_storage import SQLiteStorage
-        from .database.storage_interface import StorageConfig
+        from src.database.sqlite_storage import SQLiteStorage
+        from src.database.storage_interface import StorageConfig
 
         # Create database config from backend config
         db_config = StorageConfig(
@@ -311,11 +313,17 @@ class DatabaseStorageBackend(DataAccessInterface):
 
     async def connect(self) -> bool:
         """Connect to database"""
-        return await self.db_storage.connect()
+        result = await self.db_storage.connect()
+        if result:
+            self.is_connected = True
+        return result
 
     async def disconnect(self) -> bool:
         """Disconnect from database"""
-        return await self.db_storage.disconnect()
+        result = await self.db_storage.disconnect()
+        if result:
+            self.is_connected = False
+        return result
 
     async def save_energy_data(self, data: List[Dict[str, Any]]) -> bool:
         """Save energy data to database"""
@@ -398,8 +406,25 @@ class DataAccessLayer:
         """Get decisions for time range"""
         return await self.backend.get_decisions(start_time, end_time) if self.backend else []
 
+    async def switch_backend_async(self, mode: str):
+        """Switch storage backend at runtime (async version with proper cleanup)"""
+        # Disconnect current backend
+        if self.backend:
+            await self.backend.disconnect()
+        
+        self.config.mode = mode
+        logger.info(f"Switching storage backend to: {mode}")
+        self._initialize_backend()
+        
+        # Auto-connect the new backend
+        await self.backend.connect()
+    
     def switch_backend(self, mode: str):
-        """Switch storage backend at runtime"""
+        """Switch storage backend at runtime
+        
+        Note: After switching, you should call connect() to establish connection.
+        For async context, use switch_backend_async() instead.
+        """
         self.config.mode = mode
         logger.info(f"Switching storage backend to: {mode}")
         self._initialize_backend()

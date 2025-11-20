@@ -555,13 +555,14 @@ class SQLiteStorage(StorageInterface, RetryMixin, CircuitBreakerMixin, FallbackM
     
     async def health_check(self) -> bool:
         """Check storage health"""
-        if not self.is_connected:
-            return False
-
+        # Try health check even if not explicitly connected, since lazy connections might work
         try:
             conn = await self._get_connection()
             await conn.execute("SELECT 1")
             await self._return_connection(conn)
+            # If we got here, connection works - update flag if needed
+            if not self.is_connected:
+                self.is_connected = True
             return True
         except Exception as e:
             logger.error(f"Health check failed: {e}")
