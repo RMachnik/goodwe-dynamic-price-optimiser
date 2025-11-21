@@ -125,7 +125,33 @@ class BatterySellingEngine:
         self.min_selling_soc = selling_config.get('min_battery_soc', 80.0)  # 80% minimum SOC (default)
         self.safety_margin_soc = selling_config.get('safety_margin_soc', 50.0)  # 50% safety margin
         # Selling thresholds
-        self.min_selling_price_pln = selling_config.get('min_selling_price_pln', 0.50)  # 0.50 PLN/kWh
+        # Dynamic minimum price configuration
+        dynamic_price_config = selling_config.get('dynamic_min_price', {})
+        self.dynamic_price_enabled = dynamic_price_config.get('enabled', False)
+        self.dynamic_base_multiplier = dynamic_price_config.get('base_multiplier', 1.5)
+        self.dynamic_lookback_days = dynamic_price_config.get('lookback_days', 7)
+        self.dynamic_min_samples = dynamic_price_config.get('min_samples', 24)
+        self.dynamic_fallback_price = dynamic_price_config.get('fallback_price_pln', 1.2)
+        
+        # Seasonal multipliers
+        seasonal_config = dynamic_price_config.get('seasonal_adjustments', {})
+        self.seasonal_multipliers = {
+            'winter': {
+                'multiplier': seasonal_config.get('winter', {}).get('multiplier', 2.0),
+                'months': set(seasonal_config.get('winter', {}).get('months', [11, 12, 1, 2]))
+            },
+            'summer': {
+                'multiplier': seasonal_config.get('summer', {}).get('multiplier', 1.3),
+                'months': set(seasonal_config.get('summer', {}).get('months', [6, 7, 8]))
+            },
+            'spring_autumn': {
+                'multiplier': seasonal_config.get('spring_autumn', {}).get('multiplier', 1.5),
+                'months': set(seasonal_config.get('spring_autumn', {}).get('months', [3, 4, 5, 9, 10]))
+            }
+        }
+        
+        # Legacy fixed minimum price (fallback)
+        self.min_selling_price_pln = selling_config.get('min_selling_price_pln', 0.80)
         
         # Revenue factor (e.g., 0.8 for 80% return)
         self.revenue_factor = selling_config.get('revenue_factor', 1.0)
@@ -250,7 +276,14 @@ class BatterySellingEngine:
         self.logger.info(f"Battery Selling Engine initialized with conservative parameters:")
         self.logger.info(f"  - Min selling SOC: {self.min_selling_soc}% (default)")
         self.logger.info(f"  - Safety margin SOC: {self.safety_margin_soc}%")
-        self.logger.info(f"  - Min selling price: {self.min_selling_price_pln} PLN/kWh")
+        if self.dynamic_price_enabled:
+            current_month = datetime.now().month
+            season = self._get_current_season(current_month)
+            multiplier = self._get_seasonal_multiplier(current_month)
+            self.logger.info(f"  - Dynamic min price: ENABLED (season: {season}, multiplier: {multiplier}x market avg)")
+            self.logger.info(f"  - Fallback min price: {self.dynamic_fallback_price} PLN/kWh")
+        else:
+            self.logger.info(f"  - Min selling price: {self.min_selling_price_pln} PLN/kWh (fixed)")
         self.logger.info(f"  - Usable energy per cycle: {self.usable_energy_per_cycle:.2f} kWh")
         self.logger.info(f"  - Net sellable energy: {self.net_sellable_energy:.2f} kWh")
         self.logger.info(f"  - Smart timing: {'Enabled' if self.timing_engine else 'Disabled'}")
@@ -320,6 +353,88 @@ class BatterySellingEngine:
         """Get total SOC drop for today"""
         today_str = datetime.now().strftime('%Y-%m-%d')
         return self.daily_soc_drop_tracking.get(today_str, 0.0)
+    
+    def _get_current_season(self, month: int) -> str:
+        """Get current season name based on month"""
+        for season, config in self.seasonal_multipliers.items():
+            if month in config['months']:
+                return season
+        return 'spring_autumn'  # Default
+    
+    def _get_seasonal_multiplier(self, month: int) -> float:
+        """Get seasonal multiplier for given month"""
+        for season, config in self.seasonal_multipliers.items():
+            if month in config['months']:
+                return config['multiplier']
+        return self.dynamic_base_multiplier  # Default fallback
+    
+    def _calculate_dynamic_min_price(self, price_data: Dict[str, Any]) -> float:
+        """
+        Calculate dynamic minimum selling price based on market average with seasonal adjustments
+        
+        Args:
+            price_data: Dictionary containing current and historical price data
+            
+        Returns:
+            Dynamic minimum selling price in PLN/kWh
+        """
+        if not self.dynamic_price_enabled:
+            return self.min_selling_price_pln
+        
+        try:
+            # Try to get historical prices from price_data
+            historical_prices = price_data.get('price_history', [])
+            
+            # Filter to last N days
+            cutoff_time = datetime.now() - timedelta(days=self.dynamic_lookback_days)
+            recent_prices = []
+            
+            for price_point in historical_prices:
+                # Handle different time formats
+                point_time = price_point.get('time') or price_point.get('timestamp')
+                if isinstance(point_time, str):
+                    try:
+                        point_time = datetime.fromisoformat(point_time.replace('Z', '+00:00'))
+                    except:
+                        continue
+                elif not isinstance(point_time, datetime):
+                    continue
+                
+                if point_time >= cutoff_time:
+                    price = price_point.get('price', price_point.get('price_pln', 0))
+                    if price > 0:
+                        recent_prices.append(price)
+            
+            # Check if we have enough samples
+            if len(recent_prices) < self.dynamic_min_samples:
+                self.logger.warning(
+                    f"Insufficient price samples ({len(recent_prices)}/{self.dynamic_min_samples}), "
+                    f"using fallback price: {self.dynamic_fallback_price} PLN/kWh"
+                )
+                return self.dynamic_fallback_price
+            
+            # Calculate market average
+            market_avg = sum(recent_prices) / len(recent_prices)
+            
+            # Get seasonal multiplier
+            current_month = datetime.now().month
+            season = self._get_current_season(current_month)
+            multiplier = self._get_seasonal_multiplier(current_month)
+            
+            # Calculate dynamic minimum price
+            dynamic_min_price = market_avg * multiplier
+            
+            self.logger.info(
+                f"📊 Dynamic min price: {dynamic_min_price:.3f} PLN/kWh "
+                f"(market avg: {market_avg:.3f}, season: {season}, multiplier: {multiplier}x, "
+                f"samples: {len(recent_prices)})"
+            )
+            
+            return dynamic_min_price
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating dynamic min price: {e}, using fallback: {self.dynamic_fallback_price}")
+            return self.dynamic_fallback_price
     
     def _is_peak_hour(self) -> bool:
         """Check if current hour is a peak selling hour"""
@@ -809,26 +924,30 @@ class BatterySellingEngine:
                     risk_level="low"
                 )
             
-            # Check minimum selling price
-            if current_price_pln < self.min_selling_price_pln:
+            # Check minimum selling price (dynamic or fixed)
+            effective_min_price = self._calculate_dynamic_min_price(price_data)
+            if current_price_pln < effective_min_price:
+                price_type = "dynamic" if self.dynamic_price_enabled else "fixed"
                 return SellingOpportunity(
                     decision=SellingDecision.WAIT,
                     confidence=0.0,
                     expected_revenue_pln=0.0,
                     selling_power_w=0,
                     estimated_duration_hours=0.0,
-                    reasoning=f"Current price {current_price_pln:.3f} PLN/kWh below minimum {self.min_selling_price_pln} PLN/kWh",
+                    reasoning=f"Current price {current_price_pln:.3f} PLN/kWh below {price_type} minimum {effective_min_price:.3f} PLN/kWh",
                     safety_checks_passed=True,
                     risk_level="low"
                 )
             
             # Check profit margin (skip in emergency mode)
             if not emergency_mode:
-                min_profitable_price = self.min_selling_price_pln * self.profit_margin_multiplier
+                effective_min_price = self._calculate_dynamic_min_price(price_data)
+                min_profitable_price = effective_min_price * self.profit_margin_multiplier
                 if current_price_pln < min_profitable_price:
+                    price_type = "dynamic" if self.dynamic_price_enabled else "fixed"
                     self.logger.info(
                         f"🛡️ BLOCKED: Insufficient profit margin — Price {current_price_pln:.3f} < "
-                        f"{min_profitable_price:.3f} PLN/kWh ({self.profit_margin_multiplier}x threshold)"
+                        f"{min_profitable_price:.3f} PLN/kWh ({self.profit_margin_multiplier}x {price_type} threshold)"
                     )
                     return SellingOpportunity(
                         decision=SellingDecision.WAIT,
@@ -836,7 +955,7 @@ class BatterySellingEngine:
                         expected_revenue_pln=0.0,
                         selling_power_w=0,
                         estimated_duration_hours=0.0,
-                        reasoning=f"Price {current_price_pln:.3f} below profitable threshold {min_profitable_price:.3f} PLN/kWh",
+                        reasoning=f"Price {current_price_pln:.3f} below profitable threshold {min_profitable_price:.3f} PLN/kWh ({price_type})",
                         safety_checks_passed=True,
                         risk_level="medium"
                     )

@@ -527,11 +527,32 @@ weather_aware_decisions:
 # Battery Energy Selling Configuration (Conservative Safety Parameters)
 battery_selling:
   enabled: true                    # Enable battery energy selling functionality
-  min_selling_price_pln: 0.50     # Minimum price to start selling (PLN/kWh)
+  
+  # Dynamic Minimum Selling Price (adapts to market conditions)
+  dynamic_min_price:
+    enabled: true                  # Enable dynamic pricing based on market average
+    base_multiplier: 1.5           # Base: Sell only when price ≥ 150% of market average
+    seasonal_adjustments:
+      winter:                      # November - February (high demand season)
+        multiplier: 2.0            # Winter: Sell only when price ≥ 200% of market average (≈1.2 PLN if avg=0.6)
+        months: [11, 12, 1, 2]     # November, December, January, February
+      summer:                      # June - August (low demand season)
+        multiplier: 1.3            # Summer: More aggressive selling at ≥ 130% of average
+        months: [6, 7, 8]          # June, July, August
+      spring_autumn:               # March-May, September-October (shoulder seasons)
+        multiplier: 1.5            # Standard: ≥ 150% of market average
+        months: [3, 4, 5, 9, 10]   # Spring and Autumn
+    lookback_days: 7               # Calculate average from last 7 days
+    min_samples: 24                # Minimum price samples needed for reliable average
+    fallback_price_pln: 1.2        # Fallback if dynamic calculation fails (winter-appropriate)
+  
+  # Legacy fixed minimum price (used only if dynamic_min_price.enabled = false)
+  min_selling_price_pln: 0.80     # Minimum price to start selling (PLN/kWh) - used as fallback
+  
   revenue_factor: 0.8             # Revenue factor (e.g., 0.8 for 80% return on sold energy)
-  # Selling trigger aligned to analysis: sell at ≥ p80 with SOC > 50%
+  # Selling trigger aligned to analysis: sell at ≥ p90 with SOC > 50%
   use_percentile_trigger: true     # Enable percentile-based trigger
-  sell_percentile_threshold: 80    # p80 (top 20% prices)
+  sell_percentile_threshold: 90    # p90 (top 10% prices) - more conservative to avoid premature selling
   min_battery_soc: 50              # Minimum SOC to start selling (%)
   max_soc_drop_per_session: 20     # Max 20% SOC drop per selling session
   max_soc_drop_per_day: 40         # Max 40% cumulative SOC drop per day
@@ -549,7 +570,7 @@ battery_selling:
   sell_then_buy_prevention:
     enabled: true                  # Enable buy-back cost analysis
     analysis_hours: 12             # Analyze next 12 hours for buy-back risk
-    min_savings_ratio: 1.5         # Selling revenue must be 1.5x buy-back cost
+    min_savings_ratio: 2.0         # Selling revenue must be 2.0x buy-back cost - increased to prevent marginal sales
   
   # Smart Timing Configuration (Avoid Selling Too Early)
   smart_timing:
@@ -576,18 +597,18 @@ battery_selling:
     
     # Enhanced percentile-based selling (Phase 1)
     percentile_thresholds:
-      aggressive_sell: 5                   # Top 5% prices - aggressive immediate selling
-      standard_sell: 20                    # Top 20% prices aligns with p80 trigger
-      conditional_sell: 25                 # Top 25% prices - sell if high confidence and good opportunity cost
+      aggressive_sell: 3                   # Top 3% prices - aggressive immediate selling (more selective)
+      standard_sell: 10                    # Top 10% prices aligns with p90 trigger (more conservative)
+      conditional_sell: 15                 # Top 15% prices - sell if high confidence and good opportunity cost
       
     # Opportunity cost thresholds (Phase 1: improved graduated thresholds)
     opportunity_cost:
-      high_confidence_wait: 30             # 30%+ revenue gain = definitely wait (high confidence)
-      medium_confidence_wait: 15           # 15-30% revenue gain = wait if low risk and <3h to peak
-      low_confidence_wait: 10              # 10-15% revenue gain = consider waiting if very low risk
-      sell_threshold: 10                   # <10% gain = sell now
-      significant_savings_percent: 20      # Legacy: 20%+ revenue gain = significant (definitely wait)
-      marginal_savings_percent: 5          # Legacy: 5%+ revenue gain = marginal (consider waiting)
+      high_confidence_wait: 20             # 20%+ revenue gain = definitely wait (high confidence)
+      medium_confidence_wait: 10           # 10-20% revenue gain = wait if low risk and <3h to peak
+      low_confidence_wait: 5               # 5-10% revenue gain = consider waiting if very low risk
+      sell_threshold: 5                    # <5% gain = sell now (tightened from 10%)
+      significant_savings_percent: 15      # Legacy: 15%+ revenue gain = significant (definitely wait)
+      marginal_savings_percent: 3          # Legacy: 3%+ revenue gain = marginal (consider waiting)
       
     # Trend analysis configuration
     trend_analysis:
