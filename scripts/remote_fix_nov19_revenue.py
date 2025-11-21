@@ -13,15 +13,44 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 def main():
-    # Production paths on Ubuntu server
-    snapshots_dir = Path("/opt/goodwe/out/daily_snapshots")
-    monthly_snapshots_dir = Path("/opt/goodwe/out/monthly_snapshots")
+    # Try to find the project root
+    # Could be /opt/goodwe or ~/sources/goodwe-dynamic-price-optimiser
+    possible_roots = [
+        Path("/opt/goodwe"),
+        Path.home() / "sources" / "goodwe-dynamic-price-optimiser",
+        Path(__file__).parent.parent  # Relative to script location
+    ]
+    
+    project_root = None
+    for root in possible_roots:
+        if root.exists() and (root / "out").exists():
+            project_root = root
+            logger.info(f"Found project root: {project_root}")
+            break
+    
+    if not project_root:
+        logger.error("Could not find project root directory")
+        logger.info("Tried: " + ", ".join(str(p) for p in possible_roots))
+        return 1
+    
+    snapshots_dir = project_root / "out" / "daily_snapshots"
+    monthly_snapshots_dir = project_root / "out" / "monthly_snapshots"
+    
+    if not snapshots_dir.exists():
+        logger.error(f"Snapshots directory not found: {snapshots_dir}")
+        return 1
     
     target_date = "2025-11-19"
     snapshot_file = snapshots_dir / f"daily_snapshot_{target_date.replace('-', '')}.json"
     
     if not snapshot_file.exists():
         logger.error(f"Snapshot file not found: {snapshot_file}")
+        logger.info(f"Looking in directory: {snapshots_dir}")
+        # List available snapshots for this month
+        available = list(snapshots_dir.glob("daily_snapshot_202511*.json"))
+        if available:
+            logger.info(f"Available November snapshots: {len(available)}")
+            logger.info(f"First few: {', '.join(f.name for f in sorted(available)[:5])}")
         return 1
     
     # Load current snapshot
@@ -70,7 +99,10 @@ def main():
     logger.info(f"\n📦 Regenerating monthly snapshot for November 2025...")
     
     import sys
-    sys.path.insert(0, '/opt/goodwe/src')
+    src_path = str(project_root / "src")
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
+    
     from daily_snapshot_manager import DailySnapshotManager
     
     snapshot_manager = DailySnapshotManager()
