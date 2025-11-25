@@ -526,7 +526,7 @@ weather_aware_decisions:
 
 # Battery Energy Selling Configuration (Conservative Safety Parameters)
 battery_selling:
-  enabled: true                    # Enable battery energy selling functionality
+  enabled: false                   # Enable battery energy selling functionality
   
   # Dynamic Minimum Selling Price (adapts to market conditions)
   dynamic_min_price:
