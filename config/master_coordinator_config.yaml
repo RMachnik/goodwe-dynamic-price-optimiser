@@ -171,13 +171,6 @@ coordinator:
     session_gap_minutes: 30            # Minimum gap between charging sessions
     daily_planning_time: "06:00"       # Time to plan daily charging schedule
   
-  # Decision engine weights (from project plan)
-  decision_weights:
-    price: 0.40        # 40% weight for electricity prices
-    battery: 0.25      # 25% weight for battery state
-    pv: 0.20          # 20% weight for PV production
-    consumption: 0.15  # 15% weight for house consumption
-  
   # Emergency stop conditions (GoodWe Lynx-D compliant)
   emergency_stop_conditions:
     battery_temp_max: 53.0      # Stop if battery temperature exceeds this (GoodWe Lynx-D max)
@@ -189,13 +182,6 @@ coordinator:
     # Additional GoodWe Lynx-D safety conditions
     battery_temp_warning: 50.0  # Warning if battery temperature exceeds this
     undervoltage_reboot: true   # Enable auto-reboot after undervoltage (GoodWe Lynx-D feature)
-  
-  # Charging decision thresholds
-  charging_thresholds:
-    start_charging_score: 50    # Start charging if total score >= this (lowered from 70)
-    stop_charging_score: 30     # Stop charging if total score <= this
-    continue_charging_min: 30   # Continue charging if score >= this
-    continue_charging_max: 70   # Continue charging if score <= this
   
   # Enhanced Aggressive Charging (Revised for Better Price Detection)
   cheapest_price_aggressive_charging:
@@ -231,11 +217,6 @@ coordinator:
     # SOC RANGES (when to apply aggressive charging)
     min_battery_soc_for_aggressive: 30  # Minimum SOC to trigger
     max_battery_soc_for_aggressive: 85  # Maximum SOC to trigger
-    
-    # LEGACY PARAMETERS (kept for compatibility)
-    override_pv_overproduction: true    # Override PV overproduction check
-    min_charging_duration_minutes: 15   # Minimum charging duration
-    max_price_difference_pln: 0.05      # DEPRECATED: use price_threshold_percent
 
 # Price Analysis Configuration
 price_analysis:
@@ -246,15 +227,6 @@ price_analysis:
     low: 400         # PLN/MWh - low price threshold
     medium: 600      # PLN/MWh - medium price threshold
     high: 800        # PLN/MWh - high price threshold
-
-# PV Production Configuration
-pv_monitoring:
-  strings: 2                    # Number of PV strings (PV1 + PV2)
-  max_power: 6800              # Maximum expected PV power in Watts
-  production_thresholds:
-    high: 3000                 # High production threshold
-    medium: 1000               # Medium production threshold
-    low: 100                   # Low production threshold
 
 # Battery Management Configuration (GoodWe Lynx-D compliant)
 battery_management:
@@ -282,24 +254,6 @@ battery_management:
   bms_integration: true           # Battery Management System integration
   vde_2510_50_compliance: true    # VDE 2510-50 safety standard compliance
 
-# Grid Flow Configuration
-grid_flow:
-  phases: 3                    # Number of grid phases
-  max_import: 14000           # Maximum grid import power in Watts
-  max_export: 14000           # Maximum grid export power in Watts
-  voltage_thresholds:
-    min: 200                   # Minimum safe grid voltage
-    max: 250                   # Maximum safe grid voltage
-
-# Consumption Monitoring Configuration
-consumption_monitoring:
-  expected_daily_kwh: 30       # Expected daily consumption in kWh
-  peak_hours: [18, 19, 20, 21] # Peak consumption hours
-  consumption_thresholds:
-    high: 3000                 # High consumption threshold in Watts
-    medium: 1000               # Medium consumption threshold in Watts
-    low: 100                   # Low consumption threshold in Watts
-
 # Enhanced Safety Settings (merged from fast_charge_config.yaml)
 safety:
   # Maximum battery temperature in Celsius (0 to disable)
@@ -318,10 +272,6 @@ hybrid_charging:
 logging:
   level: "INFO"                # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
   file: "/opt/goodwe-dynamic-price-optimiser/logs/master_coordinator.log"
-  max_file_size: "10MB"        # Maximum log file size
-  backup_count: 5              # Number of backup log files
-  console_output: true         # Enable console output
-  log_to_file: true           # Log to file (true/false)
 
 # Data Storage Configuration
 data_storage:
@@ -331,9 +281,7 @@ data_storage:
     energy_data_dir: "/opt/goodwe-dynamic-price-optimiser/out/energy_data"
     charging_schedules_dir: "/opt/goodwe-dynamic-price-optimiser/out/charging_schedules"
     system_state_dir: "/opt/goodwe-dynamic-price-optimiser/out/system_state"
-    compression: true           # Enable gzip compression for JSON files
     retention_days: 7          # Keep only 7 days in files (reduced from 24h in-memory)
-    backup_interval_hours: 24  # How often to backup data
   
   # Future database storage (ready for implementation)
   database_storage:
@@ -368,34 +316,6 @@ data_storage:
         provider: "aws_s3"      # or "gcp", "azure"
         bucket: "goodwe-energy-archive"
         region: "eu-central-1"
-
-# Performance Monitoring Configuration
-performance_monitoring:
-  metrics_collection: true     # Enable performance metrics collection
-  metrics_interval_minutes: 5  # How often to collect metrics
-  alert_thresholds:
-    high_cpu_usage: 80         # Alert if CPU usage exceeds this %
-    high_memory_usage: 80      # Alert if memory usage exceeds this %
-    long_decision_time: 30     # Alert if decision takes longer than this seconds
-
-# Notification Configuration (unified)
-notifications:
-  enabled: false               # Enable notifications
-  # Send notifications when charging starts/stops (true/false)
-  charging_notifications: false
-  # Webhook URL for notifications (optional)
-  webhook_url: ""
-  email:
-    smtp_server: "smtp.gmail.com"
-    smtp_port: 587
-    username: "your-email@gmail.com"
-    password: "your-app-password"
-    from_email: "your-email@gmail.com"
-    to_email: "admin@example.com"
-    to_addresses: ["admin@example.com"]
-  webhook:
-    url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
-    enabled: false
 
 # Weather Integration Configuration
 weather_integration:
@@ -732,11 +652,6 @@ battery_selling:
       s1_conservative: true                # S1 signal = low prices, be conservative
       use_kompas_for_charging: true        # Use S1 signal for charging decisions
   
-  # Revenue estimation (conservative, based on 20 kWh capacity)
-  expected_daily_revenue_pln: 1.43  # ~1.43 PLN/day (5.7 kWh × 0.25 PLN/kWh)
-  expected_monthly_revenue_pln: 43  # ~43 PLN/month
-  expected_annual_revenue_pln: 520  # ~520 PLN/year
-  
   # Safety parameters (GoodWe Lynx-D compliant)
   safety_checks:
     battery_temp_max: 50.0          # Max battery temperature (°C)
@@ -744,13 +659,6 @@ battery_selling:
     grid_voltage_min: 200.0         # Min grid voltage (V)
     grid_voltage_max: 250.0         # Max grid voltage (V)
     night_hours: [22, 23, 0, 1, 2, 3, 4, 5]  # Preserve night charge (10 PM - 6 AM)
-  
-  # Performance monitoring
-  monitoring:
-    track_revenue: true             # Track actual revenue vs estimates
-    track_battery_health: true      # Monitor battery degradation
-    track_cycles: true              # Track discharge cycles
-    alert_on_anomalies: true        # Alert on unusual patterns
 
 # PSE Price Forecast Configuration
 pse_price_forecast:
@@ -785,10 +693,3 @@ pse_peak_hours:
   fallback:
     retry_attempts: 3
     retry_delay_seconds: 60
-
-# Development/Debug Configuration
-debug:
-  enabled: false               # Enable debug mode
-  verbose_logging: false       # Enable verbose logging
-  test_mode: false             # Enable test mode (no actual charging)
-  simulation_mode: false       # Enable simulation mode (fake data)
