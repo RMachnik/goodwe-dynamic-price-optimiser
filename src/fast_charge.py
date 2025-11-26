@@ -251,6 +251,13 @@ class GoodWeFastCharger:
             return False
         
         try:
+            # Read current state before stopping
+            try:
+                current_state = await self.inverter.read_setting('fast_charging')
+                self.logger.info(f"Inverter fast_charging setting before stop: {current_state}")
+            except Exception as e:
+                self.logger.debug(f"Could not read fast_charging state: {e}")
+            
             # Disable fast charging
             await self.inverter.write_setting('fast_charging', 0)
             
@@ -262,6 +269,17 @@ class GoodWeFastCharger:
             self.logger.info("Fast charging stopped")
             if charging_duration:
                 self.logger.info(f"Total charging time: {charging_duration}")
+            
+            # Verify the setting was applied
+            try:
+                await asyncio.sleep(0.5)  # Give inverter time to process
+                verified_state = await self.inverter.read_setting('fast_charging')
+                if verified_state != 0:
+                    self.logger.warning(f"⚠️ Inverter fast_charging still enabled ({verified_state}) after stop command - inverter may have scheduled charging enabled")
+                else:
+                    self.logger.info("✅ Verified: fast_charging disabled on inverter")
+            except Exception as e:
+                self.logger.debug(f"Could not verify stop command: {e}")
             
             await self._send_notification("Fast charging stopped")
             return True

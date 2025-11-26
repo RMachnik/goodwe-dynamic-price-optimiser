@@ -982,12 +982,14 @@ class MasterCoordinator:
                 # Always stop if we are currently charging and decision says do not charge
                 if is_currently_charging:
                     try:
+                        logger.info(f"⛔ Stopping charging: decision says wait, currently charging (SOC {battery_soc}%)")
                         await self.charging_controller.stop_price_based_charging()
                     except Exception as e:
                         logger.warning(f"Stop charging command failed: {e}")
                 # If not currently charging, only enforce stop when explicitly waiting for a better window
                 elif waiting_for_window:
                     try:
+                        logger.debug(f"Ensuring stopped state: waiting for window at {decision.get('next_window', 'unknown')}")
                         await self.charging_controller.stop_price_based_charging()
                     except Exception as e:
                         logger.warning(f"Stop charging command failed: {e}")
