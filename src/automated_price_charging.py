@@ -27,6 +27,8 @@ from fast_charge import GoodWeFastCharger
 from enhanced_data_collector import EnhancedDataCollector
 from enhanced_aggressive_charging import EnhancedAggressiveCharging
 from tariff_pricing import TariffPricingCalculator, PriceComponents
+from price_history_manager import PriceHistoryManager
+from adaptive_threshold_calculator import AdaptiveThresholdCalculator
 
 # Logging configuration handled by main application
 logger = logging.getLogger(__name__)
@@ -75,7 +77,7 @@ class AutomatedPriceCharger:
         # Advanced optimization rules
         optimization_rules = smart_critical_config.get('optimization_rules', {})
         self.wait_at_10_percent_if_high_price = optimization_rules.get('wait_at_10_percent_if_high_price', True)
-        self.high_price_threshold = optimization_rules.get('high_price_threshold_pln', 0.8)  # PLN/kWh
+        self.high_price_threshold = optimization_rules.get('high_price_threshold_pln', 1.35)  # PLN/kWh - fallback value
         self.proactive_charging_enabled = optimization_rules.get('proactive_charging_enabled', True)
         self.pv_poor_threshold = optimization_rules.get('pv_poor_threshold_w', 200)  # Watts
         self.battery_target_threshold = optimization_rules.get('battery_target_threshold', 80)  # %
@@ -116,6 +118,41 @@ class AutomatedPriceCharger:
         except Exception as e:
             logger.error(f"Failed to initialize enhanced aggressive charging: {e}")
             self.enhanced_aggressive = None
+        
+        # Initialize adaptive price thresholds
+        adaptive_config = smart_critical_config.get('adaptive_thresholds', {})
+        self.adaptive_enabled = adaptive_config.get('enabled', False)
+        
+        if self.adaptive_enabled:
+            try:
+                self.price_history = PriceHistoryManager(adaptive_config)
+                self.threshold_calculator = AdaptiveThresholdCalculator(adaptive_config)
+                self.threshold_update_interval = adaptive_config.get('update_interval_hours', 3) * 3600  # Convert to seconds
+                self.last_threshold_update = 0
+                self.adaptive_high_price_threshold = None
+                self.adaptive_critical_price = None
+                
+                # Load historical data on startup
+                loaded_count = self.price_history.load_historical_from_files()
+                if loaded_count > 0:
+                    # Calculate initial thresholds if we have enough data
+                    self._update_adaptive_thresholds(force=True)
+                
+                logger.info(
+                    f"Adaptive price thresholds initialized: "
+                    f"method={adaptive_config.get('method', 'multiplier')}, "
+                    f"update_interval={adaptive_config.get('update_interval_hours', 3)}h, "
+                    f"loaded={loaded_count} historical prices"
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize adaptive thresholds, using fixed values: {e}")
+                self.adaptive_enabled = False
+                self.price_history = None
+                self.threshold_calculator = None
+        else:
+            logger.info("Adaptive price thresholds disabled, using fixed values from config")
+            self.price_history = None
+            self.threshold_calculator = None
     
     def _load_config(self):
         """Load configuration from config file"""
@@ -235,11 +272,99 @@ class AutomatedPriceCharger:
             
             data = response.json()
             logger.info(f"Fetched {len(data.get('value', []))} CSDAC price points")
+            
+            # Record prices for adaptive threshold calculation
+            if self.adaptive_enabled and self.price_history and data:
+                try:
+                    for item in data.get('value', []):
+                        timestamp = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                        price_pln_kwh = float(item['csdac_pln']) / 1000  # Convert MWh to kWh
+                        self.price_history.add_price_point(timestamp, price_pln_kwh)
+                except Exception as e:
+                    logger.debug(f"Failed to record price history: {e}")
+            
             return data
             
         except Exception as e:
             logger.error(f"Failed to fetch CSDAC price data: {e}")
             return None
+    
+    def _update_adaptive_thresholds(self, force: bool = False) -> None:
+        """
+        Update adaptive thresholds from recent price history.
+        
+        Args:
+            force: Force update regardless of time interval
+        """
+        if not self.adaptive_enabled:
+            return
+        
+        current_time = time.time()
+        if not force and current_time - self.last_threshold_update < self.threshold_update_interval:
+            return  # Not time to update yet
+        
+        try:
+            price_stats = self.price_history.calculate_statistics()
+            
+            if price_stats['sample_count'] < self.price_history.min_samples:
+                logger.warning(
+                    f"Insufficient price samples ({price_stats['sample_count']}/{self.price_history.min_samples}), "
+                    f"using fallback thresholds"
+                )
+                return  # Keep using fallback or previous thresholds
+            
+            # Calculate new thresholds
+            self.adaptive_high_price_threshold = self.threshold_calculator.calculate_high_price_threshold(price_stats)
+            self.adaptive_critical_price = self.threshold_calculator.calculate_critical_price_threshold(price_stats)
+            
+            self.last_threshold_update = current_time
+            
+            # Get calculation info for logging
+            calc_info = self.threshold_calculator.get_calculation_info(price_stats)
+            
+            logger.info(
+                f"📊 Updated adaptive thresholds: "
+                f"high={self.adaptive_high_price_threshold:.3f} PLN/kWh, "
+                f"critical={self.adaptive_critical_price:.3f} PLN/kWh "
+                f"(season={calc_info['season']}, "
+                f"seasonal_mult={calc_info['seasonal_multiplier']:.2f}x, "
+                f"median={price_stats['median']:.3f} PLN/kWh, "
+                f"samples={price_stats['sample_count']})"
+            )
+        except Exception as e:
+            logger.error(f"Failed to update adaptive thresholds: {e}")
+    
+    def get_high_price_threshold(self) -> float:
+        """
+        Get current high price threshold (adaptive or fixed).
+        
+        Returns:
+            High price threshold in PLN/kWh
+        """
+        # Update thresholds if needed (checks interval internally)
+        if self.adaptive_enabled:
+            self._update_adaptive_thresholds()
+        
+        # Return adaptive threshold if available, otherwise fallback to fixed
+        if self.adaptive_enabled and self.adaptive_high_price_threshold is not None:
+            return self.adaptive_high_price_threshold
+        return self.high_price_threshold
+    
+    def get_critical_price_threshold(self) -> float:
+        """
+        Get current critical charging price threshold (adaptive or fixed).
+        
+        Returns:
+            Critical price threshold in PLN/kWh
+        """
+        # Update thresholds if needed (checks interval internally)
+        if self.adaptive_enabled:
+            self._update_adaptive_thresholds()
+        
+        # Return adaptive threshold if available, otherwise fallback to fixed
+        if self.adaptive_enabled and self.adaptive_critical_price is not None:
+            return self.adaptive_critical_price
+        return self.max_critical_price
     
     def analyze_charging_windows(self, price_data: Dict, 
                                target_hours: float = 4.0,
@@ -496,20 +621,22 @@ class AutomatedPriceCharger:
         # OPTIMIZATION RULE 1: At 10% SOC with high price, always wait for price drop
         if (self.wait_at_10_percent_if_high_price and 
             battery_soc == 10 and 
-            current_price > self.high_price_threshold):
+            current_price > self.get_high_price_threshold()):
+            high_threshold = self.get_high_price_threshold()
             return {
                 'should_charge': False,
-                'reason': f'Critical battery (10%) but high price ({current_price:.3f} PLN/kWh > {self.high_price_threshold} PLN/kWh) - waiting for price drop',
+                'reason': f'Critical battery (10%) but high price ({current_price:.3f} PLN/kWh > {high_threshold:.3f} PLN/kWh) - waiting for price drop',
                 'priority': 'critical',
                 'confidence': 0.9
             }
         
         # Decision logic for critical battery
-        if current_price <= self.max_critical_price:
+        critical_threshold = self.get_critical_price_threshold()
+        if current_price <= critical_threshold:
             # Price is acceptable for critical charging
             return {
                 'should_charge': True,
-                'reason': f'Critical battery ({battery_soc}%) + acceptable price ({current_price:.3f} PLN/kWh ≤ {self.max_critical_price} PLN/kWh)',
+                'reason': f'Critical battery ({battery_soc}%) + acceptable price ({current_price:.3f} PLN/kWh ≤ {critical_threshold:.3f} PLN/kWh)',
                 'priority': 'critical',
                 'confidence': 0.9
             }
@@ -946,7 +1073,8 @@ class AutomatedPriceCharger:
             grid_direction == 'Import' and grid_power > self.high_consumption_threshold):
             
             # Check if current price is reasonable for charging
-            if current_price and current_price <= self.max_critical_price:
+            critical_threshold = self.get_critical_price_threshold()
+            if current_price and current_price <= critical_threshold:
                 return {
                     'should_charge': True,
                     'reason': f'Low battery ({battery_soc}%) + high grid consumption ({grid_power}W) + reasonable price ({current_price:.3f} PLN/kWh)',
@@ -956,7 +1084,7 @@ class AutomatedPriceCharger:
             else:
                 # Price is too high or unavailable - wait for better conditions
                 if current_price:
-                    reason = f'Low battery ({battery_soc}%) + high consumption ({grid_power}W) but price too high ({current_price:.3f} PLN/kWh > {self.max_critical_price} PLN/kWh) - waiting for better price'
+                    reason = f'Low battery ({battery_soc}%) + high consumption ({grid_power}W) but price too high ({current_price:.3f} PLN/kWh > {critical_threshold:.3f} PLN/kWh) - waiting for better price'
                 else:
                     reason = f'Low battery ({battery_soc}%) + high consumption ({grid_power}W) but no price data available - waiting for better conditions'
                 

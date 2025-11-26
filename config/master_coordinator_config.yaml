@@ -450,16 +450,53 @@ timing_awareness:
   # Smart Critical Charging Configuration
   smart_critical_charging:
     enabled: true                    # Enable smart critical charging logic
-    max_critical_price_pln: 1.20    # Maximum price to charge at critical level (PLN/kWh)
+    max_critical_price_pln: 1.20    # DEPRECATED: use adaptive_thresholds (kept as fallback)
     max_wait_hours: 2               # Maximum hours to wait for better price
     min_price_savings_percent: 30  # Minimum savings % to wait for better price
     emergency_override_price: true  # Always charge at emergency level regardless of price
+    
+    # Adaptive Price Thresholds (automatically adjust to seasonal market conditions)
+    adaptive_thresholds:
+      enabled: true                    # Enable adaptive thresholds (true) or use fixed (false)
+      
+      # Historical data collection
+      lookback_days: 7                 # Calculate thresholds from last 7 days
+      min_samples: 24                  # Minimum hourly samples required (1 day)
+      update_interval_hours: 3         # Recalculate thresholds every 3 hours
+      
+      # Calculation method: 'multiplier' or 'percentile'
+      method: 'multiplier'             # Multiplier-based for simplicity and stability
+      
+      # Multiplier-based configuration (recommended)
+      high_price_multiplier: 1.5       # High price = 1.5× median
+      critical_price_multiplier: 1.3   # Critical charging = 1.3× median
+      
+      # Percentile-based configuration (alternative, not used if method='multiplier')
+      high_price_percentile: 75        # High price = 75th percentile (top 25%)
+      critical_price_percentile: 65    # Critical charging = 65th percentile
+      
+      # Seasonal adjustments (adapts to winter/summer price patterns)
+      seasonal_adjustments_enabled: true
+      seasonal_multipliers:
+        winter:                        # November - February
+          multiplier: 1.3              # Increase thresholds by 30% (expect higher prices)
+          months: [11, 12, 1, 2]
+        summer:                        # June - August
+          multiplier: 0.85             # Decrease thresholds by 15% (expect lower prices)
+          months: [6, 7, 8]
+        spring_autumn:                 # March-May, September-October
+          multiplier: 1.0              # Standard thresholds
+          months: [3, 4, 5, 9, 10]
+      
+      # Fallback values (used when insufficient data or system startup)
+      fallback_high_price_pln: 1.35    # Current fixed value as fallback
+      fallback_critical_price_pln: 1.20  # Current fixed value as fallback
     
     # Advanced Optimization Rules
     optimization_rules:
       # Rule 1: At 10% SOC with high price, always wait for price drop
       wait_at_10_percent_if_high_price: true
-      high_price_threshold_pln: 1.35  # PLN/kWh - above this is considered high price
+      high_price_threshold_pln: 1.35  # PLN/kWh - DEPRECATED: use adaptive_thresholds (kept as fallback)
       
       # Rule 2: Proactive charging when PV is poor and weather won't improve
       proactive_charging_enabled: true
