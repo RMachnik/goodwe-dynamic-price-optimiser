@@ -91,6 +91,7 @@ class MasterCoordinator:
         self.last_decision_time = None
         self.health_check_interval = 300  # 5 minutes
         self.decision_interval = 900  # 15 minutes
+        self.multi_session_hold = False
         
         # Component managers
         self.data_collector = None
@@ -959,8 +960,8 @@ class MasterCoordinator:
             )
         else:
             logger.info(f"Executing decision: No action needed at SOC {battery_soc}% - {reason}")
-            # Stop charging if currently charging
-            if self.charging_controller.is_charging:
+            # Ensure charging is stopped when waiting for a better window
+            if self.charging_controller:
                 await self.charging_controller.stop_price_based_charging()
     
     async def _execute_decision(self, decision: Dict[str, Any]):
