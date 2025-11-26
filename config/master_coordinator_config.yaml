@@ -451,7 +451,7 @@ timing_awareness:
   smart_critical_charging:
     enabled: true                    # Enable smart critical charging logic
     max_critical_price_pln: 1.20    # DEPRECATED: use adaptive_thresholds (kept as fallback)
-    max_wait_hours: 2               # Maximum hours to wait for better price
+    max_wait_hours: 6               # Maximum hours to wait for better price
     min_price_savings_percent: 30  # Minimum savings % to wait for better price
     emergency_override_price: true  # Always charge at emergency level regardless of price
     
