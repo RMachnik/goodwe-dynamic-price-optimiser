@@ -944,6 +944,16 @@ class MasterCoordinator:
         battery_data = self.current_data.get('battery', {})
         battery_soc = battery_data.get('soc_percent', battery_data.get('soc', 50))
         
+        # If we've recently decided to wait, enforce a short cooldown to prevent flapping
+        now = datetime.now()
+        if hasattr(self, '_wait_cooldown_until') and self._wait_cooldown_until:
+            if now < self._wait_cooldown_until and should_charge and priority not in ['critical', 'emergency']:
+                logger.info(
+                    f"Cooldown active until {self._wait_cooldown_until.strftime('%H:%M')}; "
+                    f"skipping start despite decision (priority: {priority})"
+                )
+                should_charge = False
+
         if should_charge:
             logger.info(f"Executing decision: Start charging at SOC {battery_soc}% - {reason}")
             # Check if this is a critical battery situation (force start)
@@ -961,8 +971,34 @@ class MasterCoordinator:
         else:
             logger.info(f"Executing decision: No action needed at SOC {battery_soc}% - {reason}")
             # Ensure charging is stopped when waiting for a better window
+            waiting_for_window = bool(decision.get('next_window')) or decision.get('waiting', False)
+            is_currently_charging = False
+            try:
+                is_currently_charging = getattr(self.charging_controller, 'is_charging', False)
+            except Exception:
+                is_currently_charging = False
+            
             if self.charging_controller:
-                await self.charging_controller.stop_price_based_charging()
+                # Always stop if we are currently charging and decision says do not charge
+                if is_currently_charging:
+                    try:
+                        await self.charging_controller.stop_price_based_charging()
+                    except Exception as e:
+                        logger.warning(f"Stop charging command failed: {e}")
+                # If not currently charging, only enforce stop when explicitly waiting for a better window
+                elif waiting_for_window:
+                    try:
+                        await self.charging_controller.stop_price_based_charging()
+                    except Exception as e:
+                        logger.warning(f"Stop charging command failed: {e}")
+            # Set a short cooldown to avoid immediately starting after a wait decision
+            # Exceptions: critical/emergency decisions can override cooldown
+            if waiting_for_window and priority not in ['critical', 'emergency']:
+                # Default 15-minute cooldown
+                self._wait_cooldown_until = now + timedelta(minutes=15)
+                logger.info(
+                    f"Wait decision applied; starting cooldown until {self._wait_cooldown_until.strftime('%H:%M')}"
+                )
     
     async def _execute_decision(self, decision: Dict[str, Any]):
         """Execute the charging decision"""
