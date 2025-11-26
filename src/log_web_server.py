@@ -60,10 +60,11 @@ def format_uptime_human_readable(seconds: float) -> str:
 class LogWebServer:
     """Simple HTTP server for log access and system monitoring"""
     
-    def __init__(self, host='0.0.0.0', port=8080, log_dir=None):
+    def __init__(self, host='0.0.0.0', port=8080, log_dir=None, config=None):
         """Initialize the log web server"""
         self.host = host
         self.port = port
+        self.config = config or {}
         self.app = Flask(__name__)
         CORS(self.app)  # Enable CORS for all routes
         
@@ -99,7 +100,7 @@ class LogWebServer:
         # Initialize daily snapshot manager for efficient monthly reporting
         from daily_snapshot_manager import DailySnapshotManager
         project_root = Path(__file__).parent.parent
-        self.snapshot_manager = DailySnapshotManager(project_root)
+        self.snapshot_manager = DailySnapshotManager(project_root, config=self.config)
         
         # Setup routes
         self._setup_routes()

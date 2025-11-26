@@ -22,6 +22,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch, AsyncMock
 import sys
 import os
+import pytest
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -31,7 +32,7 @@ from pv_forecasting import PVForecaster
 from price_window_analyzer import PriceWindowAnalyzer, PriceWindow
 
 
-class TestHybridChargingLogic(unittest.TestCase):
+class TestHybridChargingLogic(unittest.IsolatedAsyncioTestCase):
     """Test hybrid charging logic functionality"""
     
     def setUp(self):
@@ -136,7 +137,9 @@ class TestHybridChargingLogic(unittest.TestCase):
         with open(self.config_path, 'r') as f:
             return yaml.safe_load(f)
     
-    def test_hybrid_charging_logic_initialization(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_hybrid_charging_logic_initialization(self):
         """Test hybrid charging logic initialization"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -146,7 +149,9 @@ class TestHybridChargingLogic(unittest.TestCase):
         self.assertEqual(logic.config['hybrid_charging']['max_charging_power'], 3000,
                         "Max charging power should be set correctly")
     
-    def test_pv_only_charging_decision(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_pv_only_charging_decision(self):
         """Test decision for PV-only charging when PV is sufficient"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -157,7 +162,7 @@ class TestHybridChargingLogic(unittest.TestCase):
         current_data['house_consumption']['current_power_w'] = 1000.0  # 1 kW consumption
         current_data['battery']['soc_percent'] = 40.0  # 40% SOC
         
-        decision = logic.make_charging_decision(
+        decision = await logic.make_charging_decision(
             current_data, self.mock_price_data, self.mock_pv_forecast
         )
         
@@ -166,7 +171,9 @@ class TestHybridChargingLogic(unittest.TestCase):
         self.assertEqual(decision.charging_source, 'pv', "Should choose PV charging")
         self.assertGreater(decision.confidence, 0.7, "Should have high confidence for PV charging")
     
-    def test_grid_only_charging_decision(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_grid_only_charging_decision(self):
         """Test decision for grid-only charging when PV is insufficient"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -181,7 +188,7 @@ class TestHybridChargingLogic(unittest.TestCase):
         price_data = self.mock_price_data.copy()
         price_data['current_price'] = 0.05  # Very low price
         
-        decision = logic.make_charging_decision(
+        decision = await logic.make_charging_decision(
             current_data, price_data, self.mock_pv_forecast
         )
         
@@ -189,7 +196,9 @@ class TestHybridChargingLogic(unittest.TestCase):
         self.assertEqual(decision.charging_source, 'grid', "Should choose grid charging")
         self.assertGreater(decision.confidence, 0.6, "Should have good confidence for grid charging")
     
-    def test_hybrid_charging_decision(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_hybrid_charging_decision(self):
         """Test decision for hybrid charging (PV + Grid)"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -226,7 +235,7 @@ class TestHybridChargingLogic(unittest.TestCase):
             {'hour': 3, 'power_kw': 1.0, 'confidence': 0.5}
         ]
         
-        decision = logic.make_charging_decision(
+        decision = await logic.make_charging_decision(
             current_data, price_data, pv_forecast
         )
         
@@ -241,7 +250,9 @@ class TestHybridChargingLogic(unittest.TestCase):
             self.assertGreater(decision.pv_contribution_kwh, 0, "Should use PV contribution")
             self.assertGreater(decision.grid_contribution_kwh, 0, "Should use grid contribution")
     
-    def test_critical_scenario_low_price_insufficient_pv(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_critical_scenario_low_price_insufficient_pv(self):
         """Test critical scenario: low price window + insufficient PV timing"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -268,7 +279,7 @@ class TestHybridChargingLogic(unittest.TestCase):
             {'hour': 3, 'power_kw': 2.5, 'confidence': 0.5}
         ]
         
-        decision = logic.make_charging_decision(
+        decision = await logic.make_charging_decision(
             current_data, price_data, pv_forecast
         )
         
@@ -277,7 +288,9 @@ class TestHybridChargingLogic(unittest.TestCase):
         self.assertGreater(decision.confidence, 0.8, "Should have high confidence for critical scenario")
         self.assertIn('low price window', decision.reason.lower(), "Should mention low price window in reasoning")
     
-    def test_wait_decision_improving_pv(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_wait_decision_improving_pv(self):
         """Test decision to wait when PV is improving significantly"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -299,7 +312,7 @@ class TestHybridChargingLogic(unittest.TestCase):
             {'hour': 3, 'power_kw': 3.5, 'confidence': 0.6}
         ]
         
-        decision = logic.make_charging_decision(
+        decision = await logic.make_charging_decision(
             current_data, price_data, pv_forecast
         )
         
@@ -307,7 +320,9 @@ class TestHybridChargingLogic(unittest.TestCase):
         self.assertEqual(decision.action, 'wait', "Should decide to wait for better PV")
         self.assertIn('pv improvement', decision.reason.lower(), "Should mention PV improvement in reasoning")
     
-    def test_urgent_charging_critical_battery(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_urgent_charging_critical_battery(self):
         """Test urgent charging when battery is critically low"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -321,7 +336,7 @@ class TestHybridChargingLogic(unittest.TestCase):
         price_data = self.mock_price_data.copy()
         price_data['current_price'] = 0.85  # High price
         
-        decision = logic.make_charging_decision(
+        decision = await logic.make_charging_decision(
             current_data, price_data, self.mock_pv_forecast
         )
         
@@ -330,7 +345,9 @@ class TestHybridChargingLogic(unittest.TestCase):
         self.assertTrue('critical' in decision.reason.lower() or 'emergency' in decision.reason.lower(), "Should mention critical or emergency battery in reasoning")
         self.assertGreater(decision.confidence, 0.9, "Should have very high confidence for critical scenario")
     
-    def test_energy_cost_calculation(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_energy_cost_calculation(self):
         """Test energy cost calculation for different charging sources"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -351,7 +368,9 @@ class TestHybridChargingLogic(unittest.TestCase):
         self.assertAlmostEqual(hybrid_cost, expected_cost, places=2,
                               msg="Hybrid charging cost should be calculated correctly")
     
-    def test_charging_efficiency_calculation(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_charging_efficiency_calculation(self):
         """Test charging efficiency calculations"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -370,7 +389,9 @@ class TestHybridChargingLogic(unittest.TestCase):
         self.assertAlmostEqual(hybrid_efficiency, expected_efficiency, places=3,
                               msg="Hybrid charging efficiency should be weighted average")
     
-    def test_charging_power_calculation(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_charging_power_calculation(self):
         """Test charging power calculations"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -388,7 +409,9 @@ class TestHybridChargingLogic(unittest.TestCase):
         expected_power = min(1500.0, 2500.0) + 3000.0  # PV + Grid
         self.assertEqual(hybrid_power, expected_power, "Hybrid charging power should be PV + Grid")
     
-    def test_charging_duration_calculation(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_charging_duration_calculation(self):
         """Test charging duration calculations"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -414,7 +437,9 @@ class TestHybridChargingLogic(unittest.TestCase):
         self.assertAlmostEqual(hybrid_duration, expected_duration, places=2,
                               msg="Hybrid charging duration should be calculated correctly")
     
-    def test_savings_calculation(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_savings_calculation(self):
         """Test savings calculation compared to average price"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -435,7 +460,9 @@ class TestHybridChargingLogic(unittest.TestCase):
         self.assertAlmostEqual(grid_savings, expected_savings, places=2,
                               msg="Grid charging savings should be calculated correctly")
     
-    def test_decision_confidence_calculation(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_decision_confidence_calculation(self):
         """Test decision confidence calculation"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -463,7 +490,9 @@ class TestHybridChargingLogic(unittest.TestCase):
         confidence = logic.calculate_decision_confidence(current_data, self.mock_price_data, 'wait')
         self.assertLess(confidence, 0.6, "Should have lower confidence for unclear conditions")
     
-    def test_error_handling_invalid_data(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_error_handling_invalid_data(self):
         """Test error handling with invalid data"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -477,7 +506,7 @@ class TestHybridChargingLogic(unittest.TestCase):
         
         # Should handle invalid data gracefully
         try:
-            decision = logic.make_charging_decision(
+            decision = await logic.make_charging_decision(
                 invalid_data, self.mock_price_data, self.mock_pv_forecast
             )
             self.assertIsNotNone(decision, "Should handle invalid data gracefully")
@@ -485,7 +514,9 @@ class TestHybridChargingLogic(unittest.TestCase):
             # Should not raise unhandled exceptions
             self.fail(f"Should handle invalid data gracefully, got exception: {e}")
     
-    def test_error_handling_missing_config(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_error_handling_missing_config(self):
         """Test error handling with missing configuration"""
         # Test with non-existent config file
         invalid_config_path = os.path.join(self.temp_dir, 'non_existent_config.yaml')
@@ -534,7 +565,9 @@ class TestHybridChargingPerformance(unittest.TestCase):
         with open(self.config_path, 'r') as f:
             return yaml.safe_load(f)
     
-    def test_decision_making_performance(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_decision_making_performance(self):
         """Test decision making performance"""
         config = self.load_config()
         logic = HybridChargingLogic(config)
@@ -562,7 +595,7 @@ class TestHybridChargingPerformance(unittest.TestCase):
                     {'hour': 1, 'power_kw': 1.5, 'confidence': 0.7}
                 ]
                 
-                decision = logic.make_charging_decision(current_data, price_data, pv_forecast)
+                decision = await logic.make_charging_decision(current_data, price_data, pv_forecast)
                 decision_count += 1
             except Exception as e:
                 pass
@@ -578,7 +611,9 @@ class TestHybridChargingPerformance(unittest.TestCase):
         avg_decision_time = duration / decision_count if decision_count > 0 else 0
         self.assertLess(avg_decision_time, 0.05, "Average decision time should be less than 50ms")
     
-    def test_memory_usage(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_memory_usage(self):
         """Test memory usage of hybrid charging logic"""
         import psutil
         import os
@@ -599,7 +634,9 @@ class TestHybridChargingPerformance(unittest.TestCase):
         self.assertLess(memory_increase, 5 * 1024 * 1024, 
                        f"Memory increase should be less than 5MB, got {memory_increase / 1024 / 1024:.2f}MB")
     
-    def test_initialization_time(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_initialization_time(self):
         """Test hybrid charging logic initialization time"""
         start_time = datetime.now()
         

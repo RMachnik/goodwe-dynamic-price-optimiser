@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
 import sys
 import os
+import pytest
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -16,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from master_coordinator import MultiFactorDecisionEngine
 
 
-class TestScoringAlgorithm(unittest.TestCase):
+class TestScoringAlgorithm(unittest.IsolatedAsyncioTestCase):
     """Test the multi-factor decision engine scoring algorithm"""
     
     def setUp(self):
@@ -69,7 +70,9 @@ class TestScoringAlgorithm(unittest.TestCase):
             }
         }
     
-    def test_price_score_calculation_low_price(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_price_score_calculation_low_price(self):
         """Test price score calculation for low prices"""
         with patch('master_coordinator.datetime') as mock_datetime:
             mock_datetime.now.return_value = datetime(2025, 9, 6, 12, 0)
@@ -82,7 +85,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # Low price (200 PLN/MWh = 0.2 PLN/kWh) should give score 100 (excellent)
         self.assertEqual(score, 100)
     
-    def test_price_score_calculation_medium_price(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_price_score_calculation_medium_price(self):
         """Test price score calculation for medium prices"""
         # Update mock to return medium price (300 PLN/MWh = 0.3 PLN/kWh, still <= 200, so score 100)
         self.mock_charging_controller.get_current_price.return_value = 300.0  # PLN/MWh
@@ -102,7 +107,9 @@ class TestScoringAlgorithm(unittest.TestCase):
             # Medium price (300 PLN/MWh = 0.3 PLN/kWh) should give score (100) - still excellent
             self.assertEqual(score, 100)
     
-    def test_price_score_calculation_high_price(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_price_score_calculation_high_price(self):
         """Test price score calculation for high prices"""
         # Update mock to return high price (300,000 PLN/MWh = 300 PLN/kWh, gives score 80)
         self.mock_charging_controller.get_current_price.return_value = 300000.0  # PLN/MWh
@@ -122,7 +129,9 @@ class TestScoringAlgorithm(unittest.TestCase):
             # High price (300,000 PLN/MWh = 300 PLN/kWh) should give score (80)
             self.assertEqual(score, 80)
     
-    def test_price_score_calculation_very_high_price(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_price_score_calculation_very_high_price(self):
         """Test price score calculation for very high prices"""
         # Update mock to return very high price (500,000 PLN/MWh = 500 PLN/kWh, gives score 40)
         self.mock_charging_controller.get_current_price.return_value = 500000.0  # PLN/MWh
@@ -142,7 +151,9 @@ class TestScoringAlgorithm(unittest.TestCase):
             # Very high price (500,000 PLN/MWh = 500 PLN/kWh) should give score (40)
             self.assertEqual(score, 40)
     
-    def test_battery_score_calculation_critical(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_battery_score_calculation_critical(self):
         """Test battery score calculation for critical battery level"""
         critical_battery_data = self.mock_current_data.copy()
         critical_battery_data['battery']['soc_percent'] = 15  # Critical level
@@ -152,7 +163,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # Critical battery (15%) should give maximum score (100)
         self.assertEqual(score, 100)
     
-    def test_battery_score_calculation_low(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_battery_score_calculation_low(self):
         """Test battery score calculation for low battery level"""
         low_battery_data = self.mock_current_data.copy()
         low_battery_data['battery']['soc_percent'] = 35  # Low level
@@ -162,7 +175,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # Low battery (35%) should give high score (80)
         self.assertEqual(score, 80)
     
-    def test_battery_score_calculation_medium(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_battery_score_calculation_medium(self):
         """Test battery score calculation for medium battery level"""
         medium_battery_data = self.mock_current_data.copy()
         medium_battery_data['battery']['soc_percent'] = 60  # Medium level
@@ -172,7 +187,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # Medium battery (60%) should give medium score (40)
         self.assertEqual(score, 40)
     
-    def test_battery_score_calculation_high(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_battery_score_calculation_high(self):
         """Test battery score calculation for high battery level"""
         high_battery_data = self.mock_current_data.copy()
         high_battery_data['battery']['soc_percent'] = 85  # High level
@@ -182,7 +199,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # High battery (85%) should give low score (10)
         self.assertEqual(score, 10)
     
-    def test_battery_score_calculation_full(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_battery_score_calculation_full(self):
         """Test battery score calculation for full battery"""
         full_battery_data = self.mock_current_data.copy()
         full_battery_data['battery']['soc_percent'] = 95  # Full battery
@@ -192,7 +211,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # Full battery (95%) should give minimum score (0)
         self.assertEqual(score, 0)
     
-    def test_pv_score_calculation_no_production(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_pv_score_calculation_no_production(self):
         """Test PV score calculation for no production"""
         no_pv_data = self.mock_current_data.copy()
         no_pv_data['photovoltaic']['current_power_w'] = 0  # No PV production
@@ -202,7 +223,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # No PV production should give maximum score (100)
         self.assertEqual(score, 100)
     
-    def test_pv_score_calculation_low_production(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_pv_score_calculation_low_production(self):
         """Test PV score calculation for low production with deficit"""
         low_pv_data = self.mock_current_data.copy()
         low_pv_data['photovoltaic']['current_power_w'] = 200  # Low PV production
@@ -214,7 +237,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # High deficit should give high score (80)
         self.assertEqual(score, 80)
     
-    def test_pv_score_calculation_medium_production(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_pv_score_calculation_medium_production(self):
         """Test PV score calculation for medium production with balanced consumption"""
         medium_pv_data = self.mock_current_data.copy()
         medium_pv_data['photovoltaic']['current_power_w'] = 1500  # Medium PV production
@@ -226,7 +251,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # Balanced should give medium score (30)
         self.assertEqual(score, 30)
     
-    def test_pv_score_calculation_high_production(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_pv_score_calculation_high_production(self):
         """Test PV score calculation for high production"""
         high_pv_data = self.mock_current_data.copy()
         high_pv_data['photovoltaic']['current_power_w'] = 4000  # High PV production
@@ -236,7 +263,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # High PV production should give minimum score (0)
         self.assertEqual(score, 0)
     
-    def test_consumption_score_calculation_high_consumption(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_consumption_score_calculation_high_consumption(self):
         """Test consumption score calculation for high consumption"""
         high_consumption_data = self.mock_current_data.copy()
         high_consumption_data['house_consumption']['current_power_w'] = 4000  # High consumption
@@ -246,7 +275,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # High consumption should give maximum score (100)
         self.assertEqual(score, 100)
     
-    def test_consumption_score_calculation_medium_consumption(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_consumption_score_calculation_medium_consumption(self):
         """Test consumption score calculation for medium consumption"""
         medium_consumption_data = self.mock_current_data.copy()
         medium_consumption_data['house_consumption']['current_power_w'] = 1500  # Medium consumption
@@ -256,7 +287,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # Medium consumption should give medium score (60)
         self.assertEqual(score, 60)
     
-    def test_consumption_score_calculation_low_consumption(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_consumption_score_calculation_low_consumption(self):
         """Test consumption score calculation for low consumption"""
         low_consumption_data = self.mock_current_data.copy()
         low_consumption_data['house_consumption']['current_power_w'] = 200  # Low consumption
@@ -266,7 +299,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # Low consumption should give low score (30)
         self.assertEqual(score, 30)
     
-    def test_consumption_score_calculation_very_low_consumption(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_consumption_score_calculation_very_low_consumption(self):
         """Test consumption score calculation for very low consumption"""
         very_low_consumption_data = self.mock_current_data.copy()
         very_low_consumption_data['house_consumption']['current_power_w'] = 50  # Very low consumption
@@ -276,7 +311,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # Very low consumption should give minimum score (0)
         self.assertEqual(score, 0)
     
-    def test_weighted_total_score_calculation(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_weighted_total_score_calculation(self):
         """Test weighted total score calculation"""
         with patch('master_coordinator.datetime') as mock_datetime:
             mock_datetime.now.return_value = datetime(2025, 9, 6, 12, 0)
@@ -297,7 +334,7 @@ class TestScoringAlgorithm(unittest.TestCase):
             )
             
             # Test the decision engine
-            decision = self.decision_engine.analyze_and_decide(
+            decision = await self.decision_engine.analyze_and_decide(
                 self.mock_current_data,
                 self.mock_price_data,
                 []
@@ -306,12 +343,14 @@ class TestScoringAlgorithm(unittest.TestCase):
             # Verify the total score matches expected calculation
             self.assertAlmostEqual(decision['total_score'], expected_score, places=2)
     
-    def test_decision_action_critical_battery(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_decision_action_critical_battery(self):
         """Test decision action for critical battery level"""
         critical_battery_data = self.mock_current_data.copy()
         critical_battery_data['battery']['soc_percent'] = 15  # Critical level
         
-        decision = self.decision_engine.analyze_and_decide(
+        decision = await self.decision_engine.analyze_and_decide(
             critical_battery_data,
             self.mock_price_data,
             []
@@ -320,7 +359,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # Critical battery should always result in start_charging
         self.assertEqual(decision['action'], 'start_charging')
     
-    def test_decision_action_high_score_not_charging(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_decision_action_high_score_not_charging(self):
         """Test decision action for high score when not charging"""
         high_score_data = self.mock_current_data.copy()
         high_score_data['battery']['soc_percent'] = 30  # Low battery
@@ -336,7 +377,7 @@ class TestScoringAlgorithm(unittest.TestCase):
             mock_datetime.strptime = datetime.strptime
             mock_datetime.timedelta = timedelta
             
-            decision = self.decision_engine.analyze_and_decide(
+            decision = await self.decision_engine.analyze_and_decide(
                 high_score_data,
                 low_price_data,
                 []
@@ -345,7 +386,9 @@ class TestScoringAlgorithm(unittest.TestCase):
             # Score 81 and not charging should result in start_charging (above 70 threshold)
             self.assertEqual(decision['action'], 'start_charging')
     
-    def test_decision_action_low_score_charging(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_decision_action_low_score_charging(self):
         """Test decision action for low score when charging"""
         low_score_data = self.mock_current_data.copy()
         low_score_data['battery']['soc_percent'] = 90  # High battery
@@ -363,7 +406,7 @@ class TestScoringAlgorithm(unittest.TestCase):
             mock_datetime.strptime = datetime.strptime
             mock_datetime.timedelta = timedelta
             
-            decision = self.decision_engine.analyze_and_decide(
+            decision = await self.decision_engine.analyze_and_decide(
                 low_score_data,
                 high_price_data,
                 []
@@ -372,7 +415,9 @@ class TestScoringAlgorithm(unittest.TestCase):
             # Low score and charging should result in stop_charging
             self.assertEqual(decision['action'], 'stop_charging')
     
-    def test_decision_action_medium_score_charging(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_decision_action_medium_score_charging(self):
         """Test decision action for medium score when charging"""
         medium_score_data = self.mock_current_data.copy()
         medium_score_data['battery']['soc_percent'] = 60  # Medium battery
@@ -385,7 +430,7 @@ class TestScoringAlgorithm(unittest.TestCase):
         # Update charging controller to return the medium price
         self.mock_charging_controller.get_current_price.return_value = 400.0  # PLN/MWh
         
-        decision = self.decision_engine.analyze_and_decide(
+        decision = await self.decision_engine.analyze_and_decide(
             medium_score_data,
             medium_price_data,
             []
@@ -394,7 +439,9 @@ class TestScoringAlgorithm(unittest.TestCase):
         # Medium score and charging should result in continue_charging
         self.assertEqual(decision['action'], 'continue_charging')
     
-    def test_decision_action_no_action_needed(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_decision_action_no_action_needed(self):
         """Test decision action when no action is needed"""
         no_action_data = self.mock_current_data.copy()
         no_action_data['battery']['soc_percent'] = 80  # High battery
@@ -404,7 +451,7 @@ class TestScoringAlgorithm(unittest.TestCase):
         high_price_data = self.mock_price_data.copy()
         high_price_data['value'][0]['csdac_pln'] = 600.0  # High price
         
-        decision = self.decision_engine.analyze_and_decide(
+        decision = await self.decision_engine.analyze_and_decide(
             no_action_data,
             high_price_data,
             []
@@ -413,9 +460,11 @@ class TestScoringAlgorithm(unittest.TestCase):
         # High battery, not charging, and high prices should result in no action
         self.assertEqual(decision['action'], 'none')
     
-    def test_confidence_calculation(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_confidence_calculation(self):
         """Test confidence calculation"""
-        decision = self.decision_engine.analyze_and_decide(
+        decision = await self.decision_engine.analyze_and_decide(
             self.mock_current_data,
             self.mock_price_data,
             []
@@ -425,9 +474,11 @@ class TestScoringAlgorithm(unittest.TestCase):
         self.assertGreaterEqual(decision['confidence'], 0)
         self.assertLessEqual(decision['confidence'], 100)
     
-    def test_reasoning_generation(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_reasoning_generation(self):
         """Test reasoning generation"""
-        decision = self.decision_engine.analyze_and_decide(
+        decision = await self.decision_engine.analyze_and_decide(
             self.mock_current_data,
             self.mock_price_data,
             []
@@ -438,9 +489,11 @@ class TestScoringAlgorithm(unittest.TestCase):
         self.assertGreater(len(decision['reasoning']), 0)
         self.assertIn('Decision based on:', decision['reasoning'])
     
-    def test_no_price_data_handling(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_no_price_data_handling(self):
         """Test handling when no price data is available"""
-        decision = self.decision_engine.analyze_and_decide(
+        decision = await self.decision_engine.analyze_and_decide(
             self.mock_current_data,
             None,  # No price data
             []
