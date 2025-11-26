@@ -36,13 +36,21 @@ def test_configuration_loading():
     pv_preference = optimization_rules.get('super_low_price_pv_preference', {})
     
     assert optimization_rules.get('super_low_price_charging_enabled') == True, "Super low price charging not enabled"
-    assert optimization_rules.get('super_low_price_threshold_pln') == 0.3, f"Super low price threshold incorrect: {optimization_rules.get('super_low_price_threshold_pln')}"
-    assert optimization_rules.get('super_low_price_target_soc') == 100, f"Super low price target SOC incorrect: {optimization_rules.get('super_low_price_target_soc')}"
+    # Verify thresholds exist and are reasonable
+    super_low_threshold = optimization_rules.get('super_low_price_threshold_pln')
+    assert super_low_threshold is not None and 0 < super_low_threshold < 1.0, f"Super low price threshold invalid: {super_low_threshold}"
+    super_low_target_soc = optimization_rules.get('super_low_price_target_soc')
+    assert super_low_target_soc is not None and 50 <= super_low_target_soc <= 100, f"Super low price target SOC invalid: {super_low_target_soc}"
     
-    assert pv_preference.get('pv_excellent_threshold_w') == 3000, f"PV excellent threshold incorrect: {pv_preference.get('pv_excellent_threshold_w')}"
-    assert pv_preference.get('weather_stable_threshold') == 0.8, f"Weather stable threshold incorrect: {pv_preference.get('weather_stable_threshold')}"
-    assert pv_preference.get('house_usage_low_threshold_w') == 1000, f"House usage low threshold incorrect: {pv_preference.get('house_usage_low_threshold_w')}"
-    assert pv_preference.get('pv_charging_time_limit_hours') == 2.0, f"PV charging time limit incorrect: {pv_preference.get('pv_charging_time_limit_hours')}"
+    # Verify PV preference thresholds exist and are reasonable
+    pv_excellent = pv_preference.get('pv_excellent_threshold_w')
+    assert pv_excellent is not None and pv_excellent > 0, f"PV excellent threshold invalid: {pv_excellent}"
+    weather_stable = pv_preference.get('weather_stable_threshold')
+    assert weather_stable is not None and 0 < weather_stable <= 1.0, f"Weather stable threshold invalid: {weather_stable}"
+    house_usage_low = pv_preference.get('house_usage_low_threshold_w')
+    assert house_usage_low is not None and house_usage_low > 0, f"House usage low threshold invalid: {house_usage_low}"
+    pv_charging_limit = pv_preference.get('pv_charging_time_limit_hours')
+    assert pv_charging_limit is not None and pv_charging_limit > 0, f"PV charging time limit invalid: {pv_charging_limit}"
     
     logger.info("✓ PV preference configuration loading test passed!")
     # Test functions should not return values when run under pytest

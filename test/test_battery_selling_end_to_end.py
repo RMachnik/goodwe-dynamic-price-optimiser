@@ -320,7 +320,7 @@ class TestBatterySellingEndToEnd:
         
         # Should use default values
         assert engine.min_selling_soc == 80.0
-        assert engine.min_selling_price_pln == 0.50
+        assert engine.min_selling_price_pln == 0.80  # Default from battery_selling_engine.py
         
         # Test with missing data
         coordinator = MasterCoordinator()
