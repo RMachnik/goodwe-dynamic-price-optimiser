@@ -450,8 +450,8 @@ timing_awareness:
   # Smart Critical Charging Configuration
   smart_critical_charging:
     enabled: true                    # Enable smart critical charging logic
-    max_critical_price_pln: 0.70    # Maximum price to charge at critical level (PLN/kWh)
-    max_wait_hours: 6               # Maximum hours to wait for better price
+    max_critical_price_pln: 1.20    # Maximum price to charge at critical level (PLN/kWh)
+    max_wait_hours: 3               # Maximum hours to wait for better price
     min_price_savings_percent: 30  # Minimum savings % to wait for better price
     emergency_override_price: true  # Always charge at emergency level regardless of price
     
@@ -459,7 +459,7 @@ timing_awareness:
     optimization_rules:
       # Rule 1: At 10% SOC with high price, always wait for price drop
       wait_at_10_percent_if_high_price: true
-      high_price_threshold_pln: 0.8  # PLN/kWh - above this is considered high price
+      high_price_threshold_pln: 1.35  # PLN/kWh - above this is considered high price
       
       # Rule 2: Proactive charging when PV is poor and weather won't improve
       proactive_charging_enabled: true
