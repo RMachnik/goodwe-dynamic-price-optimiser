@@ -97,6 +97,44 @@ class AutomatedPriceCharger:
         self.house_usage_low_threshold = pv_preference_config.get('house_usage_low_threshold_w', 1000)  # Watts
         self.pv_charging_time_limit = pv_preference_config.get('pv_charging_time_limit_hours', 2.0)  # hours
         
+        # Interim cost analysis configuration
+        interim_cost_config = smart_critical_config.get('interim_cost_analysis', {})
+        self.interim_cost_enabled = interim_cost_config.get('enabled', False)
+        self.interim_net_savings_threshold = interim_cost_config.get('net_savings_threshold_pln', 0.10)  # PLN
+        self.interim_evaluation_window_hours = interim_cost_config.get('evaluation_window_hours', 12)  # hours
+        self.interim_time_of_day_adjustment = interim_cost_config.get('time_of_day_adjustment', True)
+        self.interim_evening_peak_multiplier = interim_cost_config.get('evening_peak_multiplier', 1.5)
+        self.interim_night_discount_multiplier = interim_cost_config.get('night_discount_multiplier', 0.8)
+        self.interim_fallback_consumption = interim_cost_config.get('fallback_consumption_kw', 1.25)  # kW
+        self.interim_min_historical_hours = interim_cost_config.get('min_historical_hours', 48)  # hours
+        self.interim_lookback_days = interim_cost_config.get('lookback_days', 7)  # days
+        
+        # Partial charging configuration
+        partial_charging_config = smart_critical_config.get('partial_charging', {})
+        self.partial_charging_enabled = partial_charging_config.get('enabled', False)
+        self.partial_safety_margin = partial_charging_config.get('safety_margin_percent', 10) / 100.0  # Convert to fraction
+        self.partial_max_sessions_per_day = partial_charging_config.get('max_partial_sessions_per_day', 4)
+        self.partial_min_charge_kwh = partial_charging_config.get('min_partial_charge_kwh', 2.0)  # kWh
+        self.partial_session_tracking_file = partial_charging_config.get('session_tracking_file', 'data/partial_charging_sessions.json')
+        self.partial_daily_reset_hour = partial_charging_config.get('daily_reset_hour', 6)  # 24h format
+        self.partial_timezone = partial_charging_config.get('timezone', 'Europe/Warsaw')
+        
+        # Import pytz for timezone handling
+        try:
+            import pytz
+            self.warsaw_tz = pytz.timezone(self.partial_timezone)
+            logger.info(f"Partial charging timezone set to {self.partial_timezone}")
+        except Exception as e:
+            logger.warning(f"Failed to load timezone {self.partial_timezone}, using UTC: {e}")
+            import pytz
+            self.warsaw_tz = pytz.UTC
+        
+        # Battery capacity for partial charging calculations
+        self.battery_capacity_kwh = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)  # kWh
+        
+        logger.info(f"Interim cost analysis: {'enabled' if self.interim_cost_enabled else 'disabled'}")
+        logger.info(f"Partial charging: {'enabled' if self.partial_charging_enabled else 'disabled'} (max {self.partial_max_sessions_per_day} sessions/day)")
+        
         # Load electricity pricing configuration
         self._load_pricing_config()
         
@@ -246,6 +284,453 @@ class AutomatedPriceCharger:
     def apply_minimum_price_floor(self, price: float) -> float:
         """Apply minimum price floor as per Polish regulations"""
         return max(price, self.minimum_price_floor)
+    
+    def _calculate_interim_cost(self, start_time: datetime, end_time: datetime, price_data: Dict) -> float:
+        """
+        Calculate the cost of grid consumption during the interim period (waiting time).
+        
+        This method analyzes historical consumption patterns from the Enhanced Data Collector's
+        7-day buffer to estimate grid consumption costs if we wait from start_time to end_time.
+        
+        Args:
+            start_time: Current time (start of interim period)
+            end_time: Future time (end of interim period, start of charging window)
+            price_data: Dictionary with 'value' list containing price points with 'dtime' and 'csdac_pln'
+        
+        Returns:
+            Estimated grid consumption cost in PLN for the interim period
+        """
+        if not self.interim_cost_enabled:
+            return 0.0
+        
+        try:
+            # Get historical data from Enhanced Data Collector
+            historical_data = self.data_collector.historical_data
+            
+            # Check if we have enough historical data
+            if len(historical_data) < self.interim_min_historical_hours * 180:  # 180 = 3600s/hour / 20s/sample
+                logger.debug(f"Insufficient historical data ({len(historical_data)} samples, need {self.interim_min_historical_hours * 180}), using fallback consumption")
+                # Use fallback consumption rate
+                hours_to_wait = (end_time - start_time).total_seconds() / 3600
+                
+                # Get average price for interim period
+                avg_price = self._get_average_price_for_period(start_time, end_time, price_data)
+                if avg_price is None:
+                    return 0.0
+                
+                interim_cost = hours_to_wait * self.interim_fallback_consumption * avg_price
+                logger.debug(f"Interim cost (fallback): {interim_cost:.2f} PLN ({hours_to_wait:.1f}h × {self.interim_fallback_consumption:.2f} kW × {avg_price:.3f} PLN/kWh)")
+                return interim_cost
+            
+            # Group historical consumption by hour of day (0-23)
+            hourly_consumption = {}  # hour -> [consumption_kw_values]
+            
+            for data_point in historical_data:
+                try:
+                    # Extract timestamp and consumption
+                    timestamp_str = data_point.get('timestamp')
+                    if not timestamp_str:
+                        continue
+                    
+                    # Parse timestamp
+                    if isinstance(timestamp_str, str):
+                        timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                    else:
+                        timestamp = timestamp_str
+                    
+                    # Get consumption in kW
+                    consumption_kw = data_point.get('house_consumption', {}).get('current_power_kw', 0.0)
+                    if not isinstance(consumption_kw, (int, float)):
+                        continue
+                    
+                    # Group by hour of day
+                    hour = timestamp.hour
+                    if hour not in hourly_consumption:
+                        hourly_consumption[hour] = []
+                    hourly_consumption[hour].append(consumption_kw)
+                    
+                except Exception as e:
+                    logger.debug(f"Error processing historical data point: {e}")
+                    continue
+            
+            # Calculate average consumption for each hour with time-of-day adjustments
+            hourly_avg_consumption = {}
+            for hour in range(24):
+                if hour in hourly_consumption and len(hourly_consumption[hour]) > 0:
+                    avg = sum(hourly_consumption[hour]) / len(hourly_consumption[hour])
+                    
+                    # Apply time-of-day multipliers if enabled
+                    if self.interim_time_of_day_adjustment:
+                        if 18 <= hour < 22:  # Evening peak (18:00-22:00)
+                            avg *= self.interim_evening_peak_multiplier
+                        elif hour >= 22 or hour < 6:  # Night (22:00-06:00)
+                            avg *= self.interim_night_discount_multiplier
+                    
+                    hourly_avg_consumption[hour] = avg
+                else:
+                    # Use fallback for hours with no data
+                    hourly_avg_consumption[hour] = self.interim_fallback_consumption
+            
+            # Calculate interim cost by iterating through each hour in the interim period
+            total_cost = 0.0
+            current_time = start_time
+            
+            while current_time < end_time:
+                hour = current_time.hour
+                
+                # Calculate time fraction for this hour (handles partial hours)
+                next_hour = current_time.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+                if next_hour > end_time:
+                    next_hour = end_time
+                
+                hour_fraction = (next_hour - current_time).total_seconds() / 3600
+                
+                # Get consumption for this hour
+                consumption_kw = hourly_avg_consumption.get(hour, self.interim_fallback_consumption)
+                
+                # Get price for this hour
+                price_pln_kwh = self._get_price_for_hour(current_time, price_data)
+                if price_pln_kwh is None:
+                    price_pln_kwh = 0.6  # Fallback price
+                
+                # Add to total cost
+                hour_cost = hour_fraction * consumption_kw * price_pln_kwh
+                total_cost += hour_cost
+                
+                logger.debug(f"Interim hour {current_time.strftime('%H:%M')}: {hour_fraction:.2f}h × {consumption_kw:.2f} kW × {price_pln_kwh:.3f} PLN/kWh = {hour_cost:.2f} PLN")
+                
+                current_time = next_hour
+            
+            logger.info(f"Interim cost: {total_cost:.2f} PLN for period {start_time.strftime('%H:%M')} to {end_time.strftime('%H:%M')}")
+            return total_cost
+            
+        except Exception as e:
+            logger.error(f"Error calculating interim cost: {e}")
+            return 0.0
+    
+    def _get_average_price_for_period(self, start_time: datetime, end_time: datetime, price_data: Dict) -> Optional[float]:
+        """Get average price for a time period"""
+        try:
+            if not price_data or 'value' not in price_data:
+                return None
+            
+            prices = []
+            for item in price_data['value']:
+                try:
+                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                    if start_time <= item_time < end_time:
+                        # Convert from PLN/MWh to PLN/kWh
+                        price_kwh = float(item['csdac_pln']) / 1000
+                        prices.append(price_kwh)
+                except Exception:
+                    continue
+            
+            if prices:
+                return sum(prices) / len(prices)
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting average price: {e}")
+            return None
+    
+    def _get_price_for_hour(self, target_time: datetime, price_data: Dict) -> Optional[float]:
+        """Get price for a specific hour"""
+        try:
+            if not price_data or 'value' not in price_data:
+                return None
+            
+            # Find price for the target hour
+            for item in price_data['value']:
+                try:
+                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                    if item_time.hour == target_time.hour and item_time.date() == target_time.date():
+                        # Convert from PLN/MWh to PLN/kWh
+                        return float(item['csdac_pln']) / 1000
+                except Exception:
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting price for hour: {e}")
+            return None
+    
+    def _evaluate_multi_window_with_interim_cost(self, battery_soc: int, current_price: float, price_data: Dict) -> Optional[Dict[str, any]]:
+        """
+        Evaluate multiple future charging windows considering interim grid consumption costs.
+        
+        This method finds optimal charging windows within the evaluation period (default 12h)
+        and calculates net benefit = charging_savings - interim_grid_cost for each window.
+        """
+        try:
+            current_time = datetime.now()
+            evaluation_end = current_time + timedelta(hours=self.interim_evaluation_window_hours)
+            
+            # Get adaptive critical threshold - windows above this are blocked
+            critical_threshold = self.get_critical_price_threshold()
+            
+            # Find all potential charging windows
+            windows = []
+            
+            if not price_data or 'value' not in price_data:
+                logger.debug("No price data available for multi-window evaluation")
+                return None
+            
+            for item in price_data['value']:
+                try:
+                    window_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                    window_price_mwh = float(item['csdac_pln'])
+                    window_price_kwh = window_price_mwh / 1000
+                    
+                    # Skip windows outside evaluation period
+                    if window_time <= current_time or window_time > evaluation_end:
+                        continue
+                    
+                    # HARD LIMIT: Skip windows above adaptive critical threshold (except emergency)
+                    if window_price_kwh > critical_threshold:
+                        logger.debug(f"Window {window_time.strftime('%H:%M')}: {window_price_kwh:.3f} PLN/kWh > threshold {critical_threshold:.3f} PLN/kWh - BLOCKED")
+                        continue
+                    
+                    # Calculate charging savings (vs current price)
+                    charge_kwh = 10.0  # Assume 10 kWh charge for calculation
+                    charging_savings = (current_price - window_price_kwh) * charge_kwh
+                    
+                    # Calculate interim cost (grid consumption while waiting)
+                    interim_cost = self._calculate_interim_cost(current_time, window_time, price_data)
+                    
+                    # Calculate net benefit
+                    net_benefit = charging_savings - interim_cost
+                    
+                    windows.append({
+                        'time': window_time,
+                        'price_kwh': window_price_kwh,
+                        'charging_savings': charging_savings,
+                        'interim_cost': interim_cost,
+                        'net_benefit': net_benefit,
+                        'hours_to_wait': (window_time - current_time).total_seconds() / 3600
+                    })
+                    
+                    logger.info(
+                        f"Window {window_time.strftime('%H:%M')}: "
+                        f"price={window_price_kwh:.3f} PLN/kWh, "
+                        f"savings={charging_savings:.2f} PLN, "
+                        f"interim_cost={interim_cost:.2f} PLN, "
+                        f"net_benefit={net_benefit:.2f} PLN"
+                    )
+                    
+                except Exception as e:
+                    logger.debug(f"Error processing window: {e}")
+                    continue
+            
+            if not windows:
+                logger.debug("No valid charging windows found within evaluation period")
+                return None
+            
+            # Sort windows by net benefit (highest first)
+            windows.sort(key=lambda w: w['net_benefit'], reverse=True)
+            best_window = windows[0]
+            
+            # Check if best window has positive net benefit above threshold
+            if best_window['net_benefit'] > self.interim_net_savings_threshold:
+                # Waiting is beneficial - check for partial charging option
+                if self.partial_charging_enabled:
+                    partial_decision = self._evaluate_partial_charging(
+                        battery_soc, best_window, current_time, current_price
+                    )
+                    if partial_decision:
+                        return partial_decision
+                
+                # Wait for best window (no partial charge needed/possible)
+                return {
+                    'should_charge': False,
+                    'reason': (
+                        f"Better window at {best_window['time'].strftime('%H:%M')} "
+                        f"({best_window['price_kwh']:.3f} PLN/kWh): "
+                        f"net benefit {best_window['net_benefit']:.2f} PLN "
+                        f"(savings {best_window['charging_savings']:.2f} PLN - "
+                        f"interim cost {best_window['interim_cost']:.2f} PLN)"
+                    ),
+                    'priority': 'medium',
+                    'confidence': 0.8,
+                    'next_window': best_window['time'].strftime('%H:%M'),
+                    'net_benefit': best_window['net_benefit']
+                }
+            else:
+                # No beneficial window found - charge now
+                logger.info(
+                    f"Best window net benefit {best_window['net_benefit']:.2f} PLN "
+                    f"<= threshold {self.interim_net_savings_threshold} PLN - charging now"
+                )
+                return {
+                    'should_charge': True,
+                    'reason': (
+                        f"No beneficial future window found "
+                        f"(best: {best_window['time'].strftime('%H:%M')} "
+                        f"with net benefit {best_window['net_benefit']:.2f} PLN) - charge now"
+                    ),
+                    'priority': 'medium',
+                    'confidence': 0.75
+                }
+            
+        except Exception as e:
+            logger.error(f"Error in multi-window evaluation: {e}")
+            return None
+    
+    def _evaluate_partial_charging(self, battery_soc: int, best_window: Dict, 
+                                  current_time: datetime, current_price: float) -> Optional[Dict[str, any]]:
+        """
+        Evaluate whether partial charging is beneficial to bridge the gap to the next window.
+        
+        Args:
+            battery_soc: Current battery SOC percentage
+            best_window: Dictionary with best future window details
+            current_time: Current datetime
+            current_price: Current electricity price in PLN/kWh
+        
+        Returns:
+            Charging decision dict if partial charging recommended, None otherwise
+        """
+        try:
+            # Check if current price is below critical threshold
+            critical_threshold = self.get_critical_price_threshold()
+            if current_price > critical_threshold:
+                logger.debug(f"Partial charging blocked: current price {current_price:.3f} > threshold {critical_threshold:.3f}")
+                return None
+            
+            # Calculate how many hours until best window
+            hours_to_window = best_window['hours_to_wait']
+            
+            # Estimate energy consumption until window (using historical averages + safety margin)
+            avg_consumption_kw = self.interim_fallback_consumption  # Use fallback as conservative estimate
+            required_energy_kwh = hours_to_window * avg_consumption_kw * (1 + self.partial_safety_margin)
+            
+            # Check if required energy meets minimum
+            if required_energy_kwh < self.partial_min_charge_kwh:
+                logger.debug(f"Partial charge too small: {required_energy_kwh:.2f} kWh < minimum {self.partial_min_charge_kwh} kWh")
+                return None
+            
+            # Check if we have battery capacity for partial charge
+            current_energy_kwh = (battery_soc / 100.0) * self.battery_capacity_kwh
+            required_soc_kwh = current_energy_kwh + required_energy_kwh
+            
+            if required_soc_kwh > self.battery_capacity_kwh:
+                logger.debug(f"Insufficient battery capacity for partial charge: need {required_soc_kwh:.2f} kWh, have {self.battery_capacity_kwh} kWh")
+                return None
+            
+            # Check session limits
+            if not self._check_partial_session_limits():
+                logger.info("Partial charging session limit reached for today")
+                return None
+            
+            # Partial charging is viable
+            target_soc = min(100, int((required_soc_kwh / self.battery_capacity_kwh) * 100))
+            
+            return {
+                'should_charge': True,
+                'reason': (
+                    f"Partial charge to {target_soc}% "
+                    f"({required_energy_kwh:.1f} kWh) to bridge {hours_to_window:.1f}h "
+                    f"until better window at {best_window['time'].strftime('%H:%M')} "
+                    f"({best_window['price_kwh']:.3f} PLN/kWh)"
+                ),
+                'priority': 'medium',
+                'confidence': 0.7,
+                'partial_charge': True,
+                'target_soc': target_soc,
+                'required_kwh': required_energy_kwh,
+                'next_window': best_window['time'].strftime('%H:%M')
+            }
+            
+        except Exception as e:
+            logger.error(f"Error evaluating partial charging: {e}")
+            return None
+    
+    def _check_partial_session_limits(self) -> bool:
+        """Check if partial charging session limits allow another session today"""
+        try:
+            import json
+            import os
+            from pathlib import Path
+            
+            # Ensure data directory exists
+            session_file_path = Path(self.partial_session_tracking_file)
+            session_file_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Load session tracking data
+            if session_file_path.exists():
+                with open(session_file_path, 'r') as f:
+                    session_data = json.load(f)
+            else:
+                session_data = {'sessions': []}
+            
+            # Get current date in Warsaw timezone
+            current_time = datetime.now(self.warsaw_tz)
+            current_date = current_time.date()
+            
+            # Get daily reset hour in Warsaw timezone
+            reset_time = current_time.replace(hour=self.partial_daily_reset_hour, minute=0, second=0, microsecond=0)
+            if current_time.hour < self.partial_daily_reset_hour:
+                # Before reset time, use yesterday's date for comparison
+                reset_time = reset_time - timedelta(days=1)
+            
+            # Filter sessions for current day (after reset time)
+            today_sessions = []
+            for session in session_data['sessions']:
+                try:
+                    session_time = datetime.fromisoformat(session['timestamp'])
+                    # Make timezone-aware if not already
+                    if session_time.tzinfo is None:
+                        session_time = self.warsaw_tz.localize(session_time)
+                    
+                    if session_time >= reset_time:
+                        today_sessions.append(session)
+                except Exception as e:
+                    logger.debug(f"Error parsing session timestamp: {e}")
+                    continue
+            
+            # Check if we've reached the limit
+            if len(today_sessions) >= self.partial_max_sessions_per_day:
+                logger.info(f"Partial charging limit reached: {len(today_sessions)}/{self.partial_max_sessions_per_day} sessions today")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking partial session limits: {e}")
+            # On error, allow charging (fail open)
+            return True
+    
+    def _record_partial_charging_session(self):
+        """Record a partial charging session in the tracking file"""
+        try:
+            import json
+            from pathlib import Path
+            
+            session_file_path = Path(self.partial_session_tracking_file)
+            session_file_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Load existing data
+            if session_file_path.exists():
+                with open(session_file_path, 'r') as f:
+                    session_data = json.load(f)
+            else:
+                session_data = {'sessions': []}
+            
+            # Add new session
+            current_time = datetime.now(self.warsaw_tz)
+            session_data['sessions'].append({
+                'timestamp': current_time.isoformat(),
+                'date': current_time.date().isoformat()
+            })
+            
+            # Save updated data
+            with open(session_file_path, 'w') as f:
+                json.dump(session_data, f, indent=2)
+            
+            logger.info(f"Recorded partial charging session at {current_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            
+        except Exception as e:
+            logger.error(f"Error recording partial charging session: {e}")
         
     async def initialize(self) -> bool:
         """Initialize the system and connect to inverter"""
@@ -530,6 +1015,16 @@ class AutomatedPriceCharger:
             # Keep only last 10 decisions
             if len(self.decision_history) > 10:
                 self.decision_history = self.decision_history[-10:]
+            
+            # Record partial charging session if decision indicates partial charge
+            if decision.get('should_charge') and decision.get('partial_charge'):
+                self._record_partial_charging_session()
+                logger.info(
+                    f"Partial charging session recorded: "
+                    f"target SOC {decision.get('target_soc', 'unknown')}%, "
+                    f"required {decision.get('required_kwh', 'unknown')} kWh, "
+                    f"until {decision.get('next_window', 'unknown')}"
+                )
             
             logger.info(f"Smart charging decision: {decision['should_charge']} - {decision['reason']}")
             logger.info(f"Priority: {decision['priority']}, Confidence: {decision['confidence']:.1%}")
@@ -1004,6 +1499,14 @@ class AutomatedPriceCharger:
             return self._smart_critical_charging_decision(
                 battery_soc, current_price, cheapest_price, cheapest_hour
             )
+        
+        # MULTI-WINDOW INTERIM COST ANALYSIS: Evaluate future charging windows accounting for interim grid costs
+        if self.interim_cost_enabled and price_data and current_price:
+            interim_decision = self._evaluate_multi_window_with_interim_cost(
+                battery_soc, current_price, price_data
+            )
+            if interim_decision:
+                return interim_decision
         
         # HIGH: PV overproduction - no need to charge from grid (check BEFORE aggressive charging)
         if overproduction > self.overproduction_threshold:

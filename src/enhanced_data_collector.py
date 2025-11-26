@@ -223,9 +223,10 @@ class EnhancedDataCollector:
             # Update daily statistics
             self._update_daily_stats(comprehensive_data)
             
-            # Limit historical data to last 24 hours (4320 data points at 20-second intervals)
-            if len(self.historical_data) > 4320:
-                self.historical_data = self.historical_data[-4320:]
+            # Limit historical data to last 7 days (30240 data points at 20-second intervals)
+            # 7 days × 24 hours × 60 minutes × 60 seconds / 20 seconds = 30,240 data points
+            if len(self.historical_data) > 30240:
+                self.historical_data = self.historical_data[-30240:]
             
             logger.info(f"Data collected successfully at {comprehensive_data['time']}")
             return comprehensive_data

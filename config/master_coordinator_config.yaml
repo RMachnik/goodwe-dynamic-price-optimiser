@@ -517,6 +517,29 @@ timing_awareness:
         weather_stable_threshold: 0.8    # Weather stability confidence threshold
         house_usage_low_threshold_w: 1000 # House usage below this is considered low
         pv_charging_time_limit_hours: 2.0 # Maximum time to wait for PV charging
+    
+    # Interim Cost Analysis (accounts for grid consumption costs during wait periods)
+    interim_cost_analysis:
+      enabled: true                        # Enable interim cost calculation
+      net_savings_threshold_pln: 0.10      # Minimum net savings to wait (PLN)
+      evaluation_window_hours: 12          # Hours ahead to evaluate windows
+      time_of_day_adjustment: true         # Apply time-of-day consumption multipliers
+      evening_peak_multiplier: 1.5         # Evening consumption multiplier (18-22h)
+      night_discount_multiplier: 0.8       # Night consumption multiplier (22-6h)
+      fallback_consumption_kw: 1.25        # Fallback consumption if insufficient data
+      min_historical_hours: 48             # Minimum hours of data required
+      lookback_days: 7                     # Days of historical data to analyze
+    
+    # Partial Charging (bridge expensive periods until next cheap window)
+    partial_charging:
+      enabled: true                        # Enable partial charging logic
+      safety_margin_percent: 10            # Safety margin for partial charge calculation
+      max_partial_sessions_per_day: 4      # Maximum partial charging sessions per day
+      min_partial_charge_kwh: 2.0          # Minimum kWh for partial charge
+      session_tracking_file: 'data/partial_charging_sessions.json'  # Session tracking file
+      daily_reset_hour: 6                  # Hour to reset daily session counter (24h format)
+      timezone: 'Europe/Warsaw'            # Timezone for session reset (handles DST)
+  
   pv_charging_efficiency: 0.95      # PV charging efficiency (95%)
   grid_charging_efficiency: 0.90    # Grid charging efficiency (90%)
   house_consumption_buffer_kw: 0.5   # House consumption buffer (500W)
