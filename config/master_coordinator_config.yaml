@@ -440,7 +440,7 @@ timing_awareness:
   charging_rate_kw: 3.0       # Battery charging rate in kW
   target_battery_soc: 60.0    # Target battery SOC percentage
   # Note: battery_capacity_kwh is read from battery_management.capacity_kwh
-  critical_battery_threshold: 12.0  # Critical battery level (%) - price aware
+  critical_battery_threshold: 30.0  # Critical battery level (%) - price aware
   emergency_battery_threshold: 5.0 # Emergency battery level (%) - always charge
   low_battery_threshold: 40.0       # Low battery level (%)
   min_savings_threshold_pln: 50.0   # Minimum savings threshold (PLN/MWh)
@@ -451,7 +451,7 @@ timing_awareness:
   smart_critical_charging:
     enabled: true                    # Enable smart critical charging logic
     max_critical_price_pln: 1.20    # Maximum price to charge at critical level (PLN/kWh)
-    max_wait_hours: 3               # Maximum hours to wait for better price
+    max_wait_hours: 2               # Maximum hours to wait for better price
     min_price_savings_percent: 30  # Minimum savings % to wait for better price
     emergency_override_price: true  # Always charge at emergency level regardless of price
     
