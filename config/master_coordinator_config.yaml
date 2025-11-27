@@ -454,7 +454,9 @@ timing_awareness:
       window_commitment_enabled: true      # Enable window commitment mechanism
       max_window_postponements: 3          # Max times to postpone before forcing charge
       commitment_margin_minutes: 30        # Minutes before window to start charging
-      min_charging_session_duration_minutes: 90  # Protect charging session for at least 90 min (covers ~50% charge)
+      min_charging_session_duration_minutes: 90  # Fallback protection duration (used when dynamic disabled)
+      dynamic_protection_duration: true    # Calculate protection based on SOC & charging time
+      protection_duration_buffer_percent: 10  # Add 10% buffer to calculated charging time
       soc_urgency_thresholds:              # SOC-based urgency limits
         critical: 15                       # Below 15%: no postponements, charge immediately
         urgent: 20                         # Below 20%: max 1 postponement

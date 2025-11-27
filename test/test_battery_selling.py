@@ -152,7 +152,7 @@ class TestBatterySellingEngine:
     @pytest.mark.asyncio
     async def test_selling_opportunity_analysis(self, engine):
         """Test selling opportunity analysis"""
-        # Good selling opportunity
+        # Good selling opportunity - but smart timing may recommend waiting
         current_data = {
             'battery': {'soc_percent': 90, 'temperature': 25},  # Higher SOC for better confidence
             'pv': {'power_w': 500},  # Lower PV for higher deficit
@@ -161,18 +161,26 @@ class TestBatterySellingEngine:
         }
         price_data = {'current_price_pln': 0.80}  # Higher price for better confidence
         
-        # Mock day time to avoid night time check
+        # Mock day time and disable smart timing to get immediate sell decision
         with patch('battery_selling_engine.datetime') as mock_datetime:
             mock_datetime.now.return_value.hour = 14  # 2 PM
+            # Temporarily disable smart timing for this test
+            original_timing_engine = engine.timing_engine
+            engine.timing_engine = None
+            
             opportunity = await engine.analyze_selling_opportunity(current_data, price_data)
             
             assert opportunity.decision == SellingDecision.START_SELLING
             assert opportunity.safety_checks_passed
             assert opportunity.expected_revenue_pln > 0
             assert opportunity.selling_power_w > 0
+            
+            # Restore timing setting
+            engine.timing_engine = original_timing_engine
         
         # Poor selling opportunity (low SOC)
         current_data['battery']['soc_percent'] = 70
+        engine.timing_engine = None  # Disable timing for clear SOC test
         with patch('battery_selling_engine.datetime') as mock_datetime:
             mock_datetime.now.return_value.hour = 14  # 2 PM
             opportunity = await engine.analyze_selling_opportunity(current_data, price_data)
@@ -180,16 +188,19 @@ class TestBatterySellingEngine:
             assert opportunity.decision == SellingDecision.WAIT
             # Phase 2: Updated to match new dynamic threshold messaging
             assert "below" in opportunity.reasoning and "threshold" in opportunity.reasoning
+        engine.timing_engine = original_timing_engine  # Restore
         
         # Poor selling opportunity (low price)
         current_data['battery']['soc_percent'] = 85
         price_data['current_price_pln'] = 0.30
+        engine.timing_engine = None  # Disable timing for clear price test
         with patch('battery_selling_engine.datetime') as mock_datetime:
             mock_datetime.now.return_value.hour = 14  # 2 PM
             opportunity = await engine.analyze_selling_opportunity(current_data, price_data)
             
             assert opportunity.decision == SellingDecision.WAIT
             assert ("below minimum" in opportunity.reasoning or "below fixed minimum" in opportunity.reasoning)
+        engine.timing_engine = original_timing_engine  # Restore
     
     def test_daily_cycle_reset(self, engine):
         """Test daily cycle counter reset"""

@@ -64,6 +64,7 @@ class AutomatedPriceCharger:
         self.window_postponement_count = 0  # Track how many times we've postponed
         self.active_charging_session = False  # Track if we started a charging session
         self.charging_session_start_time = None  # When current session started
+        self.charging_session_start_soc = None  # SOC when session started (for dynamic duration)
         
         # Smart charging thresholds
         self.critical_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('critical', 12)  # % - Price-aware charging
@@ -122,6 +123,8 @@ class AutomatedPriceCharger:
         self.max_window_postponements = interim_cost_config.get('max_window_postponements', 3)
         self.commitment_margin_minutes = interim_cost_config.get('commitment_margin_minutes', 30)
         self.min_charging_session_duration = interim_cost_config.get('min_charging_session_duration_minutes', 90)
+        self.dynamic_protection_duration = interim_cost_config.get('dynamic_protection_duration', True)
+        self.protection_duration_buffer_percent = interim_cost_config.get('protection_duration_buffer_percent', 10)
         self.soc_urgency_thresholds = interim_cost_config.get('soc_urgency_thresholds', {
             'critical': 15,  # Below 15%: commit immediately, no more postponements
             'urgent': 20,    # Below 20%: max 1 postponement allowed
@@ -494,7 +497,7 @@ class AutomatedPriceCharger:
                 # If we're within commitment margin of the window, charge now
                 if 0 <= time_to_window <= self.commitment_margin_minutes:
                     logger.info(f"🎯 Committed window reached at {self.committed_window_time.strftime('%H:%M')} (price: {self.committed_window_price:.3f} PLN/kWh) - charging now")
-                    self._start_charging_session()
+                    self._start_charging_session(battery_soc)
                     self._clear_window_commitment()
                     return {
                         'should_charge': True,
@@ -519,7 +522,7 @@ class AutomatedPriceCharger:
                         f"⛔ Max postponements reached ({self.window_postponement_count}/{max_postponements_allowed}) "
                         f"at SOC {battery_soc}% - forcing charge now"
                     )
-                    self._start_charging_session()
+                    self._start_charging_session(battery_soc)
                     self._clear_window_commitment()
                     return {
                         'should_charge': True,
@@ -554,6 +557,20 @@ class AutomatedPriceCharger:
                         logger.debug(f"Window {window_time.strftime('%H:%M')}: {window_price_kwh:.3f} PLN/kWh > threshold {critical_threshold:.3f} PLN/kWh - BLOCKED")
                         continue
                     
+                    # NEW: Check if window is long enough to complete charging
+                    required_charging_hours = self._calculate_required_charging_duration(battery_soc) / 60.0
+                    
+                    # Calculate how long prices stay good (below critical threshold)
+                    window_duration_hours = self._calculate_window_duration(window_time, price_data, critical_threshold)
+                    
+                    # Skip if window too short to complete charge
+                    if window_duration_hours < required_charging_hours:
+                        logger.debug(
+                            f"Window {window_time.strftime('%H:%M')}: duration {window_duration_hours:.1f}h < "
+                            f"required {required_charging_hours:.1f}h - TOO SHORT"
+                        )
+                        continue
+                    
                     # Calculate charging savings (vs current price)
                     charge_kwh = 10.0  # Assume 10 kWh charge for calculation
                     charging_savings = (current_price - window_price_kwh) * charge_kwh
@@ -570,12 +587,15 @@ class AutomatedPriceCharger:
                         'charging_savings': charging_savings,
                         'interim_cost': interim_cost,
                         'net_benefit': net_benefit,
-                        'hours_to_wait': (window_time - current_time).total_seconds() / 3600
+                        'hours_to_wait': (window_time - current_time).total_seconds() / 3600,
+                        'window_duration_hours': window_duration_hours,
+                        'required_charging_hours': required_charging_hours
                     })
                     
                     logger.info(
                         f"Window {window_time.strftime('%H:%M')}: "
                         f"price={window_price_kwh:.3f} PLN/kWh, "
+                        f"duration={window_duration_hours:.1f}h (need {required_charging_hours:.1f}h), "
                         f"savings={charging_savings:.2f} PLN, "
                         f"interim_cost={interim_cost:.2f} PLN, "
                         f"net_benefit={net_benefit:.2f} PLN"
@@ -690,11 +710,123 @@ class AutomatedPriceCharger:
         else:
             return self.max_window_postponements  # Normal limit
     
-    def _start_charging_session(self):
+    def _calculate_required_charging_duration(self, current_soc: int, target_soc: int = None) -> float:
+        """
+        Calculate required charging duration in minutes based on SOC difference.
+        
+        Args:
+            current_soc: Current battery SOC percentage
+            target_soc: Target SOC percentage (defaults to fast_charging target_soc)
+        
+        Returns:
+            Required charging duration in minutes
+        """
+        try:
+            # Get target SOC from config if not provided
+            if target_soc is None:
+                target_soc = self.config.get('fast_charging', {}).get('target_soc', 100)
+            
+            # Get battery capacity from config
+            battery_capacity_kwh = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)
+            
+            # Get charging power (percentage of max)
+            power_percentage = self.config.get('fast_charging', {}).get('power_percentage', 90) / 100.0
+            max_charging_power_w = self.config.get('charging', {}).get('max_power', 10000)
+            charging_power_kw = (max_charging_power_w * power_percentage) / 1000.0
+            
+            # Calculate energy needed
+            soc_difference = max(0, target_soc - current_soc)
+            energy_needed_kwh = (soc_difference / 100.0) * battery_capacity_kwh
+            
+            # Calculate time needed (hours) with charging efficiency
+            charging_efficiency = 0.90  # 90% charging efficiency
+            charging_time_hours = energy_needed_kwh / (charging_power_kw * charging_efficiency)
+            
+            # Convert to minutes and add buffer
+            charging_time_minutes = charging_time_hours * 60
+            buffer_multiplier = 1.0 + (self.protection_duration_buffer_percent / 100.0)
+            buffered_time_minutes = charging_time_minutes * buffer_multiplier
+            
+            logger.debug(
+                f"Charging duration calculation: {current_soc}% → {target_soc}% = "
+                f"{energy_needed_kwh:.1f} kWh / {charging_power_kw:.1f} kW = "
+                f"{charging_time_minutes:.1f} min (buffered: {buffered_time_minutes:.1f} min)"
+            )
+            
+            return buffered_time_minutes
+            
+        except Exception as e:
+            logger.error(f"Error calculating charging duration: {e}")
+            # Return default fallback
+            return self.min_charging_session_duration
+    
+    def _calculate_window_duration(self, window_start_time: datetime, price_data: Dict, max_price_threshold: float) -> float:
+        """
+        Calculate how long prices stay below threshold starting from window_start_time.
+        
+        Args:
+            window_start_time: Start of the price window
+            price_data: Price data dictionary
+            max_price_threshold: Maximum acceptable price in PLN/kWh
+        
+        Returns:
+            Duration in hours that prices stay below threshold
+        """
+        try:
+            if not price_data or 'value' not in price_data:
+                return 0.0
+            
+            duration_hours = 0.0
+            current_check_time = window_start_time
+            
+            # Check consecutive hours while price stays below threshold
+            for item in sorted(price_data['value'], key=lambda x: x['dtime']):
+                try:
+                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                    
+                    # Skip until we reach window start
+                    if item_time < window_start_time:
+                        continue
+                    
+                    # Check if this hour is consecutive
+                    if item_time > current_check_time + timedelta(hours=1.5):  # Allow small gap
+                        break
+                    
+                    # Check if price is still below threshold
+                    price_kwh = float(item['csdac_pln']) / 1000
+                    if price_kwh > max_price_threshold:
+                        break
+                    
+                    # This hour qualifies
+                    duration_hours += 1.0
+                    current_check_time = item_time
+                    
+                except Exception:
+                    continue
+            
+            return duration_hours
+            
+        except Exception as e:
+            logger.error(f"Error calculating window duration: {e}")
+            return 0.0
+    
+    def _start_charging_session(self, current_soc: int = None):
         """Mark the start of a protected charging session"""
         self.active_charging_session = True
         self.charging_session_start_time = datetime.now()
-        logger.info(f"🛡️ Protected charging session started at {self.charging_session_start_time.strftime('%H:%M')}")
+        self.charging_session_start_soc = current_soc
+        
+        if self.dynamic_protection_duration and current_soc is not None:
+            required_duration = self._calculate_required_charging_duration(current_soc)
+            logger.info(
+                f"🛡️ Protected charging session started at {self.charging_session_start_time.strftime('%H:%M')} "
+                f"(SOC: {current_soc}%, dynamic protection: {required_duration:.0f} min)"
+            )
+        else:
+            logger.info(
+                f"🛡️ Protected charging session started at {self.charging_session_start_time.strftime('%H:%M')} "
+                f"(fixed protection: {self.min_charging_session_duration} min)"
+            )
     
     def end_charging_session(self):
         """End the protected charging session"""
@@ -703,21 +835,31 @@ class AutomatedPriceCharger:
             logger.info(f"✅ Charging session ended after {duration:.1f} minutes")
         self.active_charging_session = False
         self.charging_session_start_time = None
+        self.charging_session_start_soc = None
     
     def is_charging_session_protected(self) -> bool:
         """
         Check if current charging session should be protected from interruption.
-        Returns True if we're in an active session that hasn't reached minimum duration.
+        Returns True if we're in an active session that hasn't reached required duration.
+        Uses dynamic duration based on SOC if enabled, otherwise uses fixed duration.
         """
         if not self.active_charging_session or not self.charging_session_start_time:
             return False
         
+        # Calculate protection duration
+        if self.dynamic_protection_duration and hasattr(self, 'charging_session_start_soc') and self.charging_session_start_soc is not None:
+            # Dynamic: calculate based on SOC at session start
+            protection_duration = self._calculate_required_charging_duration(self.charging_session_start_soc)
+        else:
+            # Fixed: use configured minimum
+            protection_duration = self.min_charging_session_duration
+        
         elapsed_minutes = (datetime.now() - self.charging_session_start_time).total_seconds() / 60
-        is_protected = elapsed_minutes < self.min_charging_session_duration
+        is_protected = elapsed_minutes < protection_duration
         
         if is_protected:
-            remaining = self.min_charging_session_duration - elapsed_minutes
-            logger.debug(f"🛡️ Charging session protected: {remaining:.1f} minutes remaining")
+            remaining = protection_duration - elapsed_minutes
+            logger.debug(f"🛡️ Charging session protected: {remaining:.1f} min remaining (of {protection_duration:.0f} min total)")
         
         return is_protected
     

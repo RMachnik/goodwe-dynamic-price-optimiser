@@ -5,7 +5,7 @@ Tests the complete flow from data collection to decision execution
 """
 
 import unittest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock, AsyncMock, Mock
 from datetime import datetime, timedelta
 import sys
 import os
@@ -379,6 +379,8 @@ class TestMasterCoordinatorAsync(unittest.IsolatedAsyncioTestCase):
         coordinator.charging_controller = AsyncMock()
         coordinator.charging_controller.stop_price_based_charging = AsyncMock(return_value=True)
         coordinator.charging_controller.is_charging = True
+        # Mock is_charging_session_protected to return False (not protected)
+        coordinator.charging_controller.is_charging_session_protected = Mock(return_value=False)
         
         decision = {
             'should_charge': False,
@@ -428,6 +430,27 @@ class TestMasterCoordinatorAsync(unittest.IsolatedAsyncioTestCase):
         
         # Verify no action was taken
         coordinator.charging_controller.start_price_based_charging.assert_not_called()
+        coordinator.charging_controller.stop_price_based_charging.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_execute_decision_stop_charging_protected_session(self):
+        """Test that protected charging session is not stopped"""
+        coordinator = MasterCoordinator()
+        coordinator.charging_controller = AsyncMock()
+        coordinator.charging_controller.stop_price_based_charging = AsyncMock(return_value=True)
+        coordinator.charging_controller.is_charging = True
+        # Mock is_charging_session_protected to return True (protected)
+        coordinator.charging_controller.is_charging_session_protected = Mock(return_value=True)
+        
+        decision = {
+            'should_charge': False,
+            'reason': 'Test stop charging decision during protected session',
+            'priority': 'medium'
+        }
+        
+        await coordinator._execute_smart_decision(decision)
+        
+        # Verify charging was NOT stopped (session is protected)
         coordinator.charging_controller.stop_price_based_charging.assert_not_called()
 
 
