@@ -171,23 +171,10 @@ class TestBatterySellingEngine:
             
             opportunity = await engine.analyze_selling_opportunity(current_data, price_data)
             
-            # Smart timing may recommend waiting even when opportunity looks good
-            assert opportunity.decision in {
-                SellingDecision.START_SELLING,
-                SellingDecision.WAIT
-            }
-
-            if opportunity.decision == SellingDecision.START_SELLING:
-                assert opportunity.safety_checks_passed
-                assert opportunity.expected_revenue_pln > 0
-                assert opportunity.selling_power_w > 0
-            else:
-                # Smart timing path should clearly communicate why we wait
-                assert opportunity.should_wait_for_peak
-                assert opportunity.timing_recommendation is not None
-                assert opportunity.timing_recommendation.decision == TimingDecision.WAIT_FOR_PEAK
-                assert opportunity.timing_recommendation.expected_price > price_data['current_price_pln']
-                assert 'peak' in opportunity.reasoning.lower()
+            assert opportunity.decision == SellingDecision.START_SELLING
+            assert opportunity.safety_checks_passed
+            assert opportunity.expected_revenue_pln > 0
+            assert opportunity.selling_power_w > 0
             
             # Restore timing setting
             engine.timing_engine = original_timing_engine
