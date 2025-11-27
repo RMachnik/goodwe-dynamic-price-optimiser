@@ -979,6 +979,17 @@ class MasterCoordinator:
                 is_currently_charging = False
             
             if self.charging_controller:
+                # Check if this is a protected charging session (shouldn't be interrupted)
+                is_protected = False
+                try:
+                    is_protected = self.charging_controller.is_charging_session_protected()
+                except Exception:
+                    is_protected = False
+                
+                if is_protected:
+                    logger.info(f"🛡️ Charging session protected - not stopping despite wait decision (SOC {battery_soc}%)")
+                    return
+                
                 # Always stop if we are currently charging and decision says do not charge
                 if is_currently_charging:
                     try:

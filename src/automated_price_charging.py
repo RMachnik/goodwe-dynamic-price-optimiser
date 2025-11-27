@@ -62,6 +62,8 @@ class AutomatedPriceCharger:
         self.committed_window_price = None  # Price at committed window
         self.window_commitment_timestamp = None  # When commitment was made
         self.window_postponement_count = 0  # Track how many times we've postponed
+        self.active_charging_session = False  # Track if we started a charging session
+        self.charging_session_start_time = None  # When current session started
         
         # Smart charging thresholds
         self.critical_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('critical', 12)  # % - Price-aware charging
@@ -119,6 +121,7 @@ class AutomatedPriceCharger:
         self.window_commitment_enabled = interim_cost_config.get('window_commitment_enabled', True)
         self.max_window_postponements = interim_cost_config.get('max_window_postponements', 3)
         self.commitment_margin_minutes = interim_cost_config.get('commitment_margin_minutes', 30)
+        self.min_charging_session_duration = interim_cost_config.get('min_charging_session_duration_minutes', 90)
         self.soc_urgency_thresholds = interim_cost_config.get('soc_urgency_thresholds', {
             'critical': 15,  # Below 15%: commit immediately, no more postponements
             'urgent': 20,    # Below 20%: max 1 postponement allowed
@@ -491,12 +494,14 @@ class AutomatedPriceCharger:
                 # If we're within commitment margin of the window, charge now
                 if 0 <= time_to_window <= self.commitment_margin_minutes:
                     logger.info(f"🎯 Committed window reached at {self.committed_window_time.strftime('%H:%M')} (price: {self.committed_window_price:.3f} PLN/kWh) - charging now")
+                    self._start_charging_session()
                     self._clear_window_commitment()
                     return {
                         'should_charge': True,
                         'reason': f"Committed charging window reached ({self.committed_window_time.strftime('%H:%M')})",
                         'priority': 'high',
-                        'confidence': 0.9
+                        'confidence': 0.9,
+                        'charging_session_protected': True
                     }
                 
                 # If committed window passed, clear it
@@ -514,12 +519,14 @@ class AutomatedPriceCharger:
                         f"⛔ Max postponements reached ({self.window_postponement_count}/{max_postponements_allowed}) "
                         f"at SOC {battery_soc}% - forcing charge now"
                     )
+                    self._start_charging_session()
                     self._clear_window_commitment()
                     return {
                         'should_charge': True,
                         'reason': f"Max postponements reached at SOC {battery_soc}% - must charge",
                         'priority': 'high',
-                        'confidence': 0.85
+                        'confidence': 0.85,
+                        'charging_session_protected': True
                     }
             
             # Get adaptive critical threshold - windows above this are blocked
@@ -682,6 +689,37 @@ class AutomatedPriceCharger:
             return 2  # Allow 2 postponements
         else:
             return self.max_window_postponements  # Normal limit
+    
+    def _start_charging_session(self):
+        """Mark the start of a protected charging session"""
+        self.active_charging_session = True
+        self.charging_session_start_time = datetime.now()
+        logger.info(f"🛡️ Protected charging session started at {self.charging_session_start_time.strftime('%H:%M')}")
+    
+    def end_charging_session(self):
+        """End the protected charging session"""
+        if self.active_charging_session:
+            duration = (datetime.now() - self.charging_session_start_time).total_seconds() / 60
+            logger.info(f"✅ Charging session ended after {duration:.1f} minutes")
+        self.active_charging_session = False
+        self.charging_session_start_time = None
+    
+    def is_charging_session_protected(self) -> bool:
+        """
+        Check if current charging session should be protected from interruption.
+        Returns True if we're in an active session that hasn't reached minimum duration.
+        """
+        if not self.active_charging_session or not self.charging_session_start_time:
+            return False
+        
+        elapsed_minutes = (datetime.now() - self.charging_session_start_time).total_seconds() / 60
+        is_protected = elapsed_minutes < self.min_charging_session_duration
+        
+        if is_protected:
+            remaining = self.min_charging_session_duration - elapsed_minutes
+            logger.debug(f"🛡️ Charging session protected: {remaining:.1f} minutes remaining")
+        
+        return is_protected
     
     def _evaluate_partial_charging(self, battery_soc: int, best_window: Dict, 
                                   current_time: datetime, current_price: float) -> Optional[Dict[str, any]]:
@@ -1820,6 +1858,9 @@ class AutomatedPriceCharger:
             charging_duration = None
             if self.charging_start_time:
                 charging_duration = datetime.now() - self.charging_start_time
+            
+            # End the protected charging session
+            self.end_charging_session()
             
             logger.info("Price-based charging stopped")
             if charging_duration:
