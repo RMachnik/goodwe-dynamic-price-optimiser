@@ -449,6 +449,15 @@ timing_awareness:
       fallback_consumption_kw: 1.25        # Fallback consumption if insufficient data
       min_historical_hours: 48             # Minimum hours of data required
       lookback_days: 7                     # Days of historical data to analyze
+      
+      # Window Commitment (prevents infinite postponement by committing to chosen window)
+      window_commitment_enabled: true      # Enable window commitment mechanism
+      max_window_postponements: 3          # Max times to postpone before forcing charge
+      commitment_margin_minutes: 30        # Minutes before window to start charging
+      soc_urgency_thresholds:              # SOC-based urgency limits
+        critical: 15                       # Below 15%: no postponements, charge immediately
+        urgent: 20                         # Below 20%: max 1 postponement
+        low: 30                            # Below 30%: max 2 postponements
     
     # Partial Charging (bridge expensive periods until next cheap window)
     partial_charging:

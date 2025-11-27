@@ -57,6 +57,12 @@ class AutomatedPriceCharger:
         self.last_decision_time = None
         self.decision_history = []
         
+        # Window commitment mechanism to prevent infinite postponement
+        self.committed_window_time = None  # Time we committed to charge
+        self.committed_window_price = None  # Price at committed window
+        self.window_commitment_timestamp = None  # When commitment was made
+        self.window_postponement_count = 0  # Track how many times we've postponed
+        
         # Smart charging thresholds
         self.critical_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('critical', 12)  # % - Price-aware charging
         self.emergency_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('emergency', 5)  # % - Always charge regardless of price
@@ -108,6 +114,16 @@ class AutomatedPriceCharger:
         self.interim_fallback_consumption = interim_cost_config.get('fallback_consumption_kw', 1.25)  # kW
         self.interim_min_historical_hours = interim_cost_config.get('min_historical_hours', 48)  # hours
         self.interim_lookback_days = interim_cost_config.get('lookback_days', 7)  # days
+        
+        # Window commitment configuration (prevents infinite postponement)
+        self.window_commitment_enabled = interim_cost_config.get('window_commitment_enabled', True)
+        self.max_window_postponements = interim_cost_config.get('max_window_postponements', 3)
+        self.commitment_margin_minutes = interim_cost_config.get('commitment_margin_minutes', 30)
+        self.soc_urgency_thresholds = interim_cost_config.get('soc_urgency_thresholds', {
+            'critical': 15,  # Below 15%: commit immediately, no more postponements
+            'urgent': 20,    # Below 20%: max 1 postponement allowed
+            'low': 30        # Below 30%: max 2 postponements allowed
+        })
         
         # Partial charging configuration
         partial_charging_config = smart_critical_config.get('partial_charging', {})
@@ -461,10 +477,50 @@ class AutomatedPriceCharger:
         
         This method finds optimal charging windows within the evaluation period (default 12h)
         and calculates net benefit = charging_savings - interim_grid_cost for each window.
+        
+        Includes commitment mechanism to prevent infinite postponement.
         """
         try:
             current_time = datetime.now()
             evaluation_end = current_time + timedelta(hours=self.interim_evaluation_window_hours)
+            
+            # Check if we have a committed window that's now in range
+            if self.window_commitment_enabled and self.committed_window_time:
+                time_to_window = (self.committed_window_time - current_time).total_seconds() / 60
+                
+                # If we're within commitment margin of the window, charge now
+                if 0 <= time_to_window <= self.commitment_margin_minutes:
+                    logger.info(f"🎯 Committed window reached at {self.committed_window_time.strftime('%H:%M')} (price: {self.committed_window_price:.3f} PLN/kWh) - charging now")
+                    self._clear_window_commitment()
+                    return {
+                        'should_charge': True,
+                        'reason': f"Committed charging window reached ({self.committed_window_time.strftime('%H:%M')})",
+                        'priority': 'high',
+                        'confidence': 0.9
+                    }
+                
+                # If committed window passed, clear it
+                elif time_to_window < 0:
+                    logger.warning(f"⚠️ Committed window at {self.committed_window_time.strftime('%H:%M')} passed - clearing commitment")
+                    self._clear_window_commitment()
+            
+            # SOC-based urgency: determine max allowed postponements based on battery level
+            if self.window_commitment_enabled:
+                max_postponements_allowed = self._get_max_postponements_for_soc(battery_soc)
+                
+                # If we've hit postponement limit, force charge now
+                if self.window_postponement_count >= max_postponements_allowed:
+                    logger.warning(
+                        f"⛔ Max postponements reached ({self.window_postponement_count}/{max_postponements_allowed}) "
+                        f"at SOC {battery_soc}% - forcing charge now"
+                    )
+                    self._clear_window_commitment()
+                    return {
+                        'should_charge': True,
+                        'reason': f"Max postponements reached at SOC {battery_soc}% - must charge",
+                        'priority': 'high',
+                        'confidence': 0.85
+                    }
             
             # Get adaptive critical threshold - windows above this are blocked
             critical_threshold = self.get_critical_price_threshold()
@@ -540,6 +596,25 @@ class AutomatedPriceCharger:
                     if partial_decision:
                         return partial_decision
                 
+                # Handle window commitment to prevent infinite postponement
+                if self.window_commitment_enabled:
+                    # If we don't have a committed window yet, or the new window is significantly better
+                    if not self.committed_window_time:
+                        # First time committing to a window
+                        self._commit_to_window(best_window['time'], best_window['price_kwh'])
+                        logger.info(
+                            f"💡 Committing to window at {best_window['time'].strftime('%H:%M')} "
+                            f"({best_window['price_kwh']:.3f} PLN/kWh, net benefit: {best_window['net_benefit']:.2f} PLN)"
+                        )
+                    elif best_window['time'] != self.committed_window_time:
+                        # Window has changed - this is a postponement
+                        self.window_postponement_count += 1
+                        logger.info(
+                            f"📅 Window moved from {self.committed_window_time.strftime('%H:%M')} to {best_window['time'].strftime('%H:%M')} "
+                            f"(postponement #{self.window_postponement_count})"
+                        )
+                        self._commit_to_window(best_window['time'], best_window['price_kwh'])
+                
                 # Wait for best window (no partial charge needed/possible)
                 return {
                     'should_charge': False,
@@ -561,6 +636,11 @@ class AutomatedPriceCharger:
                     f"Best window net benefit {best_window['net_benefit']:.2f} PLN "
                     f"<= threshold {self.interim_net_savings_threshold} PLN - charging now"
                 )
+                
+                # Clear any commitment since we're charging now
+                if self.window_commitment_enabled:
+                    self._clear_window_commitment()
+                
                 return {
                     'should_charge': True,
                     'reason': (
@@ -575,6 +655,33 @@ class AutomatedPriceCharger:
         except Exception as e:
             logger.error(f"Error in multi-window evaluation: {e}")
             return None
+    
+    def _commit_to_window(self, window_time: datetime, window_price: float):
+        """Commit to charging at a specific window time"""
+        self.committed_window_time = window_time
+        self.committed_window_price = window_price
+        self.window_commitment_timestamp = datetime.now()
+    
+    def _clear_window_commitment(self):
+        """Clear window commitment and reset postponement counter"""
+        self.committed_window_time = None
+        self.committed_window_price = None
+        self.window_commitment_timestamp = None
+        self.window_postponement_count = 0
+    
+    def _get_max_postponements_for_soc(self, battery_soc: int) -> int:
+        """
+        Determine maximum allowed postponements based on battery SOC level.
+        Lower SOC = fewer postponements allowed (more urgency).
+        """
+        if battery_soc <= self.soc_urgency_thresholds['critical']:
+            return 0  # No postponements - charge immediately
+        elif battery_soc <= self.soc_urgency_thresholds['urgent']:
+            return 1  # Allow only 1 postponement
+        elif battery_soc <= self.soc_urgency_thresholds['low']:
+            return 2  # Allow 2 postponements
+        else:
+            return self.max_window_postponements  # Normal limit
     
     def _evaluate_partial_charging(self, battery_soc: int, best_window: Dict, 
                                   current_time: datetime, current_price: float) -> Optional[Dict[str, any]]:
