@@ -471,6 +471,13 @@ timing_awareness:
       session_tracking_file: 'data/partial_charging_sessions.json'  # Session tracking file
       daily_reset_hour: 6                  # Hour to reset daily session counter (24h format)
       timezone: 'Europe/Warsaw'            # Timezone for session reset (handles DST)
+      
+      # Preventive partial charging: charge now to avoid expensive periods ahead
+      preventive_enabled: true                        # Enable preventive partial charging
+      preventive_scan_ahead_hours: 12                 # Scan next N hours for high-price periods
+      preventive_min_savings_percent: 30              # Minimum savings % to trigger (30%)
+      preventive_critical_soc_forecast: 15            # Critical SOC threshold in forecast (15%)
+      preventive_min_high_price_duration_hours: 3     # Minimum duration of high-price period (3h)
   
   pv_charging_efficiency: 0.95      # PV charging efficiency (95%)
   grid_charging_efficiency: 0.90    # Grid charging efficiency (90%)
