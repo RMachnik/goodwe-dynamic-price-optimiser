@@ -468,7 +468,7 @@ timing_awareness:
       safety_margin_percent: 10            # Safety margin for partial charge calculation
       max_partial_sessions_per_day: 4      # Maximum partial charging sessions per day
       min_partial_charge_kwh: 2.0          # Minimum kWh for partial charge
-      session_tracking_file: 'out/partial_charging_sessions.json'  # Session tracking file (runtime state)
+      session_tracking_file: '/opt/goodwe-dynamic-price-optimiser/out/partial_charging_sessions.json'  # Session tracking (runtime state)
       daily_reset_hour: 6                  # Hour to reset daily session counter (24h format)
       timezone: 'Europe/Warsaw'            # Timezone for session reset (handles DST)
       
