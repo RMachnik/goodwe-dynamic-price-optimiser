@@ -2254,12 +2254,19 @@ class AutomatedPriceCharger:
                         'target_soc': decision.target_soc,
                         'price_category': decision.price_category.value
                     }
+                else:
+                    # Enhanced aggressive returned "don't charge" - respect that decision
+                    # This prevents legacy fallback from overriding smart decisions about waiting for better windows
+                    # The enhanced logic already considered interim costs, future windows, and percentile analysis
+                    logger.debug(f"Enhanced aggressive charging decided not to charge: {decision.reason}")
+                    # Continue to evaluate other conditions (critical, super_low_price, etc.) but skip legacy fallback
+                    pass
 
             except Exception as e:
                 logger.error(f"Error in enhanced aggressive charging: {e}")
 
-        # FALLBACK: Legacy aggressive charging logic
-        if self._check_aggressive_cheapest_price_conditions(battery_soc, current_price, cheapest_price, cheapest_hour):
+        # FALLBACK: Legacy aggressive charging logic (only if enhanced aggressive is not enabled)
+        elif self._check_aggressive_cheapest_price_conditions(battery_soc, current_price, cheapest_price, cheapest_hour):
             return {
                 'should_charge': True,
                 'reason': f'Aggressive charging during cheapest price period (current: {current_price:.3f}, cheapest: {cheapest_price:.3f} PLN/kWh)',
