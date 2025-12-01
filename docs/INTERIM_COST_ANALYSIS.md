@@ -112,7 +112,7 @@ timing_awareness:
       safety_margin_percent: 10               # Extra capacity buffer (10% = 1.1× required)
       max_partial_sessions_per_day: 4         # Daily limit for partial charging sessions
       min_partial_charge_kwh: 2.0             # Minimum kWh for partial charge
-      session_tracking_file: 'data/partial_charging_sessions.json'
+      session_tracking_file: 'out/partial_charging_sessions.json'  # Runtime state file
       daily_reset_hour: 6                     # Hour to reset daily session counter (6 AM)
       timezone: 'Europe/Warsaw'               # Timezone for session tracking (DST-aware)
 ```
@@ -336,7 +336,7 @@ if len(self.historical_data) > 30240:
 
 1. **Update config file** with interim_cost_analysis and partial_charging sections (see Configuration section above)
 2. **Restart master coordinator** to load new configuration
-3. **Monitor session tracking file** creation at `data/partial_charging_sessions.json`
+3. **Monitor session tracking file** creation at `out/partial_charging_sessions.json`
 4. **Verify 7-day data collection** by checking `historical_data` buffer growth in logs
 
 ### Feature Flags
@@ -424,7 +424,7 @@ ERROR: Error in multi-window evaluation: [exception details]
 **Solutions:**
 1. Check directory permissions: `chmod 755 data/`
 2. Verify timezone: Should show "Europe/Warsaw" in logs, not "UTC"
-3. Check session file: `cat data/partial_charging_sessions.json`
+3. Check session file: `cat out/partial_charging_sessions.json`
 
 ### Issue: Interim Cost Always Uses Fallback
 

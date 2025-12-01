@@ -149,7 +149,7 @@ class AutomatedPriceCharger:
         self.partial_safety_margin = partial_charging_config.get('safety_margin_percent', 10) / 100.0  # Convert to fraction
         self.partial_max_sessions_per_day = partial_charging_config.get('max_partial_sessions_per_day', 4)
         self.partial_min_charge_kwh = partial_charging_config.get('min_partial_charge_kwh', 2.0)  # kWh
-        self.partial_session_tracking_file = partial_charging_config.get('session_tracking_file', 'data/partial_charging_sessions.json')
+        self.partial_session_tracking_file = partial_charging_config.get('session_tracking_file', 'out/partial_charging_sessions.json')
         self.partial_daily_reset_hour = partial_charging_config.get('daily_reset_hour', 6)  # 24h format
         self.partial_timezone = partial_charging_config.get('timezone', 'Europe/Warsaw')
         

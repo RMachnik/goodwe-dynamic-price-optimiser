@@ -47,7 +47,7 @@ def mock_config():
                     'safety_margin_percent': 10,
                     'max_partial_sessions_per_day': 4,
                     'min_partial_charge_kwh': 2.0,
-                    'session_tracking_file': 'data/partial_charging_sessions.json',
+                    'session_tracking_file': 'out/partial_charging_sessions.json',
                     'daily_reset_hour': 6,
                     'timezone': 'Europe/Warsaw'
                 }
