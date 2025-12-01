@@ -2180,6 +2180,34 @@ class AutomatedPriceCharger:
                               price_data: Optional[Dict] = None) -> Dict[str, any]:
         """Make the final charging decision based on all factors"""
         
+        # ACTIVE CHARGING: If already charging, check if we should continue or stop
+        if self.is_charging:
+            # Check if we should stop charging (target SOC reached, price too high, etc.)
+            if battery_soc >= 90:  # Near full
+                return {
+                    'should_charge': False,
+                    'reason': f'Battery nearly full ({battery_soc}%) - stop charging',
+                    'priority': 'high',
+                    'confidence': 0.95
+                }
+            
+            # Check if protected charging session is active
+            if self.is_charging_session_protected():
+                return {
+                    'should_charge': True,
+                    'reason': f'Protected charging session active - continue charging (SOC: {battery_soc}%)',
+                    'priority': 'high',
+                    'confidence': 0.9
+                }
+            
+            # Continue charging if still within reasonable conditions
+            return {
+                'should_charge': True,
+                'reason': f'Charging in progress - continuing (SOC: {battery_soc}%)',
+                'priority': 'medium',
+                'confidence': 0.8
+            }
+        
         # EMERGENCY: Battery below emergency threshold - always charge regardless of price
         if battery_soc < self.emergency_battery_threshold:
             return {
