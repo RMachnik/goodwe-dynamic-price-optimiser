@@ -2896,6 +2896,10 @@ class LogWebServer:
             
             decisions = []
             
+            # Define energy_data_dir at the start for all code paths
+            project_root = Path(__file__).parent.parent
+            energy_data_dir = project_root / "out" / "energy_data"
+            
             # Try to use storage layer first using helper
             db_decisions = self._run_async_storage(
                 self.storage.get_decisions(time_threshold, now) if self.storage else None
@@ -2906,9 +2910,6 @@ class LogWebServer:
             
             # Fallback to file-based reading if storage failed or returned no data
             if not decisions:
-                # Get all decision files (charging and battery selling)
-                project_root = Path(__file__).parent.parent
-                energy_data_dir = project_root / "out" / "energy_data"
                 
                 # Load charging decisions
                 # Optimization: Sort by filename (contains timestamp) instead of mtime to avoid stat() calls on thousands of files
