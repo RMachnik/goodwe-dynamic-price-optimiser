@@ -14,6 +14,10 @@ on:
         required: false
         default: 'false'
 
+# Set minimal permissions for this disabled workflow
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
