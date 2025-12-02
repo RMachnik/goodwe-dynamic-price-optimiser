@@ -114,6 +114,7 @@ class MasterCoordinator:
         self.historical_data = []
         self.decision_history = []
         self.performance_metrics = {}
+        self.last_save_time = datetime.now()  # Track last data save time
         
         # Configuration
         self.config = self._load_config()
@@ -380,6 +381,15 @@ class MasterCoordinator:
             # Collect data from all sources
             await self.data_collector.collect_comprehensive_data()
             self.current_data.update(self.data_collector.get_current_data())
+            
+            # Save data to storage periodically (every 5 minutes)
+            if (datetime.now() - self.last_save_time).total_seconds() >= 300:
+                try:
+                    await self.data_collector.save_data_to_file()
+                    self.last_save_time = datetime.now()
+                    logger.debug("Data saved to storage")
+                except Exception as e:
+                    logger.error(f"Failed to save data to storage: {e}")
             
             # Update PV vs consumption analyzer with current data
             if self.pv_consumption_analyzer:

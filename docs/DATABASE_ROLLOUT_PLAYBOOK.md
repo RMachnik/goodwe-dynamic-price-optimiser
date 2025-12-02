@@ -568,3 +568,417 @@ grep -i "error saving\|failed to save" logs/master_coordinator.log
 |------|--------|
 | 2025-12-02 | Initial playbook created |
 | 2025-12-02 | Added rollout script `scripts/database_rollout.sh` |
+
+---
+
+## Advanced Topics
+
+### Migration from File-Only to Database
+
+If you're migrating from a long-running file-only installation:
+
+#### Option 1: Fresh Start (Recommended)
+Keep historical JSON files as archive, start fresh database:
+
+```bash
+# Archive old JSON data
+mkdir -p /opt/goodwe-dynamic-price-optimiser/archive
+mv /opt/goodwe-dynamic-price-optimiser/out/energy_data/*.json \
+   /opt/goodwe-dynamic-price-optimiser/archive/
+
+# Enable composite mode - new data flows to both systems
+./scripts/database_rollout.sh deploy
+```
+
+#### Option 2: Import Historical Data
+
+If you need historical data in the database:
+
+```bash
+# Create import script
+python3 << 'EOF'
+import asyncio
+import json
+from pathlib import Path
+from database.sqlite_storage import SQLiteStorage
+from datetime import datetime
+
+async def import_json_files():
+    storage = SQLiteStorage({
+        'sqlite': {
+            'path': '/opt/goodwe-dynamic-price-optimiser/data/goodwe_energy.db'
+        }
+    })
+    await storage.connect()
+    
+    json_dir = Path('/opt/goodwe-dynamic-price-optimiser/out/energy_data')
+    imported = 0
+    
+    for json_file in sorted(json_dir.glob('*.json')):
+        print(f'Importing {json_file.name}...')
+        with open(json_file) as f:
+            data = json.load(f)
+            # Import based on file type
+            if 'energy_data' in data:
+                for record in data['energy_data']:
+                    await storage.save_energy_data(record)
+                    imported += 1
+            elif 'system_state' in data:
+                await storage.save_system_state(data['system_state'])
+                imported += 1
+    
+    print(f'Imported {imported} records')
+    await storage.disconnect()
+
+asyncio.run(import_json_files())
+EOF
+```
+
+### Performance Tuning
+
+#### Database Optimization
+
+```bash
+# Run after large imports
+sqlite3 data/goodwe_energy.db 'VACUUM;'
+sqlite3 data/goodwe_energy.db 'ANALYZE;'
+
+# Check database statistics
+sqlite3 data/goodwe_energy.db << 'EOF'
+SELECT 
+    name as table_name,
+    (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=m.name) as row_count
+FROM sqlite_master m
+WHERE type='table';
+.quit
+EOF
+```
+
+#### Query Performance
+
+Monitor slow queries in logs:
+
+```bash
+# Find slow database operations (>1 second)
+grep -E "took [0-9]+\.[0-9]+ seconds" logs/master_coordinator.log | \
+  awk '$5 > 1.0'
+```
+
+If you see slow queries:
+
+1. Check table indexes: `sqlite3 data/goodwe_energy.db '.indexes'`
+2. Review retention settings (large tables impact performance)
+3. Consider running `VACUUM` to reclaim space
+
+### Backup Strategy
+
+#### Automated Backups
+
+Add to crontab:
+
+```bash
+# Daily backup at 3 AM
+0 3 * * * /opt/goodwe-dynamic-price-optimiser/scripts/database_rollout.sh backup
+
+# Weekly backup to external storage
+0 4 * * 0 rsync -av /opt/goodwe-dynamic-price-optimiser/backups/ \
+              user@backup-server:/backups/goodwe/
+```
+
+#### Restore from Backup
+
+```bash
+# Stop service
+sudo systemctl stop goodwe-coordinator
+
+# Restore database
+cp backups/goodwe_energy.db.backup.YYYYMMDD_HHMMSS \
+   data/goodwe_energy.db
+
+# Verify integrity
+sqlite3 data/goodwe_energy.db 'PRAGMA integrity_check;'
+
+# Restart service
+sudo systemctl start goodwe-coordinator
+```
+
+### Data Retention and Cleanup
+
+#### Manual Cleanup
+
+Remove old data to save disk space:
+
+```bash
+python3 << 'EOF'
+import asyncio
+from database.sqlite_storage import SQLiteStorage
+from datetime import datetime, timedelta
+
+async def cleanup_old_data():
+    storage = SQLiteStorage({
+        'sqlite': {
+            'path': '/opt/goodwe-dynamic-price-optimiser/data/goodwe_energy.db'
+        }
+    })
+    await storage.connect()
+    
+    # Delete energy_data older than 90 days
+    cutoff = datetime.now() - timedelta(days=90)
+    
+    # Execute cleanup
+    async with storage._get_connection() as conn:
+        result = await conn.execute(
+            "DELETE FROM energy_data WHERE timestamp < ?",
+            (cutoff.isoformat(),)
+        )
+        await conn.commit()
+        print(f'Deleted {result.rowcount} old energy_data records')
+    
+    await storage.disconnect()
+
+asyncio.run(cleanup_old_data())
+EOF
+```
+
+#### Automated Retention
+
+Configure in `config/master_coordinator_config.yaml`:
+
+```yaml
+data_storage:
+  file_storage:
+    retention_days: 7  # Keep JSON files for 7 days
+  database_storage:
+    retention_days: 365  # Keep DB data for 1 year
+```
+
+---
+
+## Monitoring and Observability
+
+### Key Metrics to Track
+
+| Metric | Command | Healthy Range |
+|--------|---------|---------------|
+| Database size | `du -sh data/goodwe_energy.db` | < 500MB per month |
+| Write latency | `grep "save.*took" logs/master_coordinator.log` | < 100ms |
+| Connection pool | `grep "connection pool" logs/master_coordinator.log` | No warnings |
+| Storage failures | `grep -i "storage.*error" logs/master_coordinator.log` | Zero |
+
+### Grafana Dashboard (Future)
+
+If you set up Grafana, monitor:
+
+- Storage write latency (p50, p95, p99)
+- Database size growth rate
+- Failed write attempts
+- Composite mode fallback rate
+
+### Health Check Script
+
+```bash
+#!/bin/bash
+# save as: scripts/storage_health_check.sh
+
+DB_PATH="/opt/goodwe-dynamic-price-optimiser/data/goodwe_energy.db"
+LOG_PATH="/opt/goodwe-dynamic-price-optimiser/logs/master_coordinator.log"
+
+echo "=== Storage Health Check ==="
+echo
+
+# Check database exists and is accessible
+if [ -f "$DB_PATH" ]; then
+    echo "✅ Database file exists"
+    echo "   Size: $(du -h $DB_PATH | cut -f1)"
+else
+    echo "❌ Database file not found!"
+    exit 1
+fi
+
+# Check integrity
+if sqlite3 "$DB_PATH" 'PRAGMA integrity_check;' | grep -q 'ok'; then
+    echo "✅ Database integrity OK"
+else
+    echo "❌ Database integrity check FAILED!"
+    exit 1
+fi
+
+# Check recent writes
+RECENT_ERRORS=$(grep -i "storage.*error" "$LOG_PATH" | tail -n 10 | wc -l)
+if [ "$RECENT_ERRORS" -eq 0 ]; then
+    echo "✅ No recent storage errors"
+else
+    echo "⚠️  Found $RECENT_ERRORS recent storage errors"
+fi
+
+# Check table row counts
+echo
+echo "Table row counts:"
+sqlite3 "$DB_PATH" << 'EOF'
+SELECT 
+    'energy_data: ' || COUNT(*) FROM energy_data
+UNION ALL
+SELECT 
+    'system_state: ' || COUNT(*) FROM system_state
+UNION ALL
+SELECT 
+    'charging_sessions: ' || COUNT(*) FROM charging_sessions;
+EOF
+
+echo
+echo "=== Health Check Complete ==="
+```
+
+Make executable: `chmod +x scripts/storage_health_check.sh`
+
+---
+
+## Security Considerations
+
+### File Permissions
+
+Ensure only the service user can access database:
+
+```bash
+# Set restrictive permissions
+chmod 600 /opt/goodwe-dynamic-price-optimiser/data/goodwe_energy.db
+chown goodwe:goodwe /opt/goodwe-dynamic-price-optimiser/data/goodwe_energy.db
+```
+
+### Backup Security
+
+Backups contain sensitive data:
+
+```bash
+# Encrypt backups
+gpg --symmetric --cipher-algo AES256 \
+    backups/goodwe_energy.db.backup.YYYYMMDD_HHMMSS
+
+# Store encrypted, delete plaintext
+rm backups/goodwe_energy.db.backup.YYYYMMDD_HHMMSS
+```
+
+### Network Access
+
+SQLite runs in-process (no network exposure), but:
+
+- Restrict SSH access to deployment machine
+- Use firewall rules if running multiple services
+- Consider read-only mounts for backup locations
+
+---
+
+## Future Migration: Database-Only Mode
+
+Once composite mode is stable (recommended: 30+ days), switch to database-only:
+
+### Pre-Migration Checklist
+
+- [ ] Composite mode running successfully for 30+ days
+- [ ] No storage errors in logs
+- [ ] All queries working correctly
+- [ ] Backups tested and validated
+- [ ] Historical JSON data archived
+
+### Migration Steps
+
+```bash
+# 1. Final backup
+./scripts/database_rollout.sh backup
+
+# 2. Edit config to disable file storage
+sed -i 's/file_storage:$/file_storage:\n    enabled: false/' \
+    config/master_coordinator_config.yaml
+
+# 3. Restart service
+sudo systemctl restart goodwe-coordinator
+
+# 4. Verify database-only mode
+grep "Using storage: database" logs/master_coordinator.log
+
+# 5. Archive JSON files (don't delete yet!)
+mkdir -p archive/json_files
+mv out/energy_data/*.json archive/json_files/
+```
+
+### Validation Period
+
+Keep JSON archive for 30 days after switching to database-only mode. Monitor for:
+
+- Storage errors
+- Missing data
+- Performance issues
+
+If stable, remove JSON archive after 30 days.
+
+---
+
+## FAQ
+
+### Q: What happens if the database file gets corrupted?
+
+**A:** Composite mode protects you:
+1. JSON files continue receiving writes
+2. Database errors are logged but don't stop the service
+3. Restore from latest backup
+4. Optionally reimport from JSON files
+
+### Q: Can I run this on a Raspberry Pi?
+
+**A:** Yes! SQLite is very lightweight:
+- Tested on Raspberry Pi 4 (4GB RAM)
+- Database size typically < 100MB/month
+- CPU usage negligible for normal operations
+
+### Q: How do I query the database directly?
+
+**A:**
+
+```bash
+# Interactive mode
+sqlite3 /opt/goodwe-dynamic-price-optimiser/data/goodwe_energy.db
+
+# Quick queries
+sqlite3 data/goodwe_energy.db "SELECT * FROM energy_data ORDER BY timestamp DESC LIMIT 5;"
+
+# Export to CSV
+sqlite3 -header -csv data/goodwe_energy.db \
+  "SELECT * FROM energy_data WHERE date(timestamp) = date('now');" \
+  > today_energy.csv
+```
+
+### Q: What's the difference between composite and dual-write?
+
+**A:** They're the same thing! "Composite mode" writes to both storage backends simultaneously while reading primarily from the database. This ensures zero data loss during transition.
+
+### Q: Can I migrate back to file-only storage?
+
+**A:** Yes, that's the rollback procedure (see "Rollback Procedure" section). Since composite mode writes to both, your JSON files are always current.
+
+### Q: How much disk space will the database use?
+
+**A:** Typical growth:
+- ~3-5MB per day (with 5-minute sampling)
+- ~100-150MB per month
+- With 1-year retention: ~1.2-1.8GB
+
+Use `VACUUM` periodically to reclaim space after deletions.
+
+---
+
+## Related Documentation
+
+- [Database Infrastructure](./DATABASE_INFRASTRUCTURE.md) - Architecture and design
+- [Docker Deployment](./DOCKER_DEPLOYMENT.md) - Container setup
+- [Master Coordinator](../config/master_coordinator_config.yaml) - Full configuration
+- [Storage Factory](../src/database/storage_factory.py) - Storage mode logic
+
+---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2025-12-02 | Initial playbook created |
+| 2025-12-02 | Added rollout script `scripts/database_rollout.sh` |
+| 2025-12-02 | Added Advanced Topics, Monitoring, Security, and FAQ sections |

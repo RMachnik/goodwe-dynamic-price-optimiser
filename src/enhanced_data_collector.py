@@ -584,7 +584,7 @@ class EnhancedDataCollector:
                 
                 # Save data periodically
                 if (datetime.now() - last_save_time).total_seconds() >= self.data_save_interval:
-                    self.save_data_to_file()
+                    await self.save_data_to_file()
                     last_save_time = datetime.now()
                 
                 # Print status every 5 minutes
@@ -600,7 +600,7 @@ class EnhancedDataCollector:
             logger.error(f"Monitoring error: {e}")
         finally:
             # Final data save
-            self.save_data_to_file()
+            await self.save_data_to_file()
             logger.info("Enhanced data collection completed")
 
 def parse_arguments():
@@ -740,7 +740,7 @@ async def main():
                 
             elif choice == "4":
                 print("Saving data to files...")
-                collector.save_data_to_file()
+                await collector.save_data_to_file()
                 print("Data saved successfully!")
                 
             elif choice == "5":
