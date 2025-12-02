@@ -317,6 +317,7 @@ class DailySnapshotManager:
             return {
                 'year': year,
                 'month': month,
+                'month_name': date(year, month, 1).strftime('%B'),
                 'total_decisions': 0,
                 'charging_count': 0,
                 'wait_count': 0,

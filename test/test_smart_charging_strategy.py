@@ -11,6 +11,7 @@ import sys
 import os
 import yaml
 import tempfile
+import pytest
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -162,6 +163,7 @@ class TestSmartChargingStrategy(unittest.TestCase):
         self.assertEqual(decision['confidence'], 0.9)
         self.assertIn('PV overproduction', decision['reason'])
     
+    @pytest.mark.external
     def test_price_optimization_wait(self):
         """Test that system waits for better prices when significant savings available"""
         current_data = {
@@ -184,6 +186,7 @@ class TestSmartChargingStrategy(unittest.TestCase):
             self.assertGreater(decision['confidence'], 0.6)
             self.assertIn('Much cheaper price available', decision['reason'])
     
+    @pytest.mark.external
     def test_low_battery_high_consumption_charging(self):
         """Test that low battery with high consumption triggers charging when price is acceptable"""
         current_data = {
@@ -258,6 +261,7 @@ class TestSmartChargingStrategy(unittest.TestCase):
         # Should calculate ~67.7% savings
         self.assertAlmostEqual(savings, 67.7, places=1)
     
+    @pytest.mark.external
     def test_decision_history_tracking(self):
         """Test that decisions are tracked in history"""
         current_data = {
@@ -277,6 +281,7 @@ class TestSmartChargingStrategy(unittest.TestCase):
         self.assertIn('decision', self.charger.decision_history[0])
         self.assertIn('current_data', self.charger.decision_history[0])
     
+    @pytest.mark.external
     def test_edge_case_no_price_data(self):
         """Test behavior when no price data is available"""
         current_data = {
