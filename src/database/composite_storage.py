@@ -117,3 +117,27 @@ class CompositeStorage(DataStorageInterface):
 
     async def get_charging_sessions(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
         return await self._read_with_fallback('get_charging_sessions', start_time, end_time)
+
+    async def save_selling_session(self, session: Dict[str, Any]) -> bool:
+        return await self._write_to_all('save_selling_session', session)
+
+    async def get_selling_sessions(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        return await self._read_with_fallback('get_selling_sessions', start_time, end_time)
+
+    async def save_weather_data(self, data: List[Dict[str, Any]]) -> bool:
+        return await self._write_to_all('save_weather_data', data)
+
+    async def get_weather_data(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        return await self._read_with_fallback('get_weather_data', start_time, end_time)
+
+    async def save_price_forecast(self, forecast_list: List[Dict[str, Any]]) -> bool:
+        return await self._write_to_all('save_price_forecast', forecast_list)
+
+    async def get_price_forecasts(self, date_str: str) -> List[Dict[str, Any]]:
+        return await self._read_with_fallback('get_price_forecasts', date_str)
+
+    async def save_pv_forecast(self, forecast_list: List[Dict[str, Any]]) -> bool:
+        return await self._write_to_all('save_pv_forecast', forecast_list)
+
+    async def get_pv_forecasts(self, date_str: str) -> List[Dict[str, Any]]:
+        return await self._read_with_fallback('get_pv_forecasts', date_str)

@@ -79,4 +79,44 @@ class DataStorageInterface(ABC):
         """Retrieve charging sessions."""
         pass
 
+    @abstractmethod
+    async def save_selling_session(self, session: Dict[str, Any]) -> bool:
+        """Save or update a battery selling session."""
+        pass
+        
+    @abstractmethod
+    async def get_selling_sessions(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        """Retrieve battery selling sessions."""
+        pass
+
+    @abstractmethod
+    async def save_weather_data(self, data: List[Dict[str, Any]]) -> bool:
+        """Save weather observations."""
+        pass
+        
+    @abstractmethod
+    async def get_weather_data(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        """Retrieve weather data."""
+        pass
+
+    @abstractmethod
+    async def save_price_forecast(self, forecast_list: List[Dict[str, Any]]) -> bool:
+        """Save price forecast data."""
+        pass
+        
+    @abstractmethod
+    async def get_price_forecasts(self, date_str: str) -> List[Dict[str, Any]]:
+        """Retrieve price forecasts for a date."""
+        pass
+
+    @abstractmethod
+    async def save_pv_forecast(self, forecast_list: List[Dict[str, Any]]) -> bool:
+        """Save PV forecast data."""
+        pass
+        
+    @abstractmethod
+    async def get_pv_forecasts(self, date_str: str) -> List[Dict[str, Any]]:
+        """Retrieve PV forecasts for a date."""
+        pass
+
 

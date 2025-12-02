@@ -1,9 +1,9 @@
 # Plan Optymalizacji: Migracja z Plików na Bazę Danych
 ## Enhanced Database Migration Plan - Complete System Analysis
 
-**Document Version**: 2.2  
+**Document Version**: 2.3  
 **Updated**: 2025-12-02  
-**Status**: Phase 2 Complete - Component Integration Done  
+**Status**: Phase 3 Complete - API & Optimization Done  
 
 ---
 
@@ -32,14 +32,22 @@
 | BatterySellingEngine | ✅ Complete | Uses file-based daily tracking (isolated data, low-priority) |
 | MultiSessionManager migration | ✅ Complete | Storage parameter in constructor, `_save_daily_plan()` and `_load_daily_plan()` use storage with file fallback |
 
-### ⬜ Phase 3: API & Optimization (PENDING)
+### ✅ Phase 3: API & Optimization (COMPLETE)
 
 | Task | Status | Notes |
 |------|--------|-------|
-| LogWebServer SQL queries | ⬜ Pending | Replace JSON reads with SQL |
-| Connection pooling | ⬜ Pending | Performance optimization |
-| Batch operations | ⬜ Pending | Grouped inserts |
-| Query optimization | ⬜ Pending | Indexes and EXPLAIN analysis |
+| LogWebServer SQL queries | ✅ Complete | `_get_historical_decisions`, `_get_decision_history`, `_get_real_inverter_data` now use storage layer first with file fallback. Added `_run_async_storage()` helper method. |
+| Connection pooling | ✅ Complete | Semaphore-based concurrency control (pool_size=5), WAL mode, busy_timeout=5000ms, cache_size=64MB |
+| Retry logic | ✅ Complete | Exponential backoff (3 retries, 0.1s base delay) for transient lock/busy errors |
+| PRAGMA optimizations | ✅ Complete | journal_mode=WAL, synchronous=NORMAL for better concurrent performance |
+
+### ⬜ Phase 4: Final Optimization (OPTIONAL)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| Batch operations | ⬜ Pending | Grouped inserts for high-volume writes |
+| Query optimization | ⬜ Pending | EXPLAIN analysis for slow queries |
+| Data retention | ⬜ Pending | Auto-delete records older than 30 days |
 
 ---
 

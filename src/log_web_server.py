@@ -118,10 +118,13 @@ class LogWebServer:
         
         # Initialize storage layer for database access
         self.storage = None
+        self._storage_connected = False
         if StorageFactory:
             try:
                 self.storage = StorageFactory.create_storage(self.config.get('data_storage', {}))
                 logger.info("Storage layer initialized for LogWebServer")
+                # Connect storage in a background thread to avoid blocking
+                self._connect_storage_async()
             except Exception as e:
                 logger.warning(f"Failed to initialize storage layer: {e}. Using file-only fallback.")
         
@@ -131,6 +134,30 @@ class LogWebServer:
         # Log streaming
         self.log_queue = Queue()
         self.clients = set()
+    
+    def _connect_storage_async(self):
+        """Connect storage layer in a background thread."""
+        import threading
+        
+        def connect_in_thread():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(self.storage.connect())
+                    self._storage_connected = result
+                    if result:
+                        logger.info("Storage layer connected successfully")
+                    else:
+                        logger.warning("Storage layer connection returned False")
+                finally:
+                    loop.close()
+            except Exception as e:
+                logger.warning(f"Failed to connect storage layer: {e}")
+                self._storage_connected = False
+        
+        thread = threading.Thread(target=connect_in_thread, daemon=True)
+        thread.start()
     
     def _get_cached_data(self, key: str, ttl: int = None) -> Optional[Any]:
         """Get data from cache if not expired"""
@@ -191,6 +218,25 @@ class LogWebServer:
             self._last_request_times[endpoint] = current_time
         
         return False
+    
+    def _run_async_storage(self, coro):
+        """Run an async storage operation from sync code.
+        
+        Creates a new event loop, runs the coroutine, and cleans up.
+        Returns None if the operation fails or storage is not connected.
+        """
+        if not self.storage or not self._storage_connected:
+            return None
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.warning(f"Async storage operation failed: {e}")
+            return None
         
     def _setup_routes(self):
         """Setup Flask routes"""
@@ -2850,25 +2896,13 @@ class LogWebServer:
             
             decisions = []
             
-            # Try to use storage layer first
-            if self.storage:
-                try:
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        db_decisions = loop.run_until_complete(
-                            self.storage.get_decisions(time_threshold, now)
-                        )
-                        if db_decisions:
-                            decisions = db_decisions
-                            logger.debug(f"Loaded {len(decisions)} decisions from storage layer")
-                        else:
-                            logger.debug("No decisions found in storage, falling back to files")
-                    finally:
-                        loop.close()
-                except Exception as e:
-                    logger.warning(f"Failed to load decisions from storage: {e}. Falling back to files.")
+            # Try to use storage layer first using helper
+            db_decisions = self._run_async_storage(
+                self.storage.get_decisions(time_threshold, now) if self.storage else None
+            )
+            if db_decisions:
+                decisions = db_decisions
+                logger.debug(f"Loaded {len(decisions)} decisions from storage layer")
             
             # Fallback to file-based reading if storage failed or returned no data
             if not decisions:
@@ -3143,27 +3177,16 @@ class LogWebServer:
         """Get historical charging decisions from storage layer or files"""
         historical_decisions = []
         try:
-            # Try storage layer first
-            if self.storage:
-                try:
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        # Get last 7 days
-                        start_time = datetime.now() - timedelta(days=7)
-                        end_time = datetime.now()
-                        db_decisions = loop.run_until_complete(
-                            self.storage.get_decisions(start_time, end_time)
-                        )
-                        if db_decisions:
-                            historical_decisions = db_decisions[:50]  # Limit to 50
-                            logger.debug(f"Loaded {len(historical_decisions)} historical decisions from storage")
-                            return historical_decisions
-                    finally:
-                        loop.close()
-                except Exception as e:
-                    logger.warning(f"Failed to load historical decisions from storage: {e}. Falling back to files.")
+            # Try storage layer first using helper
+            start_time = datetime.now() - timedelta(days=7)
+            end_time = datetime.now()
+            db_decisions = self._run_async_storage(
+                self.storage.get_decisions(start_time, end_time) if self.storage else None
+            )
+            if db_decisions:
+                historical_decisions = db_decisions[:50]  # Limit to 50
+                logger.debug(f"Loaded {len(historical_decisions)} historical decisions from storage")
+                return historical_decisions
             
             # Fallback to file-based reading
             # Look for decision files in the energy_data directory
@@ -3378,7 +3401,31 @@ class LogWebServer:
             if cached_data:
                 return cached_data
             
-            # OPTIMIZATION: Try to read from coordinator state file FIRST
+            # OPTIMIZATION 1: Try storage layer (database) first for recent system state
+            system_states = self._run_async_storage(
+                self.storage.get_system_state(limit=1) if self.storage else None
+            )
+            if system_states and len(system_states) > 0:
+                latest_state = system_states[0]
+                # Check if state is fresh (less than 2 minutes old)
+                state_time_str = latest_state.get('timestamp', '')
+                if state_time_str:
+                    try:
+                        state_time = datetime.fromisoformat(state_time_str.replace('Z', '+00:00'))
+                        state_age = (datetime.now(state_time.tzinfo) - state_time).total_seconds()
+                        if state_age < 120:  # 2 minutes freshness
+                            # Extract current_data from the state
+                            current_data = latest_state.get('current_data', {})
+                            if current_data:
+                                dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
+                                if dashboard_data:
+                                    self._set_cached_data('real_inverter_data', dashboard_data)
+                                    logger.debug(f"Loaded fresh data from storage layer (age: {state_age:.1f}s)")
+                                    return dashboard_data
+                    except Exception as e:
+                        logger.warning(f"Failed to parse state timestamp from storage: {e}")
+            
+            # OPTIMIZATION 2: Try to read from coordinator state file SECOND
             # This avoids slow inverter connections if the coordinator is running and updating state
             project_root = Path(__file__).parent.parent
             try:

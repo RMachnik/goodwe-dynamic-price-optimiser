@@ -194,3 +194,58 @@ class FileStorage(DataStorageInterface):
     async def get_charging_sessions(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
         """Not efficiently implemented for files - returns empty."""
         return []
+
+    async def save_selling_session(self, session: Dict[str, Any]) -> bool:
+        """Save selling session to battery_selling_decision_*.json."""
+        try:
+            start_ts = session.get('start_time')
+            if isinstance(start_ts, str):
+                start_ts = datetime.fromisoformat(start_ts)
+                
+            filename = os.path.join(self.energy_data_dir, f"battery_selling_decision_{start_ts.strftime('%Y%m%d_%H%M%S')}.json")
+            
+            session_copy = session.copy()
+            if isinstance(session_copy.get('start_time'), datetime):
+                session_copy['start_time'] = session_copy['start_time'].isoformat()
+            if isinstance(session_copy.get('end_time'), datetime):
+                session_copy['end_time'] = session_copy['end_time'].isoformat()
+                
+            async with aiofiles.open(filename, 'w') as f:
+                await f.write(json.dumps(session_copy, indent=2))
+                
+            return True
+        except Exception as e:
+            self.logger.error(f"Error saving selling session to file: {e}")
+            return False
+
+    async def get_selling_sessions(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        """Not efficiently implemented for files - returns empty."""
+        return []
+
+    async def save_weather_data(self, data: List[Dict[str, Any]]) -> bool:
+        """Save weather data to file - stub implementation."""
+        # Weather data is typically not saved to files in legacy mode
+        return True
+
+    async def get_weather_data(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
+        """Not implemented for files - returns empty."""
+        return []
+
+    async def save_price_forecast(self, forecast_list: List[Dict[str, Any]]) -> bool:
+        """Save price forecast to file - stub implementation."""
+        # Forecasts are typically not saved to files in legacy mode
+        return True
+
+    async def get_price_forecasts(self, date_str: str) -> List[Dict[str, Any]]:
+        """Not implemented for files - returns empty."""
+        return []
+
+    async def save_pv_forecast(self, forecast_list: List[Dict[str, Any]]) -> bool:
+        """Save PV forecast to file - stub implementation."""
+        # Forecasts are typically not saved to files in legacy mode
+        return True
+
+    async def get_pv_forecasts(self, date_str: str) -> List[Dict[str, Any]]:
+        """Not implemented for files - returns empty."""
+        return []
+
