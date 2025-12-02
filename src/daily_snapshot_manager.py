@@ -54,6 +54,26 @@ class DailySnapshotManager:
         """Check if a snapshot exists for a given date"""
         return self.get_snapshot_path(target_date).exists()
     
+    def _run_async(self, coro):
+        """Safely run an async coroutine from sync context.
+        
+        Handles the case where we might already be in an event loop (e.g., Flask request).
+        """
+        try:
+            # Check if there's already an event loop running
+            loop = asyncio.get_running_loop()
+            # We're in an async context - can't use asyncio.run
+            # Fall back to synchronous file-based operation
+            logger.debug("Already in async context, skipping database query")
+            return None
+        except RuntimeError:
+            # No running loop, safe to use asyncio.run
+            try:
+                return asyncio.run(coro)
+            except Exception as e:
+                logger.error(f"Error running async operation: {e}")
+                return None
+    
     def create_daily_snapshot(self, target_date: date) -> Optional[Dict[str, Any]]:
         """Create a daily snapshot for the given date
         
@@ -67,7 +87,7 @@ class DailySnapshotManager:
         
         decisions = []
         
-        # Try to fetch from storage first
+        # Try to fetch from storage first (only if we can safely run async)
         if self.storage:
             try:
                 async def _fetch_decisions():
@@ -81,8 +101,9 @@ class DailySnapshotManager:
                     await self.storage.disconnect()
                     return data
                 
-                decisions = asyncio.run(_fetch_decisions())
-                if decisions:
+                result = self._run_async(_fetch_decisions())
+                if result:
+                    decisions = result
                     logger.info(f"Retrieved {len(decisions)} decisions from storage for {target_date}")
             except Exception as e:
                 logger.error(f"Failed to fetch decisions from storage: {e}")
