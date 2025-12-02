@@ -4,6 +4,14 @@ logs/
 out/
 *.log
 
+# Database files
+data/
+*.db
+*.db-shm
+*.db-wal
+backups/
+*_backups/
+
 # Python
 __pycache__/
 *.py[cod]

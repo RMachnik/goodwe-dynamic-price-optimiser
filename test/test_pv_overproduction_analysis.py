@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
 import sys
 import os
+import pytest
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -16,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from master_coordinator import MultiFactorDecisionEngine
 
 
-class TestPVOverproductionAnalysis(unittest.TestCase):
+class TestPVOverproductionAnalysis(unittest.IsolatedAsyncioTestCase):
     """Test PV overproduction analysis in the decision engine"""
     
     def setUp(self):
@@ -49,7 +50,9 @@ class TestPVOverproductionAnalysis(unittest.TestCase):
             ]
         }
     
-    def test_pv_overproduction_no_grid_charging(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_pv_overproduction_no_grid_charging(self):
         """Test that grid charging is avoided when PV overproduction is detected"""
         # Scenario: PV overproduction (PV > consumption + 500W)
         current_data = {
@@ -72,7 +75,7 @@ class TestPVOverproductionAnalysis(unittest.TestCase):
         # Net power = 3000 - 1000 = 2000W > 500W threshold
         # Should avoid grid charging despite low battery and low prices
         
-        decision = self.decision_engine.analyze_and_decide(
+        decision = await self.decision_engine.analyze_and_decide(
             current_data,
             self.mock_price_data,
             []
@@ -89,7 +92,9 @@ class TestPVOverproductionAnalysis(unittest.TestCase):
         self.assertIn('PV overproduction', decision['reasoning'])
         self.assertIn('no grid charging needed', decision['reasoning'])
     
-    def test_pv_overproduction_stop_charging(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_pv_overproduction_stop_charging(self):
         """Test that grid charging is stopped when PV overproduction is detected"""
         # Scenario: Currently charging but PV overproduction detected
         current_data = {
@@ -112,7 +117,7 @@ class TestPVOverproductionAnalysis(unittest.TestCase):
         # Net power = 2500 - 1000 = 1500W > 500W threshold
         # Should stop charging due to PV overproduction
         
-        decision = self.decision_engine.analyze_and_decide(
+        decision = await self.decision_engine.analyze_and_decide(
             current_data,
             self.mock_price_data,
             []
@@ -128,7 +133,9 @@ class TestPVOverproductionAnalysis(unittest.TestCase):
         self.assertIn('PV overproduction', decision['reasoning'])
         self.assertIn('Stopping grid charging', decision['reasoning'])
     
-    def test_pv_deficit_urgent_charging(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_pv_deficit_urgent_charging(self):
         """Test that urgent charging is triggered when PV deficit is detected"""
         # Scenario: PV deficit (PV < consumption)
         current_data = {
@@ -151,7 +158,7 @@ class TestPVOverproductionAnalysis(unittest.TestCase):
         # Net power = 500 - 2000 = -1500W (deficit)
         # Should trigger urgent charging
         
-        decision = self.decision_engine.analyze_and_decide(
+        decision = await self.decision_engine.analyze_and_decide(
             current_data,
             self.mock_price_data,
             []
@@ -167,7 +174,9 @@ class TestPVOverproductionAnalysis(unittest.TestCase):
         self.assertIn('PV deficit', decision['reasoning'])
         self.assertIn('urgent charging needed', decision['reasoning'])
     
-    def test_pv_balanced_conditions(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_pv_balanced_conditions(self):
         """Test decision making under balanced PV conditions"""
         # Scenario: PV balanced (PV ≈ consumption)
         current_data = {
@@ -190,7 +199,7 @@ class TestPVOverproductionAnalysis(unittest.TestCase):
         # Net power = 1200 - 1000 = 200W (balanced, below threshold)
         # Should make normal charging decision based on other factors
         
-        decision = self.decision_engine.analyze_and_decide(
+        decision = await self.decision_engine.analyze_and_decide(
             current_data,
             self.mock_price_data,
             []
@@ -203,7 +212,9 @@ class TestPVOverproductionAnalysis(unittest.TestCase):
         # Reasoning should mention PV production available
         self.assertIn('PV production available', decision['reasoning'])
     
-    def test_critical_battery_override(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_critical_battery_override(self):
         """Test that critical battery level overrides PV overproduction check"""
         # Scenario: Critical battery but PV overproduction
         current_data = {
@@ -226,7 +237,7 @@ class TestPVOverproductionAnalysis(unittest.TestCase):
         # Net power = 3000 - 1000 = 2000W > 500W threshold
         # But battery is critical (15%) - should override PV overproduction check
         
-        decision = self.decision_engine.analyze_and_decide(
+        decision = await self.decision_engine.analyze_and_decide(
             current_data,
             self.mock_price_data,
             []
@@ -238,7 +249,9 @@ class TestPVOverproductionAnalysis(unittest.TestCase):
         # PV score should still be 0 (overproduction)
         self.assertEqual(decision['scores']['pv'], 0)
     
-    def test_pv_score_calculation_various_scenarios(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_pv_score_calculation_various_scenarios(self):
         """Test PV score calculation for various PV vs consumption scenarios"""
         test_cases = [
             # (pv_power, consumption_power, expected_score_range, description)

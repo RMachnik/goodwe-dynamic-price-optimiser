@@ -278,14 +278,22 @@ data_storage:
   # Current file-based storage (enhanced with compression)
   file_storage:
     enabled: true
-    energy_data_dir: "/opt/goodwe-dynamic-price-optimiser/out/energy_data"
-    charging_schedules_dir: "/opt/goodwe-dynamic-price-optimiser/out/charging_schedules"
-    system_state_dir: "/opt/goodwe-dynamic-price-optimiser/out/system_state"
+    # Relative paths - resolved from working directory (project root)
+    energy_data_dir: "out/energy_data"
+    charging_schedules_dir: "out/charging_schedules"
+    system_state_dir: "out/system_state"
     retention_days: 7          # Keep only 7 days in files (reduced from 24h in-memory)
   
-  # Future database storage (ready for implementation)
+  # Database storage configuration
   database_storage:
-    enabled: false             # Set to true when databases are configured
+    enabled: true              # Enable database storage
+    sqlite:
+      # Relative path - resolved from working directory (project root)
+      path: "data/goodwe_energy.db"
+      connection_pool_size: 5
+      timeout: 30.0
+    
+    # Future expansion
     timeseries_db:
       type: "influxdb"         # or "timescaledb"
       enabled: false

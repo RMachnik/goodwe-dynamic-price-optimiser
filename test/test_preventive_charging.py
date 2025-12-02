@@ -12,7 +12,7 @@ Tests cover:
 import pytest
 from datetime import datetime, timedelta
 from unittest.mock import Mock, MagicMock, patch
-from src.automated_price_charging import AutomatedPriceCharger
+from automated_price_charging import AutomatedPriceCharger
 
 
 @pytest.fixture
@@ -61,10 +61,10 @@ def charger(mock_config, tmp_path):
     config_file = tmp_path / "test_config.yaml"
     config_file.write_text(yaml.dump(mock_config))
     
-    with patch('src.automated_price_charging.EnhancedDataCollector'), \
-         patch('src.automated_price_charging.TariffPricingCalculator'), \
-         patch('src.automated_price_charging.AdaptiveThresholdCalculator'), \
-         patch('src.automated_price_charging.GoodWeFastCharger'):
+    with patch('automated_price_charging.EnhancedDataCollector'), \
+         patch('automated_price_charging.TariffPricingCalculator'), \
+         patch('automated_price_charging.AdaptiveThresholdCalculator'), \
+         patch('automated_price_charging.GoodWeFastCharger'):
         
         charger = AutomatedPriceCharger(str(config_file))
         # Override methods that require external data

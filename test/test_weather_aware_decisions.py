@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock, Mock
 from datetime import datetime, timedelta
 import sys
 import os
+import pytest
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -17,7 +18,7 @@ from master_coordinator import MultiFactorDecisionEngine
 from pv_trend_analyzer import PVTrendAnalyzer
 
 
-class TestWeatherAwareDecisions(unittest.TestCase):
+class TestWeatherAwareDecisions(unittest.IsolatedAsyncioTestCase):
     """Test weather-aware decision making in the enhanced system"""
     
     def setUp(self):
@@ -149,12 +150,16 @@ class TestWeatherAwareDecisions(unittest.TestCase):
             ]
         }
     
-    def test_pv_trend_analyzer_initialization(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_pv_trend_analyzer_initialization(self):
         """Test that PV trend analyzer is properly initialized"""
         self.assertIsNotNone(self.decision_engine.pv_trend_analyzer)
         self.assertIsInstance(self.decision_engine.pv_trend_analyzer, PVTrendAnalyzer)
     
-    def test_weather_aware_decision_with_increasing_pv_trend(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_weather_aware_decision_with_increasing_pv_trend(self):
         """Test decision making when PV production is increasing"""
         # Scenario: PV production is increasing, should wait for better conditions
         current_data = {
@@ -197,7 +202,7 @@ class TestWeatherAwareDecisions(unittest.TestCase):
                 {'forecasted_power_kw': 8.0, 'ghi_w_m2': 1800, 'confidence': 0.8, 'timestamp': '2025-09-07T13:45:00'}
             ]
             
-            decision = self.decision_engine.analyze_and_decide(
+            decision = await self.decision_engine.analyze_and_decide(
                 current_data,
                 self.mock_price_data,
                 []
@@ -219,7 +224,9 @@ class TestWeatherAwareDecisions(unittest.TestCase):
             self.assertIn('increasing', timing_rec['wait_reason'])
             self.assertGreater(timing_rec['expected_pv_improvement_kw'], 0)
     
-    def test_weather_aware_decision_with_decreasing_pv_trend(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_weather_aware_decision_with_decreasing_pv_trend(self):
         """Test decision making when PV production is decreasing"""
         # Scenario: PV production is decreasing, should charge now
         current_data = {
@@ -262,7 +269,7 @@ class TestWeatherAwareDecisions(unittest.TestCase):
                 {'forecasted_power_kw': 0.1, 'ghi_w_m2': 25, 'confidence': 0.8, 'timestamp': '2025-09-07T13:45:00'}
             ]
             
-            decision = self.decision_engine.analyze_and_decide(
+            decision = await self.decision_engine.analyze_and_decide(
                 current_data,
                 self.mock_price_data,
                 []
@@ -279,7 +286,9 @@ class TestWeatherAwareDecisions(unittest.TestCase):
             self.assertFalse(timing_rec['should_wait'])
             self.assertIn('decreasing', timing_rec['wait_reason'])
     
-    def test_weather_aware_decision_critical_battery_override(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_weather_aware_decision_critical_battery_override(self):
         """Test that critical battery level overrides weather recommendations"""
         # Scenario: Critical battery but PV production increasing
         current_data = {
@@ -318,7 +327,7 @@ class TestWeatherAwareDecisions(unittest.TestCase):
                 {'forecasted_power_kw': 4.0, 'ghi_w_m2': 1000, 'confidence': 0.8, 'timestamp': '2025-09-07T12:45:00'}
             ]
             
-            decision = self.decision_engine.analyze_and_decide(
+            decision = await self.decision_engine.analyze_and_decide(
                 current_data,
                 self.mock_price_data,
                 []
@@ -333,7 +342,9 @@ class TestWeatherAwareDecisions(unittest.TestCase):
             self.assertTrue(timing_rec['should_wait'])  # Trend analysis says wait
             # But action overrides due to critical battery
     
-    def test_weather_aware_decision_without_weather_data(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_weather_aware_decision_without_weather_data(self):
         """Test decision making when weather data is not available"""
         # Scenario: No weather data, should fall back to normal decision making
         current_data = {
@@ -363,7 +374,7 @@ class TestWeatherAwareDecisions(unittest.TestCase):
                 {'forecasted_power_kw': 2.6, 'confidence': 0.6, 'timestamp': '2025-09-07T12:45:00'}
             ]
             
-            decision = self.decision_engine.analyze_and_decide(
+            decision = await self.decision_engine.analyze_and_decide(
                 current_data,
                 self.mock_price_data,
                 []
@@ -377,7 +388,9 @@ class TestWeatherAwareDecisions(unittest.TestCase):
             pv_trend = weather_analysis['pv_trend']
             self.assertLess(pv_trend['confidence'], 0.8)  # Lower confidence without weather data
     
-    def test_pv_trend_analyzer_standalone(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_pv_trend_analyzer_standalone(self):
         """Test PV trend analyzer functionality independently"""
         analyzer = PVTrendAnalyzer(self.config)
         
@@ -416,7 +429,9 @@ class TestWeatherAwareDecisions(unittest.TestCase):
         self.assertIn('increasing', timing_rec.wait_reason)
         self.assertGreater(timing_rec.expected_pv_improvement_kw, 0)
     
-    def test_weather_aware_decision_with_very_low_prices(self):
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_weather_aware_decision_with_very_low_prices(self):
         """Test that very low prices override wait recommendations"""
         # Scenario: Very low prices but PV production increasing
         current_time = datetime.now()
@@ -470,7 +485,7 @@ class TestWeatherAwareDecisions(unittest.TestCase):
                 {'forecasted_power_kw': 4.0, 'ghi_w_m2': 1000, 'confidence': 0.8, 'timestamp': '2025-09-07T12:45:00'}
             ]
             
-            decision = self.decision_engine.analyze_and_decide(
+            decision = await self.decision_engine.analyze_and_decide(
                 current_data,
                 very_low_price_data,
                 []

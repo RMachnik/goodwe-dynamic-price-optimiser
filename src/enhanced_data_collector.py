@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 import statistics
+import yaml
 
 # Import the GoodWe fast charging functionality
 import sys
@@ -26,6 +27,7 @@ current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 
 from fast_charge import GoodWeFastCharger
+from database.storage_factory import StorageFactory
 
 # Setup logging
 import os
@@ -44,13 +46,24 @@ class EnhancedDataCollector:
     
     def __init__(self, config_path: str):
         """Initialize the enhanced data collector"""
-        self.config_path = config_path
-        self.goodwe_charger = GoodWeFastCharger(config_path)
-        # Create out directory for data storage
-        out_dir = Path(__file__).parent.parent / "out"
-        out_dir.mkdir(exist_ok=True)
-        self.data_storage_path = out_dir / "energy_data"
-        self.data_storage_path.mkdir(exist_ok=True)
+        # Support both dict config and file path
+        if isinstance(config_path, dict):
+            self.config_path = None
+            self.config = config_path
+        else:
+            self.config_path = config_path
+            # Load config to initialize storage
+            try:
+                with open(config_path, 'r') as f:
+                    self.config = yaml.safe_load(f)
+            except Exception as e:
+                logger.error(f"Failed to load config: {e}")
+                self.config = {}
+        
+        self.goodwe_charger = GoodWeFastCharger(config_path if not isinstance(config_path, dict) else self.config)
+
+        # Initialize storage via factory
+        self.storage = StorageFactory.create_storage(self.config.get('data_storage', {}))
         
         # Data storage
         self.current_data: Dict[str, Any] = {}
@@ -64,6 +77,11 @@ class EnhancedDataCollector:
     async def initialize(self) -> bool:
         """Initialize the system and connect to inverter"""
         logger.info("Initializing GoodWe Dynamic Price Optimiser...")
+        
+        # Connect to storage
+        if not await self.storage.connect():
+            logger.error("Failed to connect to data storage")
+            # We continue even if storage fails, as we might have fallback or just in-memory
         
         # Connect to GoodWe inverter
         if not await self.goodwe_charger.connect_inverter():
@@ -405,30 +423,66 @@ class EnhancedDataCollector:
         except Exception as e:
             logger.error(f"Failed to update daily stats: {e}")
     
-    def save_data_to_file(self):
-        """Save collected data to files"""
+    async def save_data_to_file(self):
+        """Save collected data to storage (file or database)"""
         try:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            
-            # Save current data
-            current_file = self.data_storage_path / f"current_data_{timestamp}.json"
-            with open(current_file, 'w', encoding='utf-8') as f:
-                json.dump(self.current_data, f, indent=2, ensure_ascii=False)
-            
-            # Save daily stats
-            stats_file = self.data_storage_path / f"daily_stats_{datetime.now().strftime('%Y%m%d')}.json"
-            with open(stats_file, 'w', encoding='utf-8') as f:
-                json.dump(self.daily_stats, f, indent=2, ensure_ascii=False)
-            
-            # Save historical data (last 100 points to avoid huge files)
-            historical_file = self.data_storage_path / f"historical_data_{timestamp}.json"
-            with open(historical_file, 'w', encoding='utf-8') as f:
-                json.dump(self.historical_data[-100:], f, indent=2, ensure_ascii=False)
-            
-            logger.info(f"Data saved to files: {current_file}, {stats_file}, {historical_file}")
+            # Prepare data for storage
+            if self.current_data:
+                # Flatten the nested structure for DB schema compatibility
+                flat_data = self._flatten_data_for_storage(self.current_data)
+                
+                # The storage interface expects a list of dicts
+                await self.storage.save_energy_data([flat_data])
+                
+            logger.info("Data saved to storage")
             
         except Exception as e:
-            logger.error(f"Failed to save data to files: {e}")
+            logger.error(f"Failed to save data to storage: {e}")
+    
+    def _flatten_data_for_storage(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Flatten nested data structure to match DB schema"""
+        try:
+            battery = data.get('battery', {})
+            pv = data.get('photovoltaic', {})
+            grid = data.get('grid', {})
+            consumption = data.get('house_consumption', {})
+            
+            flat = {
+                'timestamp': data.get('timestamp') or data.get('time') or datetime.now().isoformat(),
+                'battery_soc': self._safe_float(battery.get('soc_percent')),
+                'pv_power': self._safe_int(pv.get('current_power_w')),
+                'grid_power': self._safe_int(grid.get('power_w')),
+                'house_consumption': self._safe_int(consumption.get('current_power_w')),
+                'battery_power': self._safe_int(battery.get('power_w')),
+                'grid_voltage': self._safe_float(grid.get('voltage')),
+                'grid_frequency': None,  # Not available in current data structure
+                'battery_voltage': self._safe_float(battery.get('voltage')),
+                'battery_current': self._safe_float(battery.get('current')),
+                'battery_temperature': self._safe_float(battery.get('temperature')),
+                'price_pln': None  # Will be set by caller if price data available
+            }
+            return flat
+        except Exception as e:
+            logger.error(f"Failed to flatten data: {e}")
+            return {'timestamp': datetime.now().isoformat()}
+    
+    def _safe_float(self, value) -> Optional[float]:
+        """Safely convert value to float, returning None for invalid values"""
+        if value is None or value == 'Unknown':
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+    
+    def _safe_int(self, value) -> Optional[int]:
+        """Safely convert value to int, returning None for invalid values"""
+        if value is None or value == 'Unknown':
+            return None
+        try:
+            return int(float(value))
+        except (ValueError, TypeError):
+            return None
     
     def get_current_data(self) -> Dict[str, Any]:
         """Get current system data"""
@@ -530,7 +584,7 @@ class EnhancedDataCollector:
                 
                 # Save data periodically
                 if (datetime.now() - last_save_time).total_seconds() >= self.data_save_interval:
-                    self.save_data_to_file()
+                    await self.save_data_to_file()
                     last_save_time = datetime.now()
                 
                 # Print status every 5 minutes
@@ -546,7 +600,7 @@ class EnhancedDataCollector:
             logger.error(f"Monitoring error: {e}")
         finally:
             # Final data save
-            self.save_data_to_file()
+            await self.save_data_to_file()
             logger.info("Enhanced data collection completed")
 
 def parse_arguments():
@@ -686,7 +740,7 @@ async def main():
                 
             elif choice == "4":
                 print("Saving data to files...")
-                collector.save_data_to_file()
+                await collector.save_data_to_file()
                 print("Data saved successfully!")
                 
             elif choice == "5":

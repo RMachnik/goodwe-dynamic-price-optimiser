@@ -1,9 +1,53 @@
 # Plan Optymalizacji: Migracja z Plików na Bazę Danych
 ## Enhanced Database Migration Plan - Complete System Analysis
 
-**Document Version**: 2.0  
-**Updated**: 2025-01-09  
-**Status**: Comprehensive Analysis Complete  
+**Document Version**: 2.3  
+**Updated**: 2025-12-02  
+**Status**: Phase 3 Complete - API & Optimization Done  
+
+---
+
+## Implementation Progress
+
+### ✅ Phase 1: Core Infrastructure (COMPLETE)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| Database schema (`src/database/schema.py`) | ✅ Complete | 8 tables: energy_data, system_state, coordinator_decisions, charging_sessions, battery_selling_sessions, weather_data, price_forecasts, pv_forecasts |
+| Storage interface (`src/database/storage_interface.py`) | ✅ Complete | Abstract base class with async methods |
+| SQLite storage (`src/database/sqlite_storage.py`) | ✅ Complete | Full implementation with all save/get methods |
+| File storage (`src/database/file_storage.py`) | ✅ Complete | Legacy file-based storage wrapper |
+| Composite storage (`src/database/composite_storage.py`) | ✅ Complete | Writes to both SQLite and files for safety |
+| Storage factory (`src/database/storage_factory.py`) | ✅ Complete | Creates storage based on config (file_only/db_only/composite) |
+| Dict config support in core classes | ✅ Complete | AutomatedPriceCharger, GoodWeFastCharger, EnhancedDataCollector |
+| LogWebServer StorageFactory integration | ✅ Complete | Uses StorageFactory for data access |
+| Test suite passing | ✅ Complete | 627 passed, 10 skipped (expected async DB tests) |
+
+### ✅ Phase 2: Component Migration (COMPLETE)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| EnhancedDataCollector DB writes | ✅ Complete | Added `_flatten_data_for_storage()` to convert nested data to DB schema |
+| MasterCoordinator DB writes | ✅ Complete | Already had storage integration, now passes storage to MultiSessionManager |
+| BatterySellingEngine | ✅ Complete | Uses file-based daily tracking (isolated data, low-priority) |
+| MultiSessionManager migration | ✅ Complete | Storage parameter in constructor, `_save_daily_plan()` and `_load_daily_plan()` use storage with file fallback |
+
+### ✅ Phase 3: API & Optimization (COMPLETE)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| LogWebServer SQL queries | ✅ Complete | `_get_historical_decisions`, `_get_decision_history`, `_get_real_inverter_data` now use storage layer first with file fallback. Added `_run_async_storage()` helper method. |
+| Connection pooling | ✅ Complete | Semaphore-based concurrency control (pool_size=5), WAL mode, busy_timeout=5000ms, cache_size=64MB |
+| Retry logic | ✅ Complete | Exponential backoff (3 retries, 0.1s base delay) for transient lock/busy errors |
+| PRAGMA optimizations | ✅ Complete | journal_mode=WAL, synchronous=NORMAL for better concurrent performance |
+
+### ⬜ Phase 4: Final Optimization (OPTIONAL)
+
+| Task | Status | Notes |
+|------|--------|-------|
+| Batch operations | ⬜ Pending | Grouped inserts for high-volume writes |
+| Query optimization | ⬜ Pending | EXPLAIN analysis for slow queries |
+| Data retention | ⬜ Pending | Auto-delete records older than 30 days |
 
 ---
 
@@ -44,6 +88,29 @@
 - Dodanie `alembic>=1.12.0` - migracje bazy danych
 - Dodanie `pydantic>=2.0.0` - walidacja danych
 - Dodanie `backoff>=2.2.0` - retry logic dla operacji bazodanowych
+
+## 1.4 Composite Storage Architecture (New)
+
+**Cel**: Zapewnienie bezpieczeństwa danych i kompatybilności wstecznej
+
+- **Composite Pattern**: Implementacja `CompositeStorage`, która zapisuje dane jednocześnie do wielu backendów (SQLite + Pliki).
+- **Read Fallback Strategy**:
+  1. Próba odczytu z SQLite (Primary).
+  2. W przypadku błędu lub braku danych -> odczyt z plików JSON (Fallback).
+  3. Logowanie ostrzeżenia przy użyciu fallbacku.
+- **Korzyści**:
+  - Bezpieczeństwo: Awaria bazy nie zatrzymuje systemu.
+  - Migracja: Możliwość stopniowego przenoszenia danych.
+  - Debugging: Pliki JSON pozostają dostępne do łatwego podglądu.
+
+## 1.5 Storage Factory
+
+- Utworzenie `src/database/storage_factory.py`
+- Odpowiedzialność: Tworzenie odpowiedniej instancji storage na podstawie konfiguracji.
+- Obsługa trybów:
+  - `file_only`: Tylko pliki (Legacy)
+  - `db_only`: Tylko baza (Target)
+  - `composite`: Baza + Pliki (Transition/Safe Mode)
 
 ## 2. Implementacja narzędzia migracji danych
 

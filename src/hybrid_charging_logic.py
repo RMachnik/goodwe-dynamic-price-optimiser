@@ -115,7 +115,7 @@ class HybridChargingLogic:
             'data_directory': 'out/energy_data'
         }
     
-    def analyze_and_decide(self, current_data: Dict[str, Any], price_data: Dict[str, Any], pv_forecast: List[Dict] = None) -> ChargingDecision:
+    async def analyze_and_decide(self, current_data: Dict[str, Any], price_data: Dict[str, Any], pv_forecast: List[Dict] = None) -> ChargingDecision:
         """
         Analyze current conditions and make optimal charging decision
         
@@ -158,7 +158,10 @@ class HybridChargingLogic:
             )
         
         # Get PV forecasts (use provided forecast or get from forecaster)
-        pv_forecasts = pv_forecast if pv_forecast is not None else self.pv_forecaster.forecast_pv_production()
+        if pv_forecast is not None:
+            pv_forecasts = pv_forecast
+        else:
+            pv_forecasts = await self.pv_forecaster.forecast_pv_production()
         
         # Analyze price windows and timing
         # Get current PV power
@@ -624,9 +627,9 @@ class HybridChargingLogic:
             savings_potential_pln=window_data['savings_potential_pln']
         )
     
-    def make_charging_decision(self, current_data: Dict[str, Any], price_data: Dict[str, Any], pv_forecast: List[Dict] = None) -> ChargingDecision:
+    async def make_charging_decision(self, current_data: Dict[str, Any], price_data: Dict[str, Any], pv_forecast: List[Dict] = None) -> ChargingDecision:
         """Make a charging decision based on current data and price information"""
-        return self.analyze_and_decide(current_data, price_data, pv_forecast)
+        return await self.analyze_and_decide(current_data, price_data, pv_forecast)
     
     def calculate_charging_duration(self, charging_source: str, energy_kwh: float, pv_power_available: float = 0.0) -> float:
         """Calculate charging duration for given energy and source"""

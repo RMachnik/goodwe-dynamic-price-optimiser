@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
 import statistics
+from database.storage_factory import StorageFactory
+from database.storage_interface import DataStorageInterface
 
 # Import all the component modules
 import sys
@@ -112,9 +114,18 @@ class MasterCoordinator:
         self.historical_data = []
         self.decision_history = []
         self.performance_metrics = {}
+        self.last_save_time = datetime.now()  # Track last data save time
         
         # Configuration
         self.config = self._load_config()
+        
+        # Initialize storage
+        self.storage: Optional[DataStorageInterface] = None
+        try:
+            self.storage = StorageFactory.create_storage(self.config.get('data_storage', {}))
+        except Exception as e:
+            logger.error(f"Failed to create storage: {e}")
+            
         self._setup_logging()
         
         # Signal handlers for graceful shutdown
@@ -168,6 +179,12 @@ class MasterCoordinator:
         logger.info("Initializing Master Coordinator...")
         
         try:
+            # Initialize storage connection
+            if self.storage:
+                if not await self.storage.connect():
+                    logger.error("Failed to connect to storage")
+                    # We continue even if storage fails, as it might be optional or have fallback
+            
             # Initialize data collector
             logger.info("Initializing Enhanced Data Collector...")
             self.data_collector = EnhancedDataCollector(self.config_path)
@@ -241,9 +258,9 @@ class MasterCoordinator:
                 self.decision_engine.peak_hours_collector = self.peak_hours_collector
                 logger.info("PSE Peak Hours Collector integrated with decision engine")
             
-            # Initialize multi-session manager
+            # Initialize multi-session manager with storage support
             logger.info("Initializing Multi-Session Manager...")
-            self.multi_session_manager = MultiSessionManager(self.config)
+            self.multi_session_manager = MultiSessionManager(self.config, storage=self.storage)
             logger.info("Multi-Session Manager initialized successfully")
             
             # Initialize battery selling engine
@@ -272,7 +289,12 @@ class MasterCoordinator:
             web_enabled = web_server_config.get('enabled', True)
             
             if web_enabled:
-                self.log_web_server = LogWebServer(host=web_host, port=web_port, log_dir=str(logs_dir))
+                self.log_web_server = LogWebServer(
+                    host=web_host, 
+                    port=web_port, 
+                    log_dir=str(logs_dir),
+                    config=self.config
+                )
                 # Start web server in a separate thread
                 self.web_server_thread = threading.Thread(
                     target=self.log_web_server.start,
@@ -359,6 +381,15 @@ class MasterCoordinator:
             # Collect data from all sources
             await self.data_collector.collect_comprehensive_data()
             self.current_data.update(self.data_collector.get_current_data())
+            
+            # Save data to storage periodically (every 5 minutes)
+            if (datetime.now() - self.last_save_time).total_seconds() >= 300:
+                try:
+                    await self.data_collector.save_data_to_file()
+                    self.last_save_time = datetime.now()
+                    logger.debug("Data saved to storage")
+                except Exception as e:
+                    logger.error(f"Failed to save data to storage: {e}")
             
             # Update PV vs consumption analyzer with current data
             if self.pv_consumption_analyzer:
@@ -691,11 +722,21 @@ class MasterCoordinator:
                 'cheapest_hour': cheapest_hour
             }
             
-            # Save to file
-            with open(file_path, 'w') as f:
-                json.dump(decision_data, f, indent=2)
-            
-            logger.debug(f"Decision saved to {filename}")
+            # Save to storage
+            if self.storage:
+                # Add decision_type for storage schema
+                decision_data['decision_type'] = 'charging'
+                logger.info(f"Storage type: {type(self.storage).__name__}, attempting to save decision to storage: {decision_data.get('timestamp')}, action={decision_data.get('action')}")
+                result = await self.storage.save_decision(decision_data)
+                if result:
+                    logger.info(f"✅ Decision saved to storage successfully")
+                else:
+                    logger.error(f"❌ Failed to save decision to storage (returned False)")
+            else:
+                # Fallback to file
+                with open(file_path, 'w') as f:
+                    json.dump(decision_data, f, indent=2)
+                logger.debug(f"Decision saved to {filename}")
             
         except Exception as e:
             logger.error(f"Failed to save decision to file: {e}")
@@ -739,11 +780,17 @@ class MasterCoordinator:
                 'execution_error': error_msg
             }
             
-            # Save to file
-            with open(file_path, 'w') as f:
-                json.dump(selling_data, f, indent=2)
-            
-            logger.debug(f"Battery selling decision saved to {filename}")
+            # Save to storage
+            if self.storage:
+                # Add type for storage schema
+                selling_data['type'] = 'selling'
+                await self.storage.save_decision(selling_data)
+                logger.debug(f"Battery selling decision saved to storage")
+            else:
+                # Fallback to file
+                with open(file_path, 'w') as f:
+                    json.dump(selling_data, f, indent=2)
+                logger.debug(f"Battery selling decision saved to {filename}")
             
         except Exception as e:
             logger.error(f"Failed to save battery selling decision to file: {e}")
@@ -1130,6 +1177,10 @@ class MasterCoordinator:
             # Save final data
             await self._save_system_state()
             
+            # Disconnect storage
+            if self.storage:
+                await self.storage.disconnect()
+            
             logger.info("Master Coordinator shutdown complete")
             
         except Exception as e:
@@ -1147,13 +1198,17 @@ class MasterCoordinator:
                 'decision_count': len(self.decision_history)
             }
             
-            state_file = project_root / "out" / f"coordinator_state_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            state_file.parent.mkdir(exist_ok=True)
-            
-            with open(state_file, 'w') as f:
-                json.dump(state_data, f, indent=2, default=str)
-            
-            logger.info(f"System state saved to {state_file}")
+            if self.storage:
+                await self.storage.save_system_state(state_data)
+                logger.info("System state saved to storage")
+            else:
+                state_file = project_root / "out" / f"coordinator_state_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                state_file.parent.mkdir(exist_ok=True)
+                
+                with open(state_file, 'w') as f:
+                    json.dump(state_data, f, indent=2, default=str)
+                
+                logger.info(f"System state saved to {state_file}")
             
         except Exception as e:
             logger.error(f"Failed to save system state: {e}")
@@ -1242,17 +1297,17 @@ class MultiFactorDecisionEngine:
         # PSE Price Forecast integration
         self.forecast_collector = None  # Will be set by MasterCoordinator
     
-    def analyze_and_decide(self, current_data: Dict, price_data: Dict, historical_data: List) -> Dict[str, Any]:
+    async def analyze_and_decide(self, current_data: Dict, price_data: Dict, historical_data: List) -> Dict[str, Any]:
         """Analyze current situation and make charging decision with timing awareness"""
         
         # Use timing-aware decision if enabled
         if self.timing_awareness_enabled:
-            return self._analyze_and_decide_with_timing(current_data, price_data, historical_data)
+            return await self._analyze_and_decide_with_timing(current_data, price_data, historical_data)
         
         # Fallback to original scoring algorithm
         return self._analyze_and_decide_legacy(current_data, price_data, historical_data)
     
-    def _analyze_and_decide_with_timing(self, current_data: Dict, price_data: Dict, historical_data: List) -> Dict[str, Any]:
+    async def _analyze_and_decide_with_timing(self, current_data: Dict, price_data: Dict, historical_data: List) -> Dict[str, Any]:
         """Analyze and decide using timing-aware hybrid charging logic with weather integration and PV vs consumption analysis"""
         logger.info("Using timing-aware decision engine with weather integration and PV vs consumption analysis")
         
@@ -1274,7 +1329,7 @@ class MultiFactorDecisionEngine:
                 logger.debug("No forecast data available, using standard analysis")
             
             # Get weather-enhanced PV forecast
-            pv_forecast = self._get_weather_enhanced_pv_forecast(current_data)
+            pv_forecast = await self._get_weather_enhanced_pv_forecast(current_data)
             
             # Analyze PV trend for weather-aware decisions
             weather_data = current_data.get('weather')
@@ -1313,7 +1368,7 @@ class MultiFactorDecisionEngine:
                 )
             
             # Use hybrid charging logic for optimal decision
-            charging_decision = self.hybrid_logic.analyze_and_decide(current_data, price_data)
+            charging_decision = await self.hybrid_logic.analyze_and_decide(current_data, price_data)
             
             # Apply weather-aware timing recommendation
             action = self._apply_weather_aware_timing(
@@ -1538,10 +1593,10 @@ class MultiFactorDecisionEngine:
         except Exception:
             return {'available': False}
     
-    def _get_weather_enhanced_pv_forecast(self, current_data: Dict) -> List[Dict]:
+    async def _get_weather_enhanced_pv_forecast(self, current_data: Dict) -> List[Dict]:
         """Get PV forecast enhanced with weather data"""
         if not self.weather_enabled or 'weather' not in current_data:
-            return self.pv_forecaster.forecast_pv_production()
+            return await self.pv_forecaster.forecast_pv_production()
         
         # Use weather-based PV forecasting
         return self.pv_forecaster.forecast_pv_production_with_weather()

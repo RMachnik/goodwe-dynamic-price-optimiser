@@ -38,18 +38,31 @@ class AutomatedPriceCharger:
     
     def __init__(self, config_path: str = None):
         """Initialize the automated charger"""
-        if config_path is None:
-            # Use absolute path to config directory
-            current_dir = Path(__file__).parent.parent
-            self.config_path = str(current_dir / "config" / "master_coordinator_config.yaml")
+        # Support both dict config and file path
+        if isinstance(config_path, dict):
+            # Direct config dict provided (used in tests)
+            self.config_path = None
+            self.config = config_path
+            # Extract config values without loading from file
+            self._extract_config_values()
+            # Pass dict to dependencies
+            config_for_deps = self.config
         else:
-            self.config_path = config_path
+            # File path provided or use default
+            if config_path is None:
+                # Use absolute path to config directory
+                current_dir = Path(__file__).parent.parent
+                self.config_path = str(current_dir / "config" / "master_coordinator_config.yaml")
+            else:
+                self.config_path = config_path
+            
+            # Load configuration first (also calls _extract_config_values)
+            self._load_config()
+            # Pass path to dependencies
+            config_for_deps = self.config_path
         
-        # Load configuration first
-        self._load_config()
-        
-        self.goodwe_charger = GoodWeFastCharger(self.config_path)
-        self.data_collector = EnhancedDataCollector(self.config_path)
+        self.goodwe_charger = GoodWeFastCharger(config_for_deps)
+        self.data_collector = EnhancedDataCollector(config_for_deps)
         self.price_api_url = "https://api.raporty.pse.pl/api/csdac-pln"
         self.current_schedule = None
         self.is_charging = False
@@ -65,14 +78,29 @@ class AutomatedPriceCharger:
         self.active_charging_session = False  # Track if we started a charging session
         self.charging_session_start_time = None  # When current session started
         self.charging_session_start_soc = None  # SOC when session started (for dynamic duration)
+
+    def _load_config(self) -> None:
+        """Load YAML configuration defensively into `self.config`."""
+        try:
+            import yaml
+            with open(self.config_path, 'r') as f:
+                self.config = yaml.safe_load(f) or {}
+        except Exception as e:
+            logger.error(f"Failed to load config from {self.config_path}: {e}")
+            self.config = {}
         
+        # Extract config values
+        self._extract_config_values()
+    
+    def _extract_config_values(self) -> None:
+        """Extract configuration values from self.config dict."""
         # Smart charging thresholds
         self.critical_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('critical', 12)  # % - Price-aware charging
         self.emergency_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('emergency', 5)  # % - Always charge regardless of price
         self.low_battery_threshold = 30  # % - Consider charging if below this
         self.medium_battery_threshold = 50  # % - Only charge if conditions are favorable
         self.price_savings_threshold = 0.3  # 30% savings required to wait
-        self.overproduction_threshold = 1500  # W - Significant overproduction (increased to allow charging during negative prices)
+        self.overproduction_threshold = 1500  # W - Significant overproduction
         self.high_consumption_threshold = 1000  # W - High consumption
         
         # Smart critical charging configuration
@@ -117,33 +145,24 @@ class AutomatedPriceCharger:
         self.interim_fallback_consumption = interim_cost_config.get('fallback_consumption_kw', 1.25)  # kW
         self.interim_min_historical_hours = interim_cost_config.get('min_historical_hours', 48)  # hours
         self.interim_lookback_days = interim_cost_config.get('lookback_days', 7)  # days
-
-    def _load_config(self) -> None:
-        """Load YAML configuration defensively into `self.config`."""
-        try:
-            import yaml
-            with open(self.config_path, 'r') as f:
-                self.config = yaml.safe_load(f) or {}
-        except Exception as e:
-            logger.error(f"Failed to load config from {self.config_path}: {e}")
-            self.config = {}
+        
+        # Get interim_cost_config for window commitment config
+        interim_cost_config = smart_critical_config.get('interim_cost_analysis', {})
         
         # Window commitment configuration (prevents infinite postponement)
-        interim_cfg = self.config.get('timing_awareness', {}).get('smart_critical_charging', {}).get('interim_cost_analysis', {})
-        self.window_commitment_enabled = interim_cfg.get('window_commitment_enabled', True)
-        self.max_window_postponements = interim_cfg.get('max_window_postponements', 3)
-        self.commitment_margin_minutes = interim_cfg.get('commitment_margin_minutes', 30)
-        self.min_charging_session_duration = interim_cfg.get('min_charging_session_duration_minutes', 90)
-        self.dynamic_protection_duration = interim_cfg.get('dynamic_protection_duration', True)
-        self.protection_duration_buffer_percent = interim_cfg.get('protection_duration_buffer_percent', 10)
-        self.soc_urgency_thresholds = interim_cfg.get('soc_urgency_thresholds', {
+        self.window_commitment_enabled = interim_cost_config.get('window_commitment_enabled', True)
+        self.max_window_postponements = interim_cost_config.get('max_window_postponements', 3)
+        self.commitment_margin_minutes = interim_cost_config.get('commitment_margin_minutes', 30)
+        self.min_charging_session_duration = interim_cost_config.get('min_charging_session_duration_minutes', 90)
+        self.dynamic_protection_duration = interim_cost_config.get('dynamic_protection_duration', True)
+        self.protection_duration_buffer_percent = interim_cost_config.get('protection_duration_buffer_percent', 10)
+        self.soc_urgency_thresholds = interim_cost_config.get('soc_urgency_thresholds', {
             'critical': 15,  # Below 15%: commit immediately, no more postponements
             'urgent': 20,    # Below 20%: max 1 postponement allowed
             'low': 30        # Below 30%: max 2 postponements allowed
         })
         
         # Partial charging configuration
-        smart_critical_config = self.config.get('timing_awareness', {}).get('smart_critical_charging', {})
         partial_charging_config = smart_critical_config.get('partial_charging', {})
         self.partial_charging_enabled = partial_charging_config.get('enabled', False)
         self.partial_safety_margin = partial_charging_config.get('safety_margin_percent', 10) / 100.0  # Convert to fraction
@@ -174,7 +193,7 @@ class AutomatedPriceCharger:
         self.battery_capacity_kwh = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)  # kWh
         
         # Log status of features from config
-        self.interim_cost_enabled = interim_cfg.get('enabled', False)
+        self.interim_cost_enabled = interim_cost_config.get('enabled', False)
         logger.info(f"Interim cost analysis: {'enabled' if self.interim_cost_enabled else 'disabled'}")
         logger.info(f"Partial charging: {'enabled' if self.partial_charging_enabled else 'disabled'} (max {self.partial_max_sessions_per_day} sessions/day)")
         logger.info(f"Preventive partial charging: {'enabled' if self.preventive_partial_enabled else 'disabled'}")
@@ -557,26 +576,19 @@ class AutomatedPriceCharger:
                 
                 # If we've hit postponement limit, prevent further postponement
                 if self.window_postponement_count >= max_postponements_allowed:
-                    # Special case: at critical SOC (allowance==0) without a commitment yet, allow evaluation to create one
-                    if max_postponements_allowed == 0 and not self.committed_window_time:
-                        logger.warning(
-                            f"⛔ Max postponements limit at critical SOC {battery_soc}% - selecting and committing best window"
-                        )
-                        # continue to evaluation to commit the best available window
-                    else:
-                        logger.warning(
-                            f"⛔ Max postponements reached ({self.window_postponement_count}/{max_postponements_allowed}) "
-                            f"at SOC {battery_soc}% - forcing charge now"
-                        )
-                        self._start_charging_session(battery_soc)
-                        # Do not clear commitment or reset count here; keep history intact
-                        return {
-                            'should_charge': True,
-                            'reason': f"Max postponements reached at SOC {battery_soc}% - must charge",
-                            'priority': 'high',
-                            'confidence': 0.85,
-                            'charging_session_protected': True
-                        }
+                    logger.warning(
+                        f"⛔ Max postponements reached ({self.window_postponement_count}/{max_postponements_allowed}) "
+                        f"at SOC {battery_soc}% - forcing charge now"
+                    )
+                    self._start_charging_session(battery_soc)
+                    self._clear_window_commitment()
+                    return {
+                        'should_charge': True,
+                        'reason': f"Max postponements reached at SOC {battery_soc}% - must charge",
+                        'priority': 'high',
+                        'confidence': 0.85,
+                        'charging_session_protected': True
+                    }
             
             # Get adaptive critical threshold - windows above this are blocked
             critical_threshold = float(self.get_critical_price_threshold())
@@ -608,13 +620,10 @@ class AutomatedPriceCharger:
                     required_charging_hours = self._calculate_required_charging_duration(battery_soc) / 60.0
                     
                     # Calculate how long prices stay good (below critical threshold)
-                    if critical_mode:
-                        window_duration_hours = max(1.0, self._calculate_window_duration(window_time, price_data, critical_threshold))
-                    else:
-                        window_duration_hours = self._calculate_window_duration(window_time, price_data, critical_threshold)
+                    window_duration_hours = self._calculate_window_duration(window_time, price_data, critical_threshold)
                     
-                    # Skip if window too short to complete charge (relaxed in critical mode)
-                    if (not critical_mode) and window_duration_hours < required_charging_hours:
+                    # Skip if window too short to complete charge
+                    if window_duration_hours < required_charging_hours:
                         logger.debug(
                             f"Window {window_time.strftime('%H:%M')}: duration {window_duration_hours:.1f}h < "
                             f"required {required_charging_hours:.1f}h - TOO SHORT"
@@ -795,17 +804,18 @@ class AutomatedPriceCharger:
             soc_difference = max(0, target_soc - current_soc)
             energy_needed_kwh = (soc_difference / 100.0) * battery_capacity_kwh
             
-            # Calculate time needed (hours). Tests expect simple linear model without extra efficiency factor.
-            charging_time_hours = energy_needed_kwh / charging_power_kw
+            # Calculate time needed (hours) with charging efficiency
+            charging_efficiency = 0.90  # 90% charging efficiency
+            charging_time_hours = energy_needed_kwh / (charging_power_kw * charging_efficiency)
             
             # Convert to minutes and add buffer
             charging_time_minutes = charging_time_hours * 60
             buffer_multiplier = 1.0 + (self.protection_duration_buffer_percent / 100.0)
             buffered_time_minutes = charging_time_minutes * buffer_multiplier
             
-            # Debug log for required charging time
             logger.debug(
-                f"Required charging time: {charging_time_minutes:.1f} min (+{self.protection_duration_buffer_percent}% buffer -> {buffered_time_minutes:.1f} min)"
+                f"Required charging time: {charging_time_minutes:.1f} min "
+                f"(+{self.protection_duration_buffer_percent}% buffer -> {buffered_time_minutes:.1f} min)"
             )
             return buffered_time_minutes
 
@@ -1028,7 +1038,6 @@ class AutomatedPriceCharger:
             dynamic_until = self.charging_session_start_time + timedelta(minutes=minutes)
             return datetime.now() <= dynamic_until
         return datetime.now() <= self.session_protection_until
-
     
     def _evaluate_partial_charging(self, battery_soc: int, best_window: Dict, 
                                   current_time: datetime, current_price: float) -> Optional[Dict[str, any]]:

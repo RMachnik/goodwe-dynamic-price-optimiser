@@ -31,6 +31,20 @@ from flask_cors import CORS
 # Logging configuration handled by main application
 logger = logging.getLogger(__name__)
 
+# Storage layer
+try:
+    from database.storage_factory import StorageFactory
+except ImportError:
+    StorageFactory = None
+    logger.warning("StorageFactory not available - falling back to file-only mode")
+
+# Storage layer
+try:
+    from database.storage_factory import StorageFactory
+except ImportError:
+    StorageFactory = None
+    logger.warning("StorageFactory not available - falling back to file-only mode")
+
 def format_uptime_human_readable(seconds: float) -> str:
     """Convert seconds to human-readable uptime format"""
     if seconds < 60:
@@ -60,10 +74,11 @@ def format_uptime_human_readable(seconds: float) -> str:
 class LogWebServer:
     """Simple HTTP server for log access and system monitoring"""
     
-    def __init__(self, host='0.0.0.0', port=8080, log_dir=None):
+    def __init__(self, host='0.0.0.0', port=8080, log_dir=None, config=None):
         """Initialize the log web server"""
         self.host = host
         self.port = port
+        self.config = config or {}
         self.app = Flask(__name__)
         CORS(self.app)  # Enable CORS for all routes
         
@@ -99,7 +114,19 @@ class LogWebServer:
         # Initialize daily snapshot manager for efficient monthly reporting
         from daily_snapshot_manager import DailySnapshotManager
         project_root = Path(__file__).parent.parent
-        self.snapshot_manager = DailySnapshotManager(project_root)
+        self.snapshot_manager = DailySnapshotManager(project_root, config=self.config)
+        
+        # Initialize storage layer for database access
+        self.storage = None
+        self._storage_connected = False
+        if StorageFactory:
+            try:
+                self.storage = StorageFactory.create_storage(self.config.get('data_storage', {}))
+                logger.info("Storage layer initialized for LogWebServer")
+                # Connect storage in a background thread to avoid blocking
+                self._connect_storage_async()
+            except Exception as e:
+                logger.warning(f"Failed to initialize storage layer: {e}. Using file-only fallback.")
         
         # Setup routes
         self._setup_routes()
@@ -107,6 +134,30 @@ class LogWebServer:
         # Log streaming
         self.log_queue = Queue()
         self.clients = set()
+    
+    def _connect_storage_async(self):
+        """Connect storage layer in a background thread."""
+        import threading
+        
+        def connect_in_thread():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(self.storage.connect())
+                    self._storage_connected = result
+                    if result:
+                        logger.info("Storage layer connected successfully")
+                    else:
+                        logger.warning("Storage layer connection returned False")
+                finally:
+                    loop.close()
+            except Exception as e:
+                logger.warning(f"Failed to connect storage layer: {e}")
+                self._storage_connected = False
+        
+        thread = threading.Thread(target=connect_in_thread, daemon=True)
+        thread.start()
     
     def _get_cached_data(self, key: str, ttl: int = None) -> Optional[Any]:
         """Get data from cache if not expired"""
@@ -167,6 +218,25 @@ class LogWebServer:
             self._last_request_times[endpoint] = current_time
         
         return False
+    
+    def _run_async_storage(self, coro):
+        """Run an async storage operation from sync code.
+        
+        Creates a new event loop, runs the coroutine, and cleans up.
+        Returns None if the operation fails or storage is not connected.
+        """
+        if not self.storage or not self._storage_connected:
+            return None
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.warning(f"Async storage operation failed: {e}")
+            return None
         
     def _setup_routes(self):
         """Setup Flask routes"""
@@ -2804,7 +2874,7 @@ class LogWebServer:
         return getattr(self, '_running', False)
     
     def _get_decision_history(self, time_range: str = '24h') -> Dict[str, Any]:
-        """Get charging decision history from master coordinator"""
+        """Get charging decision history from storage layer or files"""
         try:
             # Calculate time threshold based on time_range parameter
             now = datetime.now()
@@ -2824,34 +2894,45 @@ class LogWebServer:
                 time_threshold = now - timedelta(hours=24)
                 max_files = 50
             
-            # Get all decision files (charging and battery selling)
+            decisions = []
+            
+            # Define energy_data_dir at the start for all code paths
             project_root = Path(__file__).parent.parent
             energy_data_dir = project_root / "out" / "energy_data"
             
-            decisions = []
+            # Try to use storage layer first using helper
+            db_decisions = self._run_async_storage(
+                self.storage.get_decisions(time_threshold, now) if self.storage else None
+            )
+            if db_decisions:
+                decisions = db_decisions
+                logger.debug(f"Loaded {len(decisions)} decisions from storage layer")
             
-            # Load charging decisions
-            # Optimization: Sort by filename (contains timestamp) instead of mtime to avoid stat() calls on thousands of files
-            charging_files = sorted(energy_data_dir.glob("charging_decision_*.json"), key=lambda x: x.name, reverse=True)
-            
-            for file_path in charging_files[:max_files]:
-                try:
-                    with open(file_path, 'r') as f:
-                        decision_data = json.load(f)
-                        
-                        # Filter by time
-                        decision_time = datetime.fromisoformat(decision_data.get('timestamp', '').replace('Z', '+00:00'))
-                        if decision_time.replace(tzinfo=None) < time_threshold:
-                            continue
+            # Fallback to file-based reading if storage failed or returned no data
+            if not decisions:
+                
+                # Load charging decisions
+                # Optimization: Sort by filename (contains timestamp) instead of mtime to avoid stat() calls on thousands of files
+                charging_files = sorted(energy_data_dir.glob("charging_decision_*.json"), key=lambda x: x.name, reverse=True)
+                
+                for file_path in charging_files[:max_files]:
+                    try:
+                        with open(file_path, 'r') as f:
+                            decision_data = json.load(f)
                             
-                        # Add filename for categorization
-                        decision_data['filename'] = file_path.name
-                        
-                        # No filtering here - we'll do categorization after loading all decisions
+                            # Filter by time
+                            decision_time = datetime.fromisoformat(decision_data.get('timestamp', '').replace('Z', '+00:00'))
+                            if decision_time.replace(tzinfo=None) < time_threshold:
+                                continue
+                                
+                            # Add filename for categorization
+                            decision_data['filename'] = file_path.name
                             
-                        decisions.append(decision_data)
-                except Exception as e:
-                    logger.warning(f"Failed to read charging decision file {file_path}: {e}")
+                            # No filtering here - we'll do categorization after loading all decisions
+                                
+                            decisions.append(decision_data)
+                    except Exception as e:
+                        logger.warning(f"Failed to read charging decision file {file_path}: {e}")
             
             # Load battery selling decisions
             # Optimization: Sort by filename instead of mtime
@@ -3094,9 +3175,21 @@ class LogWebServer:
             return {'error': str(e)}
     
     def _get_historical_decisions(self) -> List[Dict[str, Any]]:
-        """Get historical charging decisions from previous days"""
+        """Get historical charging decisions from storage layer or files"""
         historical_decisions = []
         try:
+            # Try storage layer first using helper
+            start_time = datetime.now() - timedelta(days=7)
+            end_time = datetime.now()
+            db_decisions = self._run_async_storage(
+                self.storage.get_decisions(start_time, end_time) if self.storage else None
+            )
+            if db_decisions:
+                historical_decisions = db_decisions[:50]  # Limit to 50
+                logger.debug(f"Loaded {len(historical_decisions)} historical decisions from storage")
+                return historical_decisions
+            
+            # Fallback to file-based reading
             # Look for decision files in the energy_data directory
             energy_data_dir = Path(__file__).parent.parent / "out" / "energy_data"
             if not energy_data_dir.exists():
@@ -3309,7 +3402,31 @@ class LogWebServer:
             if cached_data:
                 return cached_data
             
-            # OPTIMIZATION: Try to read from coordinator state file FIRST
+            # OPTIMIZATION 1: Try storage layer (database) first for recent system state
+            system_states = self._run_async_storage(
+                self.storage.get_system_state(limit=1) if self.storage else None
+            )
+            if system_states and len(system_states) > 0:
+                latest_state = system_states[0]
+                # Check if state is fresh (less than 2 minutes old)
+                state_time_str = latest_state.get('timestamp', '')
+                if state_time_str:
+                    try:
+                        state_time = datetime.fromisoformat(state_time_str.replace('Z', '+00:00'))
+                        state_age = (datetime.now(state_time.tzinfo) - state_time).total_seconds()
+                        if state_age < 120:  # 2 minutes freshness
+                            # Extract current_data from the state
+                            current_data = latest_state.get('current_data', {})
+                            if current_data:
+                                dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
+                                if dashboard_data:
+                                    self._set_cached_data('real_inverter_data', dashboard_data)
+                                    logger.debug(f"Loaded fresh data from storage layer (age: {state_age:.1f}s)")
+                                    return dashboard_data
+                    except Exception as e:
+                        logger.warning(f"Failed to parse state timestamp from storage: {e}")
+            
+            # OPTIMIZATION 2: Try to read from coordinator state file SECOND
             # This avoids slow inverter connections if the coordinator is running and updating state
             project_root = Path(__file__).parent.parent
             try:
@@ -3325,23 +3442,30 @@ class LogWebServer:
                     file_age = time.time() - latest_file.stat().st_mtime
                     
                     if file_age < 120:  # 2 minutes freshness
-                        with open(latest_file, 'r') as f:
-                            real_data = json.load(f)
-                        
-                        # Extract relevant data
-                        current_data = real_data.get('current_data', {})
-                        
-                        # Convert to dashboard format
-                        dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
-                        
-                        if dashboard_data:
-                            # Cache the result
-                            self._set_cached_data('real_inverter_data', dashboard_data)
-                            
-                            if self._should_log_message("Loaded fresh data from coordinator state file"):
-                                logger.info(f"Loaded fresh data from {latest_file.name} (age: {file_age:.1f}s)")
-                            
-                            return dashboard_data
+                        # Read file content first to handle empty or partial files
+                        file_content = latest_file.read_text().strip()
+                        if not file_content:
+                            logger.debug(f"State file {latest_file.name} is empty, skipping")
+                        else:
+                            try:
+                                real_data = json.loads(file_content)
+                                
+                                # Extract relevant data
+                                current_data = real_data.get('current_data', {})
+                                
+                                # Convert to dashboard format
+                                dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
+                                
+                                if dashboard_data:
+                                    # Cache the result
+                                    self._set_cached_data('real_inverter_data', dashboard_data)
+                                    
+                                    if self._should_log_message("Loaded fresh data from coordinator state file"):
+                                        logger.info(f"Loaded fresh data from {latest_file.name} (age: {file_age:.1f}s)")
+                                    
+                                    return dashboard_data
+                            except json.JSONDecodeError as je:
+                                logger.debug(f"State file {latest_file.name} has invalid JSON: {je}")
             except Exception as e:
                 logger.warning(f"Failed to read coordinator state file: {e}")
 
@@ -3424,8 +3548,17 @@ class LogWebServer:
                 logger.warning(f"Latest data file is {file_age/86400:.1f} days old")
                 return None
             
-            with open(latest_file, 'r') as f:
-                real_data = json.load(f)
+            # Read file content safely to handle empty or partial files
+            file_content = latest_file.read_text().strip()
+            if not file_content:
+                logger.debug(f"State file {latest_file.name} is empty")
+                return None
+            
+            try:
+                real_data = json.loads(file_content)
+            except json.JSONDecodeError as je:
+                logger.warning(f"State file {latest_file.name} has invalid JSON: {je}")
+                return None
             
             # Extract relevant data from the real system
             current_data = real_data.get('current_data', {})

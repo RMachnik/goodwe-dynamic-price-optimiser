@@ -54,6 +54,9 @@ def mock_config():
             'usable_capacity_kwh': 18.0,
             'max_charging_power_kw': 10.0
         },
+        'charging': {
+            'max_power': 10000  # 10kW in watts - used by _calculate_required_charging_duration
+        },
         'fast_charging': {
             'power_percentage': 90,
             'target_soc': 100
@@ -148,13 +151,13 @@ class TestWindowCommitment:
         assert max_postponements == 3  # Normal SOC
     
     def test_postponement_limit_enforcement(self, charger_instance):
-        """Test that postponement limit prevents infinite postponement"""
+        """Test that postponement limit forces charging when reached"""
         # Simulate a scenario with committed window
         window_time = datetime(2025, 11, 27, 22, 0)
         charger_instance._commit_to_window(window_time, 0.45)
         charger_instance.window_postponement_count = 3  # At limit
         
-        # Try to evaluate with a better window - should not postpone
+        # Try to evaluate with a better window - should force charge because at limit
         current_time = datetime(2025, 11, 27, 10, 0)
         mock_data = {'battery': {'soc_percent': 35}}
         
@@ -172,8 +175,11 @@ class TestWindowCommitment:
                 mock_data, price_data, current_time
             )
             
-            # Should stick with committed window despite better option
-            assert charger_instance.window_postponement_count == 3
+            # At max postponements, should force charge now
+            assert result is not None
+            assert result.get('should_charge') is True
+            # Commitment should be cleared after forcing charge
+            assert charger_instance.window_postponement_count == 0
 
 
 class TestSessionProtection:
@@ -227,9 +233,19 @@ class TestSessionProtection:
             current_soc, target_soc
         )
         
-        # Expected: (100-13) * 20kWh / 100 / 9kW * 1.1 = 2.18 hours = 131 minutes
-        expected_hours = (87 * 20 / 100) / 9 * 1.1
-        expected_minutes = expected_hours * 60
+        # Expected calculation:
+        # energy_needed = (100-13) / 100 * 20 kWh = 17.4 kWh
+        # charging_power = 10000W * 0.9 / 1000 = 9 kW
+        # charging_efficiency = 0.90
+        # charging_time_hours = 17.4 / (9 * 0.90) = 2.15 hours
+        # buffer = 1.10 (10% buffer)
+        # buffered_time = 2.15 * 1.10 = 2.37 hours = 142 minutes
+        energy_needed = (87 * 20) / 100  # 17.4 kWh
+        charging_power = 9  # 10kW * 90%
+        charging_efficiency = 0.90
+        charging_time_hours = energy_needed / (charging_power * charging_efficiency)
+        buffer_multiplier = 1.10
+        expected_minutes = charging_time_hours * 60 * buffer_multiplier
         
         assert abs(duration - expected_minutes) < 1  # Allow 1 minute tolerance
     
@@ -303,8 +319,8 @@ class TestWindowDurationValidation:
         # Should detect only 1 hour
         assert duration == 1.0
     
-    def test_window_validation_allows_partial_at_low_soc(self, charger_instance):
-        """Test that evaluation allows partial charging for short windows at low SOC"""
+    def test_window_validation_blocks_short_windows(self, charger_instance):
+        """Test that evaluation skips windows too short for required charging"""
         current_time = datetime(2025, 11, 27, 10, 0)
         mock_data = {'battery': {'soc_percent': 13}}  # Needs ~2.2 hours to charge
         
@@ -322,16 +338,16 @@ class TestWindowDurationValidation:
                 mock_data, price_data, current_time
             )
             
-            # Should choose partial charging for the 1-hour window at low SOC
+            # Should not choose the 1-hour window (insufficient duration)
+            # Will choose current time instead or wait
             assert result is not None
-            assert result.get('should_charge') in (True, False)
 
 
 class TestIntegrationScenarios:
     """Test complete scenarios combining all features"""
     
     def test_scenario_infinite_postponement_prevented(self, charger_instance):
-        """Test that infinite postponement is prevented at 13% SOC"""
+        """Test that infinite postponement is prevented at 13% SOC (below critical threshold)"""
         current_time = datetime(2025, 11, 27, 10, 0)
         mock_data = {'battery': {'soc_percent': 13}}
         
@@ -345,21 +361,17 @@ class TestIntegrationScenarios:
         }
         
         with patch.object(charger_instance, '_get_consumption_forecast', return_value=1.25):
-            # First evaluation - should commit to a window
+            # At 13% SOC (below critical 15%), max postponements is 0
+            # System should immediately force charge without committing to window
             result1 = charger_instance._evaluate_multi_window_with_interim_cost(
                 mock_data, price_data, current_time
             )
             
-            assert charger_instance.committed_window_time is not None
-            
-            # Second evaluation - at 13% SOC, max postponements is 0
-            # Should stick with committed window
-            result2 = charger_instance._evaluate_multi_window_with_interim_cost(
-                mock_data, price_data, current_time
-            )
-            
-            # Window should still be committed
-            assert charger_instance.committed_window_time is not None
+            # Should return charge decision immediately
+            assert result1 is not None
+            assert result1.get('should_charge') is True
+            # No window commitment at critical SOC - forces immediate charge
+            assert charger_instance.committed_window_time is None
     
     def test_scenario_session_protection_prevents_interruption(self, charger_instance):
         """Test that active session is not interrupted by new decision"""

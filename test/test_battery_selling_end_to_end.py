@@ -77,6 +77,7 @@ class TestBatterySellingEndToEnd:
         }
     
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_complete_battery_selling_workflow(self, config, mock_inverter_data, mock_price_data):
         """Test complete battery selling workflow"""
         
@@ -169,6 +170,7 @@ class TestBatterySellingEndToEnd:
                 assert opportunity.expected_revenue_pln > 0
     
     @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
     async def test_battery_selling_with_real_inverter_data(self, config):
         """Test battery selling with real inverter data (if available)"""
         

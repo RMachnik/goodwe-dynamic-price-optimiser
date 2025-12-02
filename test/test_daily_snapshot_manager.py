@@ -256,10 +256,28 @@ class TestMonthlyAggregation(unittest.TestCase):
             shutil.rmtree(self.test_dir)
     
     def _create_multi_day_data(self):
-        """Create decision files for multiple days"""
-        # Create data for the last 3 days
-        for days_ago in range(1, 4):
-            test_date = date.today() - timedelta(days=days_ago)
+        """Create decision files for multiple days in the same month"""
+        # Use a fixed test date that ensures all 3 days are in the same month
+        # Use the 5th day of current month to ensure 3 previous days exist
+        today = date.today()
+        
+        # If we're in the first few days of the month, use last month
+        if today.day <= 4:
+            if today.month == 1:
+                test_month = 12
+                test_year = today.year - 1
+            else:
+                test_month = today.month - 1
+                test_year = today.year
+            # Use a safe day in the middle of that month
+            base_date = date(test_year, test_month, 15)
+        else:
+            # Use current month, ensure we have at least 3 days before today
+            base_date = today - timedelta(days=1)
+        
+        # Create data for 3 consecutive days ending with base_date
+        for days_before in range(2, -1, -1):  # 2, 1, 0
+            test_date = base_date - timedelta(days=days_before)
             date_str = test_date.strftime('%Y%m%d')
             
             # Create 2 decisions per day
@@ -284,11 +302,21 @@ class TestMonthlyAggregation(unittest.TestCase):
     
     def test_monthly_aggregation(self):
         """Test aggregating multiple days into monthly summary"""
-        test_date = date.today() - timedelta(days=1)
-        year = test_date.year
-        month = test_date.month
+        # Use the same logic as _create_multi_day_data to determine the test date
+        today = date.today()
         
-        summary = self.manager.get_monthly_summary(year, month)
+        if today.day <= 4:
+            if today.month == 1:
+                test_month = 12
+                test_year = today.year - 1
+            else:
+                test_month = today.month - 1
+                test_year = today.year
+        else:
+            test_year = today.year
+            test_month = today.month
+        
+        summary = self.manager.get_monthly_summary(test_year, test_month)
         
         # Should have data from 3 days
         self.assertGreaterEqual(summary['days_with_data'], 3)
@@ -301,9 +329,19 @@ class TestMonthlyAggregation(unittest.TestCase):
     
     def test_monthly_summary_structure(self):
         """Test that monthly summary has correct structure"""
-        test_date = date.today() - timedelta(days=1)
-        year = test_date.year
-        month = test_date.month
+        # Use the same logic as _create_multi_day_data to determine the test date
+        today = date.today()
+        
+        if today.day <= 4:
+            if today.month == 1:
+                month = 12
+                year = today.year - 1
+            else:
+                month = today.month - 1
+                year = today.year
+        else:
+            year = today.year
+            month = today.month
         
         summary = self.manager.get_monthly_summary(year, month)
         

@@ -298,7 +298,24 @@ async def main():
         import traceback
         traceback.print_exc()
 
-if __name__ == "__main__":
-    print("This demo has been moved to `examples/demo_data_access_layer.py`. Run that file for the full demo.")
-    # Keep a no-op main to avoid pytest collection issues when imported.
-    # The working demo lives in `examples/`.
+
+# Pytest-compatible tests
+import pytest
+from data_access_layer import DataAccessLayer, DataStorageConfig
+
+def test_demo_functions_exist():
+    # Ensure demo functions are defined
+    assert callable(demo_file_storage)
+    assert callable(demo_database_storage)
+    assert callable(demo_backend_switching)
+    assert callable(demo_configuration_from_dict)
+
+@pytest.mark.asyncio
+async def test_dal_file_backend_connect():
+    config = DataStorageConfig(
+        mode="file",
+        file_config={'base_path': 'out/test_demo_file_storage'}
+    )
+    dal = DataAccessLayer(config)
+    await dal.connect()
+    await dal.disconnect()
