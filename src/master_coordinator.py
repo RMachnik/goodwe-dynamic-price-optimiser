@@ -257,9 +257,9 @@ class MasterCoordinator:
                 self.decision_engine.peak_hours_collector = self.peak_hours_collector
                 logger.info("PSE Peak Hours Collector integrated with decision engine")
             
-            # Initialize multi-session manager
+            # Initialize multi-session manager with storage support
             logger.info("Initializing Multi-Session Manager...")
-            self.multi_session_manager = MultiSessionManager(self.config)
+            self.multi_session_manager = MultiSessionManager(self.config, storage=self.storage)
             logger.info("Multi-Session Manager initialized successfully")
             
             # Initialize battery selling engine

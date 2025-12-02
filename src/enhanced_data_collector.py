@@ -424,22 +424,65 @@ class EnhancedDataCollector:
             logger.error(f"Failed to update daily stats: {e}")
     
     async def save_data_to_file(self):
-        """Save collected data to storage"""
+        """Save collected data to storage (file or database)"""
         try:
             # Prepare data for storage
             if self.current_data:
-                # Add timestamp if missing
-                if 'timestamp' not in self.current_data:
-                    self.current_data['timestamp'] = datetime.now().isoformat()
+                # Flatten the nested structure for DB schema compatibility
+                flat_data = self._flatten_data_for_storage(self.current_data)
                 
-                # Flatten structure for DB if needed, or pass as is
                 # The storage interface expects a list of dicts
-                await self.storage.save_energy_data([self.current_data])
+                await self.storage.save_energy_data([flat_data])
                 
             logger.info("Data saved to storage")
             
         except Exception as e:
             logger.error(f"Failed to save data to storage: {e}")
+    
+    def _flatten_data_for_storage(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Flatten nested data structure to match DB schema"""
+        try:
+            battery = data.get('battery', {})
+            pv = data.get('photovoltaic', {})
+            grid = data.get('grid', {})
+            consumption = data.get('house_consumption', {})
+            
+            flat = {
+                'timestamp': data.get('timestamp') or data.get('time') or datetime.now().isoformat(),
+                'battery_soc': self._safe_float(battery.get('soc_percent')),
+                'pv_power': self._safe_int(pv.get('current_power_w')),
+                'grid_power': self._safe_int(grid.get('power_w')),
+                'house_consumption': self._safe_int(consumption.get('current_power_w')),
+                'battery_power': self._safe_int(battery.get('power_w')),
+                'grid_voltage': self._safe_float(grid.get('voltage')),
+                'grid_frequency': None,  # Not available in current data structure
+                'battery_voltage': self._safe_float(battery.get('voltage')),
+                'battery_current': self._safe_float(battery.get('current')),
+                'battery_temperature': self._safe_float(battery.get('temperature')),
+                'price_pln': None  # Will be set by caller if price data available
+            }
+            return flat
+        except Exception as e:
+            logger.error(f"Failed to flatten data: {e}")
+            return {'timestamp': datetime.now().isoformat()}
+    
+    def _safe_float(self, value) -> Optional[float]:
+        """Safely convert value to float, returning None for invalid values"""
+        if value is None or value == 'Unknown':
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+    
+    def _safe_int(self, value) -> Optional[int]:
+        """Safely convert value to int, returning None for invalid values"""
+        if value is None or value == 'Unknown':
+            return None
+        try:
+            return int(float(value))
+        except (ValueError, TypeError):
+            return None
     
     def get_current_data(self) -> Dict[str, Any]:
         """Get current system data"""

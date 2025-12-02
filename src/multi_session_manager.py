@@ -14,6 +14,15 @@ from pathlib import Path
 
 from automated_price_charging import AutomatedPriceCharger
 
+# Try to import storage layer
+try:
+    from database.storage_factory import StorageFactory
+    from database.storage_interface import DataStorageInterface
+    STORAGE_AVAILABLE = True
+except ImportError:
+    STORAGE_AVAILABLE = False
+    DataStorageInterface = None
+
 # Setup logging
 logger = logging.getLogger(__name__)
 
@@ -51,10 +60,16 @@ class DailyChargingPlan:
 class MultiSessionManager:
     """Manages multiple charging sessions per day"""
     
-    def __init__(self, config: Dict[str, Any]):
-        """Initialize the multi-session manager"""
+    def __init__(self, config: Dict[str, Any], storage: Optional[Any] = None):
+        """Initialize the multi-session manager
+        
+        Args:
+            config: Configuration dictionary
+            storage: Optional storage interface for database persistence
+        """
         self.config = config
         self.multi_session_config = config.get('coordinator', {}).get('multi_session_charging', {})
+        self.storage = storage
         
         # Configuration parameters
         self.enabled = self.multi_session_config.get('enabled', True)
@@ -310,11 +325,8 @@ class MultiSessionManager:
         return energy_kwh * (window['savings'] / 1000.0)
     
     async def _save_daily_plan(self, plan: DailyChargingPlan):
-        """Save daily plan to file"""
+        """Save daily plan to storage or file"""
         try:
-            filename = f"daily_plan_{plan.date.strftime('%Y%m%d')}.json"
-            filepath = self.data_dir / filename
-            
             # Convert to serializable format
             plan_data = {
                 'date': plan.date.isoformat(),
@@ -328,15 +340,68 @@ class MultiSessionManager:
                 'status': plan.status
             }
             
+            # Try to save to storage first
+            if self.storage:
+                try:
+                    # Save each session to storage
+                    for session in plan.sessions:
+                        session_data = asdict(session)
+                        # Convert datetime objects to strings for storage
+                        for key in ['start_time', 'end_time', 'created_at', 'started_at', 'completed_at']:
+                            if session_data.get(key) and isinstance(session_data[key], datetime):
+                                session_data[key] = session_data[key].isoformat()
+                        await self.storage.save_charging_session(session_data)
+                    logger.debug(f"Daily plan saved to storage")
+                except Exception as e:
+                    logger.warning(f"Failed to save to storage, falling back to file: {e}")
+                    # Fall through to file-based saving
+            
+            # Always save to file as backup/fallback
+            filename = f"daily_plan_{plan.date.strftime('%Y%m%d')}.json"
+            filepath = self.data_dir / filename
+            
             with open(filepath, 'w') as f:
-                json.dump(plan_data, f, indent=2)
+                json.dump(plan_data, f, indent=2, default=str)
                 
         except Exception as e:
             logger.error(f"Failed to save daily plan: {e}")
     
     async def _load_daily_plan(self, date: datetime) -> Optional[DailyChargingPlan]:
-        """Load daily plan from file"""
+        """Load daily plan from storage or file"""
         try:
+            # Try to load from storage first
+            if self.storage:
+                try:
+                    start_time = datetime.combine(date if isinstance(date, datetime.date.__class__) else date.date(), time.min)
+                    end_time = datetime.combine(date if isinstance(date, datetime.date.__class__) else date.date(), time.max)
+                    
+                    db_sessions = await self.storage.get_charging_sessions(start_time, end_time)
+                    if db_sessions:
+                        # Reconstruct sessions from DB data
+                        sessions = []
+                        for session_data in db_sessions:
+                            session = self._session_from_dict(session_data)
+                            if session:
+                                sessions.append(session)
+                        
+                        if sessions:
+                            # Reconstruct plan from sessions
+                            plan = DailyChargingPlan(
+                                date=date if isinstance(date, datetime.date.__class__) else date.date(),
+                                total_sessions=len(sessions),
+                                total_duration_hours=sum(s.duration_hours for s in sessions),
+                                total_estimated_energy_kwh=sum(s.target_energy_kwh for s in sessions),
+                                total_estimated_cost_pln=sum(s.estimated_cost_pln for s in sessions),
+                                total_estimated_savings_pln=sum(s.estimated_savings_pln for s in sessions),
+                                sessions=sessions,
+                                created_at=sessions[0].created_at if sessions else datetime.now(),
+                                status='active' if any(s.status == 'active' for s in sessions) else 'planned'
+                            )
+                            return plan
+                except Exception as e:
+                    logger.warning(f"Failed to load from storage, trying file: {e}")
+            
+            # Fall back to file-based loading
             filename = f"daily_plan_{date.strftime('%Y%m%d')}.json"
             filepath = self.data_dir / filename
             
@@ -349,23 +414,9 @@ class MultiSessionManager:
             # Reconstruct sessions
             sessions = []
             for session_data in plan_data['sessions']:
-                session = ChargingSession(
-                    session_id=session_data['session_id'],
-                    start_time=datetime.fromisoformat(session_data['start_time']),
-                    end_time=datetime.fromisoformat(session_data['end_time']),
-                    duration_hours=session_data['duration_hours'],
-                    target_energy_kwh=session_data['target_energy_kwh'],
-                    status=session_data['status'],
-                    priority=session_data['priority'],
-                    estimated_cost_pln=session_data['estimated_cost_pln'],
-                    estimated_savings_pln=session_data['estimated_savings_pln'],
-                    created_at=datetime.fromisoformat(session_data['created_at']),
-                    started_at=datetime.fromisoformat(session_data['started_at']) if session_data.get('started_at') else None,
-                    completed_at=datetime.fromisoformat(session_data['completed_at']) if session_data.get('completed_at') else None,
-                    actual_energy_kwh=session_data.get('actual_energy_kwh'),
-                    actual_cost_pln=session_data.get('actual_cost_pln')
-                )
-                sessions.append(session)
+                session = self._session_from_dict(session_data)
+                if session:
+                    sessions.append(session)
             
             # Reconstruct plan
             plan = DailyChargingPlan(
@@ -384,4 +435,34 @@ class MultiSessionManager:
             
         except Exception as e:
             logger.error(f"Failed to load daily plan for {date}: {e}")
+            return None
+    
+    def _session_from_dict(self, session_data: Dict[str, Any]) -> Optional[ChargingSession]:
+        """Create a ChargingSession from dictionary data"""
+        try:
+            def parse_datetime(val):
+                if val is None:
+                    return None
+                if isinstance(val, datetime):
+                    return val
+                return datetime.fromisoformat(str(val))
+            
+            return ChargingSession(
+                session_id=session_data['session_id'],
+                start_time=parse_datetime(session_data['start_time']),
+                end_time=parse_datetime(session_data['end_time']),
+                duration_hours=session_data.get('duration_hours', 0),
+                target_energy_kwh=session_data.get('target_energy_kwh', 0),
+                status=session_data.get('status', 'planned'),
+                priority=session_data.get('priority', 2),
+                estimated_cost_pln=session_data.get('estimated_cost_pln', 0),
+                estimated_savings_pln=session_data.get('estimated_savings_pln', 0),
+                created_at=parse_datetime(session_data.get('created_at')) or datetime.now(),
+                started_at=parse_datetime(session_data.get('started_at')),
+                completed_at=parse_datetime(session_data.get('completed_at')),
+                actual_energy_kwh=session_data.get('actual_energy_kwh'),
+                actual_cost_pln=session_data.get('actual_cost_pln')
+            )
+        except Exception as e:
+            logger.warning(f"Failed to parse session data: {e}")
             return None
