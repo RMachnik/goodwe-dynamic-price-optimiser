@@ -378,6 +378,7 @@ class SQLiteStorage(DataStorageInterface):
                             params[field] = decision[field]
                     params_json = json.dumps(params, default=str)
                     
+                    self.logger.info(f"📝 Executing INSERT: ts={ts}, type={decision.get('decision_type')}, action={decision.get('action')}")
                     await self._connection.execute(query, (
                         ts,
                         decision.get('decision_type'),
@@ -386,7 +387,9 @@ class SQLiteStorage(DataStorageInterface):
                         params_json,
                         decision.get('source_module')
                     ))
+                    self.logger.info(f"💾 Committing transaction...")
                     await self._connection.commit()
+                    self.logger.info(f"✅ Commit successful!")
                     return True
                 
                 return await self._execute_with_retry(_do_save)

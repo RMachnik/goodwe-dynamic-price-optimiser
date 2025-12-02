@@ -122,7 +122,7 @@ class MasterCoordinator:
         # Initialize storage
         self.storage: Optional[DataStorageInterface] = None
         try:
-            self.storage = StorageFactory.create_storage(self.config)
+            self.storage = StorageFactory.create_storage(self.config.get('data_storage', {}))
         except Exception as e:
             logger.error(f"Failed to create storage: {e}")
             
@@ -724,10 +724,14 @@ class MasterCoordinator:
             
             # Save to storage
             if self.storage:
-                # Add type for storage schema
-                decision_data['type'] = 'charging'
-                await self.storage.save_decision(decision_data)
-                logger.debug(f"Decision saved to storage")
+                # Add decision_type for storage schema
+                decision_data['decision_type'] = 'charging'
+                logger.info(f"Storage type: {type(self.storage).__name__}, attempting to save decision to storage: {decision_data.get('timestamp')}, action={decision_data.get('action')}")
+                result = await self.storage.save_decision(decision_data)
+                if result:
+                    logger.info(f"✅ Decision saved to storage successfully")
+                else:
+                    logger.error(f"❌ Failed to save decision to storage (returned False)")
             else:
                 # Fallback to file
                 with open(file_path, 'w') as f:
