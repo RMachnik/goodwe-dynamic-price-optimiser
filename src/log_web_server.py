@@ -3441,23 +3441,30 @@ class LogWebServer:
                     file_age = time.time() - latest_file.stat().st_mtime
                     
                     if file_age < 120:  # 2 minutes freshness
-                        with open(latest_file, 'r') as f:
-                            real_data = json.load(f)
-                        
-                        # Extract relevant data
-                        current_data = real_data.get('current_data', {})
-                        
-                        # Convert to dashboard format
-                        dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
-                        
-                        if dashboard_data:
-                            # Cache the result
-                            self._set_cached_data('real_inverter_data', dashboard_data)
-                            
-                            if self._should_log_message("Loaded fresh data from coordinator state file"):
-                                logger.info(f"Loaded fresh data from {latest_file.name} (age: {file_age:.1f}s)")
-                            
-                            return dashboard_data
+                        # Read file content first to handle empty or partial files
+                        file_content = latest_file.read_text().strip()
+                        if not file_content:
+                            logger.debug(f"State file {latest_file.name} is empty, skipping")
+                        else:
+                            try:
+                                real_data = json.loads(file_content)
+                                
+                                # Extract relevant data
+                                current_data = real_data.get('current_data', {})
+                                
+                                # Convert to dashboard format
+                                dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
+                                
+                                if dashboard_data:
+                                    # Cache the result
+                                    self._set_cached_data('real_inverter_data', dashboard_data)
+                                    
+                                    if self._should_log_message("Loaded fresh data from coordinator state file"):
+                                        logger.info(f"Loaded fresh data from {latest_file.name} (age: {file_age:.1f}s)")
+                                    
+                                    return dashboard_data
+                            except json.JSONDecodeError as je:
+                                logger.debug(f"State file {latest_file.name} has invalid JSON: {je}")
             except Exception as e:
                 logger.warning(f"Failed to read coordinator state file: {e}")
 
@@ -3540,8 +3547,17 @@ class LogWebServer:
                 logger.warning(f"Latest data file is {file_age/86400:.1f} days old")
                 return None
             
-            with open(latest_file, 'r') as f:
-                real_data = json.load(f)
+            # Read file content safely to handle empty or partial files
+            file_content = latest_file.read_text().strip()
+            if not file_content:
+                logger.debug(f"State file {latest_file.name} is empty")
+                return None
+            
+            try:
+                real_data = json.loads(file_content)
+            except json.JSONDecodeError as je:
+                logger.warning(f"State file {latest_file.name} has invalid JSON: {je}")
+                return None
             
             # Extract relevant data from the real system
             current_data = real_data.get('current_data', {})
