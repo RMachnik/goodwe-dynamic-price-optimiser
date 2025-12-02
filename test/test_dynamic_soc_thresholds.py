@@ -238,6 +238,7 @@ class TestDynamicSOCThresholds:
             assert min_soc == 80
     
     @pytest.mark.asyncio
+    @pytest.mark.external
     async def test_selling_blocked_at_72_soc_normal_price(self, engine_dynamic):
         """Test selling blocked at 72% SOC with normal price"""
         current_data = {

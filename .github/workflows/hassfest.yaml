@@ -1,0 +1,28 @@
+name: Validate with hassfest
+
+# This workflow is disabled because this project is not a Home Assistant integration.
+# It was previously added by mistake and is now disabled to prevent scheduled failures.
+# To fully remove this workflow, disable it in GitHub Actions UI:
+# Repository -> Actions -> Workflows -> "Validate with hassfest" -> ... -> Disable workflow
+
+on:
+  # Explicitly disable all triggers
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'This workflow is disabled - it is not applicable to this project'
+        required: false
+        default: 'false'
+
+# Set minimal permissions for this disabled workflow
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    # Always skip this job
+    if: false
+    steps:
+      - name: Disabled
+        run: echo "This workflow has been disabled. This project is not a Home Assistant integration."

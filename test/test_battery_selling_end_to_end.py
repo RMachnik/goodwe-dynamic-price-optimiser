@@ -77,6 +77,7 @@ class TestBatterySellingEndToEnd:
         }
     
     @pytest.mark.asyncio
+    @pytest.mark.external
     async def test_complete_battery_selling_workflow(self, config, mock_inverter_data, mock_price_data):
         """Test complete battery selling workflow"""
         

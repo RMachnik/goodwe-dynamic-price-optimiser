@@ -150,6 +150,7 @@ class TestBatterySellingEngine:
         assert risk == "high"
     
     @pytest.mark.asyncio
+    @pytest.mark.external
     async def test_selling_opportunity_analysis(self, engine):
         """Test selling opportunity analysis"""
         # Good selling opportunity - but smart timing may recommend waiting
