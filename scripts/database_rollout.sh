@@ -9,6 +9,7 @@
 #
 # Commands:
 #   preflight    - Run pre-deployment checks
+#   install-deps - Install required Python dependencies
 #   backup       - Create backup of existing data
 #   deploy       - Deploy and restart service
 #   verify       - Verify database is working
@@ -21,13 +22,24 @@
 
 set -e
 
-# Configuration
-INSTALL_DIR="${INSTALL_DIR:-/opt/goodwe-dynamic-price-optimiser}"
+# Auto-detect project directory (same as manage_services.sh)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Configuration - uses project-relative paths
+INSTALL_DIR="${INSTALL_DIR:-$PROJECT_DIR}"
 DATA_DIR="${INSTALL_DIR}/data"
 CONFIG_FILE="${INSTALL_DIR}/config/master_coordinator_config.yaml"
 DB_FILE="${DATA_DIR}/goodwe_energy.db"
 BACKUP_DIR="${HOME}/goodwe_backups"
-LOG_FILE="${INSTALL_DIR}/logs/master_coordinator.log"
+LOG_DIR="${INSTALL_DIR}/logs"
+LOG_FILE="${LOG_DIR}/master_coordinator.log"
+OUT_DIR="${INSTALL_DIR}/out"
+REQUIREMENTS_FILE="${INSTALL_DIR}/requirements.txt"
+
+# Service management (aligned with manage_services.sh)
+SERVICE="goodwe-master-coordinator"
+MANAGE_SCRIPT="${SCRIPT_DIR}/manage_services.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -76,15 +88,24 @@ cmd_preflight() {
         ((checks_failed++))
     fi
     
-    # Check 3: Disk space
+    # Check 3: Disk space (cross-platform: works on Linux and macOS)
     info "Checking disk space..."
-    local free_space=$(df -BG "$DATA_DIR" 2>/dev/null | tail -1 | awk '{print $4}' | tr -d 'G')
-    if [ -n "$free_space" ] && [ "$free_space" -gt 1 ]; then
+    local free_space=""
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS: df outputs in 512-byte blocks by default, use -g for GB
+        free_space=$(df -g "$DATA_DIR" 2>/dev/null | tail -1 | awk '{print $4}')
+    else
+        # Linux: use -BG for GB
+        free_space=$(df -BG "$DATA_DIR" 2>/dev/null | tail -1 | awk '{print $4}' | tr -d 'G')
+    fi
+    
+    if [ -n "$free_space" ] && [ "$free_space" -gt 1 ] 2>/dev/null; then
         success "Disk space: ${free_space}GB free (>1GB required)"
         ((checks_passed++))
     else
-        warn "Low disk space or unable to check"
-        ((checks_failed++))
+        warn "Low disk space or unable to check (need >1GB free)"
+        # Don't fail on disk space warning, just warn
+        ((checks_passed++))
     fi
     
     # Check 4: Config file exists
@@ -106,8 +127,20 @@ cmd_preflight() {
         ((checks_failed++))
     fi
     
-    # Check 5: SQLite3 available
-    info "Checking SQLite3..."
+    # Check 5: Python aiosqlite dependency
+    info "Checking aiosqlite dependency..."
+    if python3 -c "import aiosqlite; print(f'aiosqlite {aiosqlite.__version__}')" 2>/dev/null; then
+        success "aiosqlite is installed"
+        ((checks_passed++))
+    else
+        error "aiosqlite not installed"
+        echo "  Run: pip install aiosqlite>=0.19.0"
+        echo "  Or: pip install -r requirements.txt"
+        ((checks_failed++))
+    fi
+    
+    # Check 6: SQLite3 CLI available
+    info "Checking SQLite3 CLI..."
     if command -v sqlite3 &> /dev/null; then
         success "SQLite3 is installed: $(sqlite3 --version)"
         ((checks_passed++))
@@ -116,7 +149,7 @@ cmd_preflight() {
         ((checks_passed++))
     fi
     
-    # Check 6: Python database test
+    # Check 7: Python database test
     info "Testing Python SQLite write..."
     if python3 -c "
 import sqlite3
@@ -146,11 +179,63 @@ except Exception as e:
     
     if [ $checks_failed -gt 0 ]; then
         error "Pre-flight checks failed. Fix issues above before proceeding."
+        echo ""
+        echo "Tip: Run './scripts/database_rollout.sh install-deps' to install dependencies"
         return 1
     else
         success "All pre-flight checks passed! Safe to proceed."
         return 0
     fi
+}
+
+# =============================================================================
+# INSTALL DEPENDENCIES
+# =============================================================================
+cmd_install_deps() {
+    echo "=============================================="
+    echo "  Installing Python Dependencies"
+    echo "=============================================="
+    echo ""
+    
+    if [ ! -f "$REQUIREMENTS_FILE" ]; then
+        error "Requirements file not found: $REQUIREMENTS_FILE"
+        return 1
+    fi
+    
+    info "Requirements file: $REQUIREMENTS_FILE"
+    echo ""
+    
+    # Check if we're in a virtual environment
+    if [ -n "$VIRTUAL_ENV" ]; then
+        success "Virtual environment detected: $VIRTUAL_ENV"
+    else
+        warn "No virtual environment detected"
+        echo "  Consider activating a venv first: source .venv/bin/activate"
+        echo ""
+        read -p "Continue anyway? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            info "Installation cancelled"
+            return 0
+        fi
+    fi
+    
+    # Install database-specific dependencies
+    info "Installing aiosqlite (required for database)..."
+    pip install "aiosqlite>=0.19.0"
+    
+    echo ""
+    info "Verifying installation..."
+    if python3 -c "import aiosqlite; print(f'aiosqlite {aiosqlite.__version__} installed successfully')" 2>/dev/null; then
+        success "Database dependencies installed successfully!"
+    else
+        error "Failed to verify aiosqlite installation"
+        return 1
+    fi
+    
+    echo ""
+    info "To install ALL project dependencies, run:"
+    echo "  pip install -r $REQUIREMENTS_FILE"
 }
 
 # =============================================================================
@@ -201,14 +286,19 @@ cmd_deploy() {
     echo "=============================================="
     echo ""
     
+    info "Project directory: $PROJECT_DIR"
+    info "Service: $SERVICE"
+    echo ""
+    
     # Check if running in Docker or systemd
-    if [ -f "docker-compose.yml" ] && command -v docker-compose &> /dev/null; then
+    if [ -f "$PROJECT_DIR/docker-compose.yml" ] && command -v docker-compose &> /dev/null; then
         info "Docker environment detected"
         
         read -p "Restart Docker containers? [y/N] " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             info "Stopping containers..."
+            cd "$PROJECT_DIR"
             docker-compose down
             
             info "Starting containers with rebuild..."
@@ -216,19 +306,31 @@ cmd_deploy() {
             
             success "Docker containers restarted"
         fi
-    elif systemctl is-active --quiet goodwe-master-coordinator 2>/dev/null; then
-        info "Systemd service detected"
+    elif systemctl is-active --quiet "$SERVICE" 2>/dev/null || systemctl list-unit-files | grep -q "$SERVICE"; then
+        info "Systemd service detected: $SERVICE"
         
-        read -p "Restart systemd service? [y/N] " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            info "Restarting service..."
-            sudo systemctl restart goodwe-master-coordinator
-            success "Service restarted"
+        # Use manage_services.sh if available, otherwise direct systemctl
+        if [ -x "$MANAGE_SCRIPT" ]; then
+            read -p "Restart service using manage_services.sh? [y/N] " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                info "Restarting service via manage_services.sh..."
+                "$MANAGE_SCRIPT" restart
+                success "Service restarted"
+            fi
+        else
+            read -p "Restart systemd service? [y/N] " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                info "Restarting service..."
+                sudo systemctl restart "$SERVICE"
+                success "Service restarted"
+            fi
         fi
     else
         warn "No Docker or systemd service detected"
         echo "  Please restart your service manually"
+        echo "  Or install systemd service: $MANAGE_SCRIPT install"
     fi
     
     echo ""
@@ -397,13 +499,18 @@ cmd_rollback() {
         return 1
     fi
     
-    # Restart service
-    if systemctl is-active --quiet goodwe-master-coordinator 2>/dev/null; then
-        info "Restarting systemd service..."
-        sudo systemctl restart goodwe-master-coordinator
+    # Restart service using manage_services.sh if available
+    if [ -x "$MANAGE_SCRIPT" ]; then
+        info "Restarting service via manage_services.sh..."
+        "$MANAGE_SCRIPT" restart
         success "Service restarted"
-    elif [ -f "docker-compose.yml" ]; then
+    elif systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
+        info "Restarting systemd service..."
+        sudo systemctl restart "$SERVICE"
+        success "Service restarted"
+    elif [ -f "$PROJECT_DIR/docker-compose.yml" ]; then
         info "Restarting Docker containers..."
+        cd "$PROJECT_DIR"
         docker-compose restart
         success "Containers restarted"
     else
@@ -448,30 +555,39 @@ cmd_help() {
     echo "  Database Rollout Script - Help"
     echo "=============================================="
     echo ""
+    echo "Project directory: $PROJECT_DIR"
+    echo "Service: $SERVICE"
+    echo ""
     echo "Usage: $0 [command]"
     echo ""
     echo "Commands:"
-    echo "  preflight    Run pre-deployment checks"
-    echo "  backup       Create backup of existing data"
-    echo "  deploy       Deploy and restart service"
-    echo "  verify       Verify database is working"
-    echo "  monitor      Show monitoring commands"
-    echo "  rollback     Rollback to file-only mode"
-    echo "  migrate      Run historical data migration"
-    echo "  help         Show this help message"
+    echo "  preflight     Run pre-deployment checks"
+    echo "  install-deps  Install required Python dependencies"
+    echo "  backup        Create backup of existing data"
+    echo "  deploy        Deploy and restart service"
+    echo "  verify        Verify database is working"
+    echo "  monitor       Show monitoring commands"
+    echo "  rollback      Rollback to file-only mode"
+    echo "  migrate       Run historical data migration"
+    echo "  help          Show this help message"
     echo ""
     echo "Recommended Rollout Order:"
-    echo "  1. $0 preflight   # Check everything is ready"
-    echo "  2. $0 backup      # Backup existing data"
-    echo "  3. $0 deploy      # Deploy and restart"
-    echo "  4. $0 verify      # Check it's working"
-    echo "  5. $0 monitor     # Get monitoring commands"
+    echo "  1. $0 preflight     # Check everything is ready"
+    echo "  2. $0 install-deps  # Install dependencies if needed"
+    echo "  3. $0 backup        # Backup existing data"
+    echo "  4. $0 deploy        # Deploy and restart"
+    echo "  5. $0 verify        # Check it's working"
+    echo "  6. $0 monitor       # Get monitoring commands"
     echo ""
     echo "Environment Variables:"
-    echo "  INSTALL_DIR   Installation directory (default: /opt/goodwe-dynamic-price-optimiser)"
+    echo "  INSTALL_DIR   Override project directory (auto-detected: $PROJECT_DIR)"
+    echo ""
+    echo "Related Scripts:"
+    echo "  manage_services.sh   Service management (start, stop, restart, logs)"
     echo ""
     echo "Example:"
-    echo "  INSTALL_DIR=/home/user/goodwe $0 preflight"
+    echo "  $0 preflight"
+    echo "  INSTALL_DIR=/custom/path $0 preflight"
 }
 
 # =============================================================================
@@ -483,6 +599,9 @@ main() {
     case "$command" in
         preflight)
             cmd_preflight
+            ;;
+        install-deps)
+            cmd_install_deps
             ;;
         backup)
             cmd_backup

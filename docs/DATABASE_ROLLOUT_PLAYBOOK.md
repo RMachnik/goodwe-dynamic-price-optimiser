@@ -10,6 +10,28 @@ This playbook guides you through safely enabling the SQLite database storage fea
 
 ---
 
+## Important: Path Configuration
+
+The rollout script **auto-detects** the project directory from its location. You don't need to set paths manually unless running from a non-standard location.
+
+**Default Detection:**
+- Script detects its own location: `$(dirname "$0")`
+- Project dir is parent: `$(dirname "$SCRIPT_DIR")`
+- Works in both dev (`/home/user/sources/...`) and production (`/opt/...`)
+
+**Override (if needed):**
+```bash
+INSTALL_DIR=/custom/path ./scripts/database_rollout.sh preflight
+```
+
+**Related Scripts:**
+| Script | Purpose |
+|--------|---------|
+| `scripts/database_rollout.sh` | This playbook's automation |
+| `scripts/manage_services.sh` | Service start/stop/restart |
+
+---
+
 ## Architecture
 
 ```
@@ -42,9 +64,28 @@ This playbook guides you through safely enabling the SQLite database storage fea
 ## Pre-Requisites
 
 ### System Requirements
-- Python 3.10+ with `aiosqlite` package
+- Python 3.10+
 - 1GB+ free disk space for database
 - Write access to data directory
+
+### Python Dependencies
+
+The database feature requires `aiosqlite`. This is already in `requirements.txt`:
+
+```
+# requirements.txt (excerpt)
+aiosqlite>=0.19.0
+```
+
+**Install dependencies:**
+
+```bash
+# Using the rollout script (installs aiosqlite only)
+./scripts/database_rollout.sh install-deps
+
+# Or install all project dependencies
+pip install -r requirements.txt
+```
 
 ### Files Involved
 | File | Purpose |
@@ -54,6 +95,8 @@ This playbook guides you through safely enabling the SQLite database storage fea
 | `src/database/composite_storage.py` | Dual-write logic |
 | `src/database/storage_factory.py` | Storage mode selection |
 | `scripts/database_rollout.sh` | Rollout automation script |
+| `scripts/manage_services.sh` | Service management |
+| `requirements.txt` | Python dependencies |
 
 ---
 
@@ -63,16 +106,19 @@ This playbook guides you through safely enabling the SQLite database storage fea
 # 1. Run all pre-flight checks
 ./scripts/database_rollout.sh preflight
 
-# 2. Create backup
+# 2. Install dependencies if needed (preflight will tell you)
+./scripts/database_rollout.sh install-deps
+
+# 3. Create backup
 ./scripts/database_rollout.sh backup
 
-# 3. Deploy (restarts service)
+# 4. Deploy (restarts service)
 ./scripts/database_rollout.sh deploy
 
-# 4. Verify it's working
+# 5. Verify it's working
 ./scripts/database_rollout.sh verify
 
-# 5. Get monitoring commands
+# 6. Get monitoring commands
 ./scripts/database_rollout.sh monitor
 ```
 
@@ -84,15 +130,22 @@ This playbook guides you through safely enabling the SQLite database storage fea
 
 #### 1.1 Verify Data Directory
 
+The script auto-detects your project directory. Verify with:
+
 ```bash
-# Create directory if needed
+./scripts/database_rollout.sh help
+# Shows: Project directory: /path/to/your/project
+```
+
+Create data directory if needed:
+
+```bash
+# For detected project dir
+mkdir -p data
+
+# Or explicit path
 sudo mkdir -p /opt/goodwe-dynamic-price-optimiser/data
-
-# Set ownership
 sudo chown -R $(whoami):$(whoami) /opt/goodwe-dynamic-price-optimiser/data
-
-# Verify permissions
-ls -la /opt/goodwe-dynamic-price-optimiser/data
 ```
 
 #### 1.2 Check Disk Space
@@ -162,9 +215,13 @@ docker-compose down
 docker-compose up -d --build
 ```
 
-#### Systemd Deployment
+#### Systemd Deployment (Recommended)
 
 ```bash
+# Using manage_services.sh (recommended)
+./scripts/manage_services.sh restart
+
+# Or direct systemctl
 sudo systemctl restart goodwe-master-coordinator
 ```
 
@@ -185,7 +242,11 @@ pkill -f master_coordinator
 #### 4.1 Check Database Created
 
 ```bash
-ls -lh /opt/goodwe-dynamic-price-optimiser/data/goodwe_energy.db
+# Database file location (project-relative)
+ls -lh data/goodwe_energy.db
+
+# Or use the rollout script
+./scripts/database_rollout.sh verify
 ```
 
 #### 4.2 Check Logs for Initialization
@@ -274,7 +335,9 @@ sqlite3 data/goodwe_energy.db 'PRAGMA journal_mode;'
 # 1. Edit config to disable database
 sed -i 's/enabled: true/enabled: false/' config/master_coordinator_config.yaml
 
-# 2. Restart service
+# 2. Restart service (recommended)
+./scripts/manage_services.sh restart
+# OR
 sudo systemctl restart goodwe-master-coordinator
 # OR
 docker-compose restart
@@ -284,10 +347,11 @@ docker-compose restart
 
 ```bash
 # 1. Stop service
-sudo systemctl stop goodwe-master-coordinator
+./scripts/manage_services.sh stop
+# OR: sudo systemctl stop goodwe-master-coordinator
 
-# 2. Restore from backup
-tar -xzvf ~/backup_*.tar.gz -C /opt/goodwe-dynamic-price-optimiser/
+# 2. Restore from backup (adjust path)
+tar -xzvf ~/goodwe_backups/backup_*.tar.gz -C .
 
 # 3. Disable database in config
 # Edit config/master_coordinator_config.yaml:
