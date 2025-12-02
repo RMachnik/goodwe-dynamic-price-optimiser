@@ -31,6 +31,20 @@ from flask_cors import CORS
 # Logging configuration handled by main application
 logger = logging.getLogger(__name__)
 
+# Storage layer
+try:
+    from database.storage_factory import StorageFactory
+except ImportError:
+    StorageFactory = None
+    logger.warning("StorageFactory not available - falling back to file-only mode")
+
+# Storage layer
+try:
+    from database.storage_factory import StorageFactory
+except ImportError:
+    StorageFactory = None
+    logger.warning("StorageFactory not available - falling back to file-only mode")
+
 def format_uptime_human_readable(seconds: float) -> str:
     """Convert seconds to human-readable uptime format"""
     if seconds < 60:
@@ -101,6 +115,15 @@ class LogWebServer:
         from daily_snapshot_manager import DailySnapshotManager
         project_root = Path(__file__).parent.parent
         self.snapshot_manager = DailySnapshotManager(project_root, config=self.config)
+        
+        # Initialize storage layer for database access
+        self.storage = None
+        if StorageFactory:
+            try:
+                self.storage = StorageFactory.create_storage(self.config.get('data_storage', {}))
+                logger.info("Storage layer initialized for LogWebServer")
+            except Exception as e:
+                logger.warning(f"Failed to initialize storage layer: {e}. Using file-only fallback.")
         
         # Setup routes
         self._setup_routes()
@@ -2805,7 +2828,7 @@ class LogWebServer:
         return getattr(self, '_running', False)
     
     def _get_decision_history(self, time_range: str = '24h') -> Dict[str, Any]:
-        """Get charging decision history from master coordinator"""
+        """Get charging decision history from storage layer or files"""
         try:
             # Calculate time threshold based on time_range parameter
             now = datetime.now()
@@ -2825,34 +2848,56 @@ class LogWebServer:
                 time_threshold = now - timedelta(hours=24)
                 max_files = 50
             
-            # Get all decision files (charging and battery selling)
-            project_root = Path(__file__).parent.parent
-            energy_data_dir = project_root / "out" / "energy_data"
-            
             decisions = []
             
-            # Load charging decisions
-            # Optimization: Sort by filename (contains timestamp) instead of mtime to avoid stat() calls on thousands of files
-            charging_files = sorted(energy_data_dir.glob("charging_decision_*.json"), key=lambda x: x.name, reverse=True)
-            
-            for file_path in charging_files[:max_files]:
+            # Try to use storage layer first
+            if self.storage:
                 try:
-                    with open(file_path, 'r') as f:
-                        decision_data = json.load(f)
-                        
-                        # Filter by time
-                        decision_time = datetime.fromisoformat(decision_data.get('timestamp', '').replace('Z', '+00:00'))
-                        if decision_time.replace(tzinfo=None) < time_threshold:
-                            continue
-                            
-                        # Add filename for categorization
-                        decision_data['filename'] = file_path.name
-                        
-                        # No filtering here - we'll do categorization after loading all decisions
-                            
-                        decisions.append(decision_data)
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        db_decisions = loop.run_until_complete(
+                            self.storage.get_decisions(time_threshold, now)
+                        )
+                        if db_decisions:
+                            decisions = db_decisions
+                            logger.debug(f"Loaded {len(decisions)} decisions from storage layer")
+                        else:
+                            logger.debug("No decisions found in storage, falling back to files")
+                    finally:
+                        loop.close()
                 except Exception as e:
-                    logger.warning(f"Failed to read charging decision file {file_path}: {e}")
+                    logger.warning(f"Failed to load decisions from storage: {e}. Falling back to files.")
+            
+            # Fallback to file-based reading if storage failed or returned no data
+            if not decisions:
+                # Get all decision files (charging and battery selling)
+                project_root = Path(__file__).parent.parent
+                energy_data_dir = project_root / "out" / "energy_data"
+                
+                # Load charging decisions
+                # Optimization: Sort by filename (contains timestamp) instead of mtime to avoid stat() calls on thousands of files
+                charging_files = sorted(energy_data_dir.glob("charging_decision_*.json"), key=lambda x: x.name, reverse=True)
+                
+                for file_path in charging_files[:max_files]:
+                    try:
+                        with open(file_path, 'r') as f:
+                            decision_data = json.load(f)
+                            
+                            # Filter by time
+                            decision_time = datetime.fromisoformat(decision_data.get('timestamp', '').replace('Z', '+00:00'))
+                            if decision_time.replace(tzinfo=None) < time_threshold:
+                                continue
+                                
+                            # Add filename for categorization
+                            decision_data['filename'] = file_path.name
+                            
+                            # No filtering here - we'll do categorization after loading all decisions
+                                
+                            decisions.append(decision_data)
+                    except Exception as e:
+                        logger.warning(f"Failed to read charging decision file {file_path}: {e}")
             
             # Load battery selling decisions
             # Optimization: Sort by filename instead of mtime
@@ -3095,9 +3140,32 @@ class LogWebServer:
             return {'error': str(e)}
     
     def _get_historical_decisions(self) -> List[Dict[str, Any]]:
-        """Get historical charging decisions from previous days"""
+        """Get historical charging decisions from storage layer or files"""
         historical_decisions = []
         try:
+            # Try storage layer first
+            if self.storage:
+                try:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        # Get last 7 days
+                        start_time = datetime.now() - timedelta(days=7)
+                        end_time = datetime.now()
+                        db_decisions = loop.run_until_complete(
+                            self.storage.get_decisions(start_time, end_time)
+                        )
+                        if db_decisions:
+                            historical_decisions = db_decisions[:50]  # Limit to 50
+                            logger.debug(f"Loaded {len(historical_decisions)} historical decisions from storage")
+                            return historical_decisions
+                    finally:
+                        loop.close()
+                except Exception as e:
+                    logger.warning(f"Failed to load historical decisions from storage: {e}. Falling back to files.")
+            
+            # Fallback to file-based reading
             # Look for decision files in the energy_data directory
             energy_data_dir = Path(__file__).parent.parent / "out" / "energy_data"
             if not energy_data_dir.exists():

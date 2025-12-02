@@ -38,18 +38,31 @@ class AutomatedPriceCharger:
     
     def __init__(self, config_path: str = None):
         """Initialize the automated charger"""
-        if config_path is None:
-            # Use absolute path to config directory
-            current_dir = Path(__file__).parent.parent
-            self.config_path = str(current_dir / "config" / "master_coordinator_config.yaml")
+        # Support both dict config and file path
+        if isinstance(config_path, dict):
+            # Direct config dict provided (used in tests)
+            self.config_path = None
+            self.config = config_path
+            # Extract config values without loading from file
+            self._extract_config_values()
+            # Pass dict to dependencies
+            config_for_deps = self.config
         else:
-            self.config_path = config_path
+            # File path provided or use default
+            if config_path is None:
+                # Use absolute path to config directory
+                current_dir = Path(__file__).parent.parent
+                self.config_path = str(current_dir / "config" / "master_coordinator_config.yaml")
+            else:
+                self.config_path = config_path
+            
+            # Load configuration first (also calls _extract_config_values)
+            self._load_config()
+            # Pass path to dependencies
+            config_for_deps = self.config_path
         
-        # Load configuration first
-        self._load_config()
-        
-        self.goodwe_charger = GoodWeFastCharger(self.config_path)
-        self.data_collector = EnhancedDataCollector(self.config_path)
+        self.goodwe_charger = GoodWeFastCharger(config_for_deps)
+        self.data_collector = EnhancedDataCollector(config_for_deps)
         self.price_api_url = "https://api.raporty.pse.pl/api/csdac-pln"
         self.current_schedule = None
         self.is_charging = False
@@ -65,14 +78,29 @@ class AutomatedPriceCharger:
         self.active_charging_session = False  # Track if we started a charging session
         self.charging_session_start_time = None  # When current session started
         self.charging_session_start_soc = None  # SOC when session started (for dynamic duration)
+
+    def _load_config(self) -> None:
+        """Load YAML configuration defensively into `self.config`."""
+        try:
+            import yaml
+            with open(self.config_path, 'r') as f:
+                self.config = yaml.safe_load(f) or {}
+        except Exception as e:
+            logger.error(f"Failed to load config from {self.config_path}: {e}")
+            self.config = {}
         
+        # Extract config values
+        self._extract_config_values()
+    
+    def _extract_config_values(self) -> None:
+        """Extract configuration values from self.config dict."""
         # Smart charging thresholds
         self.critical_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('critical', 12)  # % - Price-aware charging
         self.emergency_battery_threshold = self.config.get('battery_management', {}).get('soc_thresholds', {}).get('emergency', 5)  # % - Always charge regardless of price
         self.low_battery_threshold = 30  # % - Consider charging if below this
         self.medium_battery_threshold = 50  # % - Only charge if conditions are favorable
         self.price_savings_threshold = 0.3  # 30% savings required to wait
-        self.overproduction_threshold = 1500  # W - Significant overproduction (increased to allow charging during negative prices)
+        self.overproduction_threshold = 1500  # W - Significant overproduction
         self.high_consumption_threshold = 1000  # W - High consumption
         
         # Smart critical charging configuration
@@ -117,19 +145,8 @@ class AutomatedPriceCharger:
         self.interim_fallback_consumption = interim_cost_config.get('fallback_consumption_kw', 1.25)  # kW
         self.interim_min_historical_hours = interim_cost_config.get('min_historical_hours', 48)  # hours
         self.interim_lookback_days = interim_cost_config.get('lookback_days', 7)  # days
-
-    def _load_config(self) -> None:
-        """Load YAML configuration defensively into `self.config`."""
-        try:
-            import yaml
-            with open(self.config_path, 'r') as f:
-                self.config = yaml.safe_load(f) or {}
-        except Exception as e:
-            logger.error(f"Failed to load config from {self.config_path}: {e}")
-            self.config = {}
         
-        # Get interim_cost_config for subsequent use
-        smart_critical_config = self.config.get('timing_awareness', {}).get('smart_critical_charging', {})
+        # Get interim_cost_config for window commitment config
         interim_cost_config = smart_critical_config.get('interim_cost_analysis', {})
         
         # Window commitment configuration (prevents infinite postponement)

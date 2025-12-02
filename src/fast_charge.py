@@ -38,8 +38,14 @@ class GoodWeFastCharger:
     
     def __init__(self, config_path: str):
         """Initialize the fast charger with configuration"""
-        self.config_path = Path(config_path)
-        self.config = self._load_config()
+        # Support both dict config and file path
+        if isinstance(config_path, dict):
+            self.config_path = None
+            self.config = config_path
+        else:
+            self.config_path = Path(config_path)
+            self.config = self._load_config()
+        
         self.inverter: Optional[Inverter] = None
         self.charging_start_time: Optional[datetime] = None
         self.is_charging = False

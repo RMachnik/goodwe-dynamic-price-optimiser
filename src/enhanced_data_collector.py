@@ -46,16 +46,21 @@ class EnhancedDataCollector:
     
     def __init__(self, config_path: str):
         """Initialize the enhanced data collector"""
-        self.config_path = config_path
-        self.goodwe_charger = GoodWeFastCharger(config_path)
+        # Support both dict config and file path
+        if isinstance(config_path, dict):
+            self.config_path = None
+            self.config = config_path
+        else:
+            self.config_path = config_path
+            # Load config to initialize storage
+            try:
+                with open(config_path, 'r') as f:
+                    self.config = yaml.safe_load(f)
+            except Exception as e:
+                logger.error(f"Failed to load config: {e}")
+                self.config = {}
         
-        # Load config to initialize storage
-        try:
-            with open(config_path, 'r') as f:
-                self.config = yaml.safe_load(f)
-        except Exception as e:
-            logger.error(f"Failed to load config: {e}")
-            self.config = {}
+        self.goodwe_charger = GoodWeFastCharger(config_path if not isinstance(config_path, dict) else self.config)
 
         # Initialize storage via factory
         self.storage = StorageFactory.create_storage(self.config.get('data_storage', {}))

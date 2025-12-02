@@ -110,12 +110,33 @@ class SQLiteStorage(DataStorageInterface):
             )
             """
             
-            # Ensure timestamps are strings
+            # Define expected fields with defaults
+            expected_fields = {
+                'battery_soc': None,
+                'pv_power': None,
+                'grid_power': None,
+                'house_consumption': None,
+                'battery_power': None,
+                'grid_voltage': None,
+                'grid_frequency': None,
+                'battery_voltage': None,
+                'battery_current': None,
+                'battery_temperature': None,
+                'price_pln': None
+            }
+            
+            # Process data and ensure all required fields exist
             processed_data = []
             for item in data:
-                item_copy = item.copy()
+                item_copy = expected_fields.copy()
+                item_copy.update(item)
+                
+                # Ensure timestamp is a string
                 if isinstance(item_copy.get('timestamp'), datetime):
                     item_copy['timestamp'] = item_copy['timestamp'].isoformat()
+                elif 'timestamp' not in item_copy:
+                    item_copy['timestamp'] = datetime.now().isoformat()
+                    
                 processed_data.append(item_copy)
                 
             await self._connection.executemany(query, processed_data)
@@ -159,14 +180,26 @@ class SQLiteStorage(DataStorageInterface):
             ts = state.get('timestamp')
             if isinstance(ts, datetime):
                 ts = ts.isoformat()
-                
-            metrics_json = json.dumps(state.get('metrics', {}))
+            
+            # Handle uptime - could be 'uptime' or 'uptime_seconds'
+            uptime = state.get('uptime') or state.get('uptime_seconds')
+            
+            # Build metrics JSON including extra fields
+            metrics = state.get('metrics', state.get('performance_metrics', {}))
+            if state.get('current_data'):
+                metrics['current_data'] = state.get('current_data')
+            if state.get('decision_count'):
+                metrics['decision_count'] = state.get('decision_count')
+            if uptime:
+                metrics['uptime_seconds'] = uptime
+            metrics_json = json.dumps(metrics, default=str)
+            
             active_modules = ",".join(state.get('active_modules', []))
             
             await self._connection.execute(query, (
                 ts,
                 state.get('state'),
-                state.get('uptime'),
+                uptime,
                 active_modules,
                 state.get('last_error'),
                 metrics_json
@@ -197,7 +230,15 @@ class SQLiteStorage(DataStorageInterface):
                 d = dict(row)
                 if d.get('metrics'):
                     try:
-                        d['metrics'] = json.loads(d['metrics'])
+                        metrics = json.loads(d['metrics'])
+                        d['metrics'] = metrics
+                        # Flatten metrics fields to top level for compatibility
+                        if 'uptime_seconds' in metrics:
+                            d['uptime_seconds'] = metrics['uptime_seconds']
+                        if 'current_data' in metrics:
+                            d['current_data'] = metrics['current_data']
+                        if 'decision_count' in metrics:
+                            d['decision_count'] = metrics['decision_count']
                     except:
                         pass
                 results.append(d)
@@ -252,8 +293,15 @@ class SQLiteStorage(DataStorageInterface):
             ts = decision.get('timestamp')
             if isinstance(ts, datetime):
                 ts = ts.isoformat()
-                
-            params_json = json.dumps(decision.get('parameters', {}))
+            
+            # Store all extra fields in parameters JSON
+            params = decision.get('parameters', {})
+            extra_fields = ['should_charge', 'confidence', 'current_price', 'cheapest_price', 
+                           'cheapest_hour', 'battery_soc', 'pv_power', 'consumption', 'decision_score']
+            for field in extra_fields:
+                if field in decision:
+                    params[field] = decision[field]
+            params_json = json.dumps(params, default=str)
             
             await self._connection.execute(query, (
                 ts,
@@ -288,7 +336,13 @@ class SQLiteStorage(DataStorageInterface):
                     d = dict(row)
                     if d.get('parameters'):
                         try:
-                            d['parameters'] = json.loads(d['parameters'])
+                            params = json.loads(d['parameters'])
+                            d['parameters'] = params
+                            # Flatten parameter fields to top level for compatibility
+                            for key in ['should_charge', 'confidence', 'current_price', 'cheapest_price',
+                                        'cheapest_hour', 'battery_soc', 'pv_power', 'consumption', 'decision_score']:
+                                if key in params:
+                                    d[key] = params[key]
                         except:
                             pass
                     results.append(d)
@@ -353,65 +407,159 @@ class SQLiteStorage(DataStorageInterface):
             self.logger.error(f"Error retrieving charging sessions: {e}")
             return []
 
-
-    async def get_charging_sessions(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
-        await asyncio.sleep(0)
-        return [s for s in self._charging_sessions if start_date <= s['start_time'] <= end_date]
-
     async def save_weather_data(self, data: List[Dict[str, Any]]) -> bool:
-        await asyncio.sleep(0)
-        for rec in data:
-            r = dict(rec)
-            r['timestamp'] = self._normalize_ts(r.get('timestamp'))
-            self._weather_data.append(r)
-        return True
+        """Save weather data."""
+        if not self._connection or not data:
+            return False
+        try:
+            query = """
+            INSERT OR REPLACE INTO weather_data (
+                timestamp, source, temperature, humidity, pressure, 
+                wind_speed, wind_direction, cloud_cover, solar_irradiance, precipitation
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            for rec in data:
+                ts = rec.get('timestamp')
+                if isinstance(ts, datetime):
+                    ts = ts.isoformat()
+                await self._connection.execute(query, (
+                    ts,
+                    rec.get('source'),
+                    rec.get('temperature'),
+                    rec.get('humidity'),
+                    rec.get('pressure'),
+                    rec.get('wind_speed'),
+                    rec.get('wind_direction'),
+                    rec.get('cloud_cover'),
+                    rec.get('solar_irradiance'),
+                    rec.get('precipitation')
+                ))
+            await self._connection.commit()
+            return True
+        except Exception as e:
+            self.logger.error(f"Error saving weather data: {e}")
+            return False
 
     async def get_weather_data(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
-        await asyncio.sleep(0)
-        return [r for r in self._weather_data if start_time <= r['timestamp'] <= end_time]
+        """Retrieve weather data."""
+        if not self._connection:
+            return []
+        try:
+            query = """
+            SELECT * FROM weather_data 
+            WHERE timestamp BETWEEN ? AND ?
+            ORDER BY timestamp ASC
+            """
+            async with self._connection.execute(query, (start_time.isoformat(), end_time.isoformat())) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            self.logger.error(f"Error retrieving weather data: {e}")
+            return []
 
     async def save_price_forecast(self, forecast_list: List[Dict[str, Any]]) -> bool:
-        await asyncio.sleep(0)
-        for rec in forecast_list:
-            r = dict(rec)
-            r['timestamp'] = self._normalize_ts(r.get('timestamp'))
-            self._price_forecasts.append(r)
-        return True
+        """Save price forecast data."""
+        if not self._connection or not forecast_list:
+            return False
+        try:
+            query = """
+            INSERT OR REPLACE INTO price_forecasts (
+                timestamp, forecast_date, hour, price_pln, source, confidence
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """
+            for rec in forecast_list:
+                ts = rec.get('timestamp')
+                if isinstance(ts, datetime):
+                    ts = ts.isoformat()
+                # Handle price field which might be price_pln or price
+                price = rec.get('price_pln') or rec.get('price')
+                await self._connection.execute(query, (
+                    ts,
+                    rec.get('forecast_date'),
+                    rec.get('hour'),
+                    price,
+                    rec.get('source'),
+                    rec.get('confidence')
+                ))
+            await self._connection.commit()
+            return True
+        except Exception as e:
+            self.logger.error(f"Error saving price forecast: {e}")
+            return False
 
     async def get_price_forecasts(self, date_str: str) -> List[Dict[str, Any]]:
-        await asyncio.sleep(0)
-        return [f for f in self._price_forecasts if f.get('forecast_date') == date_str]
+        """Retrieve price forecasts for a date."""
+        if not self._connection:
+            return []
+        try:
+            query = """
+            SELECT * FROM price_forecasts 
+            WHERE forecast_date = ?
+            ORDER BY hour ASC
+            """
+            async with self._connection.execute(query, (date_str,)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            self.logger.error(f"Error retrieving price forecasts: {e}")
+            return []
 
     async def save_pv_forecast(self, forecast_list: List[Dict[str, Any]]) -> bool:
-        await asyncio.sleep(0)
-        for rec in forecast_list:
-            r = dict(rec)
-            r['timestamp'] = self._normalize_ts(r.get('timestamp'))
-            self._pv_forecasts.append(r)
-        return True
+        """Save PV forecast data."""
+        if not self._connection or not forecast_list:
+            return False
+        try:
+            query = """
+            INSERT OR REPLACE INTO pv_forecasts (
+                timestamp, forecast_date, hour, predicted_power_w, source, confidence, weather_conditions
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """
+            for rec in forecast_list:
+                ts = rec.get('timestamp')
+                if isinstance(ts, datetime):
+                    ts = ts.isoformat()
+                # Handle power field which might be power_w or predicted_power_w
+                power = rec.get('predicted_power_w') or rec.get('power_w')
+                await self._connection.execute(query, (
+                    ts,
+                    rec.get('forecast_date'),
+                    rec.get('hour'),
+                    power,
+                    rec.get('source'),
+                    rec.get('confidence'),
+                    rec.get('weather_conditions')
+                ))
+            await self._connection.commit()
+            return True
+        except Exception as e:
+            self.logger.error(f"Error saving PV forecast: {e}")
+            return False
 
     async def get_pv_forecasts(self, date_str: str) -> List[Dict[str, Any]]:
-        await asyncio.sleep(0)
-        return [f for f in self._pv_forecasts if f.get('forecast_date') == date_str]
+        """Retrieve PV forecasts for a date."""
+        if not self._connection:
+            return []
+        try:
+            query = """
+            SELECT * FROM pv_forecasts 
+            WHERE forecast_date = ?
+            ORDER BY hour ASC
+            """
+            async with self._connection.execute(query, (date_str,)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        except Exception as e:
+            self.logger.error(f"Error retrieving PV forecasts: {e}")
+            return []
 
     async def backup_data(self, backup_path: str) -> bool:
-        await asyncio.sleep(0)
+        """Create a backup of the database."""
         try:
             db_path = getattr(self.config, 'db_path', None)
             if db_path and os.path.exists(db_path):
                 shutil.copy2(db_path, backup_path)
-            else:
-                snapshot = {
-                    'energy': self._energy,
-                    'system_states': self._system_states,
-                    'decisions': self._decisions,
-                    'charging_sessions': self._charging_sessions,
-                    'weather_data': self._weather_data,
-                    'price_forecasts': self._price_forecasts,
-                    'pv_forecasts': self._pv_forecasts,
-                }
-                with open(backup_path, 'w', encoding='utf-8') as f:
-                    json.dump(snapshot, f, default=str)
-            return True
-        except Exception:
+                return True
+            return False
+        except Exception as e:
+            self.logger.error(f"Error creating backup: {e}")
             return False

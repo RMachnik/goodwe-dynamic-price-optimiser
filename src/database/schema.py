@@ -89,16 +89,17 @@ CREATE TABLE IF NOT EXISTS battery_selling_sessions (
 CREATE_WEATHER_DATA_TABLE = """
 CREATE TABLE IF NOT EXISTS weather_data (
     timestamp TEXT NOT NULL,
-    source TEXT NOT NULL,
+    source TEXT,
     temperature REAL,
     humidity REAL,
     pressure REAL,
     wind_speed REAL,
+    wind_direction REAL,
     cloud_cover REAL,
     solar_irradiance REAL,
     precipitation REAL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (timestamp, source)
+    PRIMARY KEY (timestamp)
 );
 """
 
@@ -108,11 +109,28 @@ CREATE_PRICE_FORECASTS_TABLE = """
 CREATE TABLE IF NOT EXISTS price_forecasts (
     timestamp TEXT NOT NULL,
     forecast_date TEXT NOT NULL,
+    hour INTEGER,
     price_pln REAL,
     source TEXT,
     confidence REAL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (timestamp, source)
+    PRIMARY KEY (forecast_date, hour, source)
+);
+"""
+
+# Table: pv_forecasts
+# Stores PV power generation forecasts
+CREATE_PV_FORECASTS_TABLE = """
+CREATE TABLE IF NOT EXISTS pv_forecasts (
+    timestamp TEXT NOT NULL,
+    forecast_date TEXT NOT NULL,
+    hour INTEGER,
+    predicted_power_w REAL,
+    source TEXT,
+    confidence REAL,
+    weather_conditions TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (forecast_date, hour, source)
 );
 """
 
@@ -123,7 +141,8 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON coordinator_decisions(timestamp);",
     "CREATE INDEX IF NOT EXISTS idx_sessions_start ON charging_sessions(start_time);",
     "CREATE INDEX IF NOT EXISTS idx_weather_timestamp ON weather_data(timestamp);",
-    "CREATE INDEX IF NOT EXISTS idx_price_timestamp ON price_forecasts(timestamp);"
+    "CREATE INDEX IF NOT EXISTS idx_price_timestamp ON price_forecasts(timestamp);",
+    "CREATE INDEX IF NOT EXISTS idx_pv_timestamp ON pv_forecasts(timestamp);"
 ]
 
 ALL_TABLES = [
@@ -133,5 +152,6 @@ ALL_TABLES = [
     CREATE_CHARGING_SESSIONS_TABLE,
     CREATE_SELLING_SESSIONS_TABLE,
     CREATE_WEATHER_DATA_TABLE,
-    CREATE_PRICE_FORECASTS_TABLE
+    CREATE_PRICE_FORECASTS_TABLE,
+    CREATE_PV_FORECASTS_TABLE
 ]
