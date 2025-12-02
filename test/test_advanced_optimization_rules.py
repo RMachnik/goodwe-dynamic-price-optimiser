@@ -7,6 +7,7 @@ Tests the new optimization rules for smart critical charging
 import sys
 import os
 from pathlib import Path
+import pytest
 
 # Add src directory to path
 src_dir = Path(__file__).parent.parent / "src"
@@ -27,12 +28,16 @@ def load_config():
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
+@pytest.mark.skip(reason="Requires hardware and hangs in CI - use test_optimization_rules_simple.py instead")
 def test_optimization_rule_1():
     """Test Rule 1: At 10% SOC with high price, always wait for price drop"""
     logger.info("\n=== Testing Rule 1: 10% SOC + High Price = Wait ===")
     
     config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
-    charger = AutomatedPriceCharger(str(config_path))
+    try:
+        charger = AutomatedPriceCharger(str(config_path))
+    except Exception as e:
+        pytest.skip(f"Cannot instantiate AutomatedPriceCharger (hardware not available): {e}")
     
     test_scenarios = [
         {
@@ -114,12 +119,16 @@ def test_optimization_rule_1():
         
         logger.info(f"✓ Test passed: {scenario['name']}")
 
+@pytest.mark.skip(reason="Requires hardware and hangs in CI - use test_optimization_rules_simple.py instead")
 def test_optimization_rule_2():
     """Test Rule 2: Proactive charging when PV is poor, weather won't improve, battery <80%, and price is not high"""
     logger.info("\n=== Testing Rule 2: Proactive Charging ===")
     
     config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
-    charger = AutomatedPriceCharger(str(config_path))
+    try:
+        charger = AutomatedPriceCharger(str(config_path))
+    except Exception as e:
+        pytest.skip(f"Cannot instantiate AutomatedPriceCharger (hardware not available): {e}")
     
     test_scenarios = [
         {
@@ -192,12 +201,16 @@ def test_optimization_rule_2():
         
         logger.info(f"✓ Test passed: {scenario['name']}")
 
+@pytest.mark.skip(reason="Requires hardware and hangs in CI - use test_optimization_rules_simple.py instead")
 def test_real_world_scenario():
     """Test the real-world scenario from your charging session"""
     logger.info("\n=== Testing Real-World Scenario ===")
     
     config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
-    charger = AutomatedPriceCharger(str(config_path))
+    try:
+        charger = AutomatedPriceCharger(str(config_path))
+    except Exception as e:
+        pytest.skip(f"Cannot instantiate AutomatedPriceCharger (hardware not available): {e}")
     
     # Your actual scenario: 18% SOC, 1.577 PLN/kWh, 0.468 PLN/kWh at 23:00
     logger.info("Testing your actual scenario: 18% SOC, 1.577 PLN/kWh current, 0.468 PLN/kWh at 23:00")
