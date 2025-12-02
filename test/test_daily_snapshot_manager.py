@@ -239,6 +239,10 @@ class TestDailySnapshotManager(unittest.TestCase):
 class TestMonthlyAggregation(unittest.TestCase):
     """Test cases for monthly aggregation logic"""
     
+    # Use dates safely in the past to avoid edge cases with today's date
+    SAFE_PAST_DAYS_OFFSET = 5  # Start test data 5 days ago
+    TEST_DAYS_COUNT = 3  # Create 3 days of test data
+    
     def setUp(self):
         """Set up test fixtures"""
         self.test_dir = Path(tempfile.mkdtemp())
@@ -257,11 +261,10 @@ class TestMonthlyAggregation(unittest.TestCase):
     
     def _create_multi_day_data(self):
         """Create decision files for multiple days"""
-        # Create data for 3 consecutive past days to ensure they're all in valid date range
-        # Start from 5 days ago to ensure all dates are in the past
-        base_date = date.today() - timedelta(days=5)
+        # Create data for consecutive past days to ensure they're all in valid date range
+        base_date = date.today() - timedelta(days=self.SAFE_PAST_DAYS_OFFSET)
         
-        for day_offset in range(0, 3):
+        for day_offset in range(0, self.TEST_DAYS_COUNT):
             current_date = base_date + timedelta(days=day_offset)
             date_str = current_date.strftime('%Y%m%d')
             
