@@ -12,8 +12,14 @@ import time
 import argparse
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
-import requests
 from pathlib import Path
+
+try:
+    import aiohttp
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
+    import requests  # Fallback to sync requests
 
 # Import the GoodWe fast charging functionality
 import sys
@@ -1371,18 +1377,27 @@ class AutomatedPriceCharger:
         logger.info("Successfully connected to GoodWe inverter")
         return True
     
-    def fetch_today_prices(self) -> Optional[Dict]:
-        """Fetch today's electricity prices from Polish market using RCE-PLN API"""
+    async def fetch_today_prices(self) -> Optional[Dict]:
+        """Fetch today's electricity prices from Polish market using RCE-PLN API (async)"""
         try:
             today = datetime.now().strftime('%Y-%m-%d')
             # CSDAC-PLN API uses business_date field for filtering
             url = f"{self.price_api_url}?$filter=business_date%20eq%20'{today}'"
             
             logger.info(f"Fetching CSDAC price data for {today}")
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
             
-            data = response.json()
+            # Use aiohttp if available, otherwise fallback to requests
+            if AIOHTTP_AVAILABLE:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                        response.raise_for_status()
+                        data = await response.json()
+            else:
+                import requests
+                response = requests.get(url, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+            
             logger.info(f"Fetched {len(data.get('value', []))} CSDAC price points")
             
             # Record prices for adaptive threshold calculation
@@ -2649,13 +2664,22 @@ class AutomatedPriceCharger:
         await self._execute_scheduled_charging(start_time, end_time, max_charging_hours)
         return True
     
-    def fetch_price_data_for_date(self, date_str: str) -> Dict:
-        """Fetch price data for a specific date"""
+    async def fetch_price_data_for_date(self, date_str: str) -> Dict:
+        """Fetch price data for a specific date (async)"""
         try:
             url = f"{self.price_api_url}?$filter=business_date%20eq%20'{date_str}'"
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            return response.json()
+            
+            # Use aiohttp if available, otherwise fallback to requests
+            if AIOHTTP_AVAILABLE:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                        response.raise_for_status()
+                        return await response.json()
+            else:
+                import requests
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                return response.json()
         except Exception as e:
             logger.error(f"Failed to fetch price data for {date_str}: {e}")
             return None

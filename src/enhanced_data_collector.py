@@ -15,6 +15,7 @@ import argparse
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+from collections import deque
 import statistics
 import yaml
 
@@ -65,9 +66,10 @@ class EnhancedDataCollector:
         # Initialize storage via factory
         self.storage = StorageFactory.create_storage(self.config.get('data_storage', {}))
         
-        # Data storage
+        # Data storage with deque for efficient O(1) operations
+        # 30240 data points = 7 days at 20-second intervals
         self.current_data: Dict[str, Any] = {}
-        self.historical_data: List[Dict[str, Any]] = []
+        self.historical_data: deque = deque(maxlen=30240)
         self.daily_stats: Dict[str, Any] = {}
         
         # Monitoring intervals
@@ -235,16 +237,11 @@ class EnhancedDataCollector:
             # Store current data
             self.current_data = comprehensive_data
             
-            # Add to historical data
+            # Add to historical data (deque automatically removes oldest when maxlen exceeded)
             self.historical_data.append(comprehensive_data)
             
             # Update daily statistics
             self._update_daily_stats(comprehensive_data)
-            
-            # Limit historical data to last 7 days (30240 data points at 20-second intervals)
-            # 7 days × 24 hours × 60 minutes × 60 seconds / 20 seconds = 30,240 data points
-            if len(self.historical_data) > 30240:
-                self.historical_data = self.historical_data[-30240:]
             
             logger.info(f"Data collected successfully at {comprehensive_data['time']}")
             return comprehensive_data

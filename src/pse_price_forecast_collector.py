@@ -7,13 +7,19 @@ This module fetches electricity price forecasts from the Polish Power System Ope
 to enable earlier and more accurate charging decisions before the daily CSDAC publication at 12:42.
 """
 
+import asyncio
 import logging
-import requests
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 import statistics
+
+try:
+    import aiohttp
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +71,9 @@ class PSEPriceForecastCollector:
         
         logger.info(f"PSE Price Forecast Collector initialized (enabled: {self.enabled})")
     
-    def fetch_price_forecast(self, hours_ahead: int = None) -> List[PriceForecastPoint]:
+    async def fetch_price_forecast(self, hours_ahead: int = None) -> List[PriceForecastPoint]:
         """
-        Fetch price forecasts from PSE API
+        Fetch price forecasts from PSE API (async)
         
         Args:
             hours_ahead: Number of hours to forecast (default: from config)
@@ -101,11 +107,18 @@ class PSEPriceForecastCollector:
                 
                 logger.debug(f"API URL: {api_url_with_filter}")
                 
-                # Fetch data from API
-                response = requests.get(api_url_with_filter, timeout=30)
-                response.raise_for_status()
-                
-                data = response.json()
+                # Fetch data from API using aiohttp
+                if AIOHTTP_AVAILABLE:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(api_url_with_filter, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                            response.raise_for_status()
+                            data = await response.json()
+                else:
+                    # Fallback to synchronous requests
+                    import requests
+                    response = requests.get(api_url_with_filter, timeout=30)
+                    response.raise_for_status()
+                    data = response.json()
                 
                 # Log diagnostic info about received data
                 raw_count = len(data.get('value', []))
@@ -133,17 +146,13 @@ class PSEPriceForecastCollector:
                     else:
                         logger.warning("No forecast data received from API (empty response)")
                     
-            except requests.exceptions.RequestException as e:
+            except Exception as e:
                 logger.error(f"Failed to fetch forecast data (attempt {attempt + 1}): {e}")
                 self.consecutive_failures += 1
                 
                 if attempt < self.retry_attempts - 1:
                     logger.info(f"Retrying in {self.retry_delay_seconds} seconds...")
-                    time.sleep(self.retry_delay_seconds)
-            except Exception as e:
-                logger.error(f"Unexpected error fetching forecast: {e}")
-                self.consecutive_failures += 1
-                break
+                    await asyncio.sleep(self.retry_delay_seconds)
         
         # All attempts failed
         self.last_fetch_success = False

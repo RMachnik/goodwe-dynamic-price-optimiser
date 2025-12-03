@@ -9,13 +9,18 @@ the orchestrator. This keeps the core decision engine deterministic for tests.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta
 from typing import Dict, List, Optional, Any
 
-import requests
+try:
+    import aiohttp
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +77,8 @@ class PSEPeakHoursCollector:
                 return s
         return None
 
-    def fetch_peak_hours(self, business_day: Optional[date] = None) -> List[PeakHourStatus]:
-        """Fetch peak-hour statuses for a given `business_day`.
+    async def fetch_peak_hours(self, business_day: Optional[date] = None) -> List[PeakHourStatus]:
+        """Fetch peak-hour statuses for a given `business_day` (async).
 
         The function is resilient and will retry on transient network errors. It
         populates the in-memory cache and returns the parsed list.
@@ -99,9 +104,18 @@ class PSEPeakHoursCollector:
         last_error: Optional[Exception] = None
         for attempt in range(self.retry_attempts):
             try:
-                resp = requests.get(query, timeout=15)
-                resp.raise_for_status()
-                payload = resp.json()
+                # Use aiohttp if available, otherwise fallback to requests
+                if AIOHTTP_AVAILABLE:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(query, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                            resp.raise_for_status()
+                            payload = await resp.json()
+                else:
+                    import requests
+                    resp = requests.get(query, timeout=15)
+                    resp.raise_for_status()
+                    payload = resp.json()
+                
                 values = payload.get("value", [])
                 statuses: List[PeakHourStatus] = []
                 for item in values:
@@ -128,7 +142,7 @@ class PSEPeakHoursCollector:
                 self._cache_timestamp = time.time()
                 logger.info("Fetched %d peak-hour statuses for %s", len(statuses), target_day)
                 return statuses
-            except requests.RequestException as e:
+            except Exception as e:
                 last_error = e
                 logger.error(
                     "Peak Hours fetch failed (attempt %d/%d): %s",
@@ -137,7 +151,7 @@ class PSEPeakHoursCollector:
                     e,
                 )
                 if attempt + 1 < self.retry_attempts:
-                    time.sleep(self.retry_delay_seconds)
+                    await asyncio.sleep(self.retry_delay_seconds)
 
         if last_error:
             logger.warning("Peak Hours fetch ultimately failed: %s", last_error)
