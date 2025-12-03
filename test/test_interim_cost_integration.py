@@ -24,6 +24,9 @@ from automated_price_charging import AutomatedPriceCharger
 def integration_config(tmp_path):
     """Create complete configuration for integration testing"""
     config = {
+        'system': {
+            'timezone': 'Europe/Warsaw'
+        },
         'timing_awareness': {
             'smart_critical_charging': {
                 'enabled': True,
@@ -47,8 +50,8 @@ def integration_config(tmp_path):
                     'max_partial_sessions_per_day': 4,
                     'min_partial_charge_kwh': 2.0,
                     'session_tracking_file': str(tmp_path / 'sessions.json'),
-                    'daily_reset_hour': 6,
-                    'timezone': 'Europe/Warsaw'
+                    'daily_reset_hour': 6
+                    # timezone now inherited from system.timezone
                 }
             }
         },
@@ -60,6 +63,9 @@ def integration_config(tmp_path):
         },
         'data_collection': {
             'buffer_size': 30240
+        },
+        'price_analysis': {
+            'api_url': 'https://api.raporty.pse.pl/api/csdac-pln'
         },
         'pricing': {
             'tariff_type': 'g12w',

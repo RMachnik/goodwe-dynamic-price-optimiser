@@ -2,6 +2,10 @@
 # This configuration orchestrates all components of the energy management system
 # Unified configuration combining master coordinator and fast charging settings
 
+# Global System Configuration
+system:
+  timezone: "Europe/Warsaw"  # System timezone for all time-based operations
+
 # Inverter Configuration
 inverter:
   vendor: "goodwe"  # Inverter vendor: goodwe, fronius, sma, huawei, etc.
@@ -332,20 +336,22 @@ weather_integration:
   # IMGW API Configuration (Official Polish Weather Service)
   imgw:
     enabled: true
+    api_base_url: "https://danepubliczne.imgw.pl/api/data/synop/station"  # IMGW API base URL
     station: "krakow"  # Nearest station to Mników, Małopolska
     update_interval_minutes: 15
     
   # Open-Meteo API Configuration (Free Weather Forecasts)
   openmeteo:
     enabled: true
+    api_url: "https://api.open-meteo.com/v1/forecast"  # Open-Meteo API URL
     forecast_days: 1  # 1 day forecast for D+1 planning
     update_interval_minutes: 60
     
-  # Location Configuration (Mników, Małopolska, Poland)
+  # Location Configuration (Mnikov, Małopolska, Poland)
   location:
     latitude: 50.1
     longitude: 19.7
-    timezone: "Europe/Warsaw"  # Server timezone now correctly set to Warsaw
+    # Timezone inherited from system.timezone
     
   # Weather Data Processing
   processing:
@@ -478,7 +484,7 @@ timing_awareness:
       min_partial_charge_kwh: 2.0          # Minimum kWh for partial charge
       session_tracking_file: '/opt/goodwe-dynamic-price-optimiser/out/partial_charging_sessions.json'  # Session tracking (runtime state)
       daily_reset_hour: 6                  # Hour to reset daily session counter (24h format)
-      timezone: 'Europe/Warsaw'            # Timezone for session reset (handles DST)
+      # Timezone inherited from system.timezone for session reset (handles DST)
       
       # Preventive partial charging: charge now to avoid expensive periods ahead
       preventive_enabled: true                        # Enable preventive partial charging
