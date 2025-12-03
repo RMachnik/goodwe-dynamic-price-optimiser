@@ -34,7 +34,7 @@ class TestBatchOperations:
         # Cleanup
         try:
             os.unlink(db_path)
-        except:
+        except (FileNotFoundError, OSError, PermissionError):
             pass
     
     @pytest.fixture
@@ -134,7 +134,7 @@ class TestDataRetention:
         # Cleanup
         try:
             os.unlink(db_path)
-        except:
+        except (FileNotFoundError, OSError, PermissionError):
             pass
     
     @pytest.fixture
@@ -277,7 +277,7 @@ class TestDatabaseStats:
         # Cleanup
         try:
             os.unlink(db_path)
-        except:
+        except (FileNotFoundError, OSError, PermissionError):
             pass
     
     @pytest.fixture
@@ -352,7 +352,7 @@ class TestQueryOptimization:
         # Cleanup
         try:
             os.unlink(db_path)
-        except:
+        except (FileNotFoundError, OSError, PermissionError):
             pass
     
     @pytest.fixture
@@ -421,7 +421,7 @@ class TestSchemaVersion:
         # Cleanup
         try:
             os.unlink(db_path)
-        except:
+        except (FileNotFoundError, OSError, PermissionError):
             pass
     
     @pytest.fixture
