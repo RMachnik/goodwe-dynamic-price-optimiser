@@ -585,7 +585,7 @@ class MasterCoordinator:
                 await self._handle_multi_session_logic()
             
             # Get current price data using AutomatedPriceCharger (has correct SC calculation)
-            price_data = self.charging_controller.fetch_price_data_for_date(
+            price_data = await self.charging_controller.fetch_price_data_for_date(
                 datetime.now().strftime('%Y-%m-%d')
             )
             if not price_data:
@@ -641,7 +641,7 @@ class MasterCoordinator:
             file_path = energy_data_dir / filename
             
             # Get current price data for the decision using AutomatedPriceCharger
-            current_price_data = self.charging_controller.fetch_price_data_for_date(
+            current_price_data = await self.charging_controller.fetch_price_data_for_date(
                 decision_record['timestamp'].strftime('%Y-%m-%d')
             )
             
