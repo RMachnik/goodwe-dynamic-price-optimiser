@@ -1,7 +1,5 @@
 # GoodWe Dynamic Price Optimiser
 
-> See `docs/MAINTENANCE_NOTES.md` for recent CI and test housekeeping details.
-
 A comprehensive, intelligent energy management system that optimizes battery charging based on electricity prices, photovoltaic production, house consumption, and battery state. **Now with support for multiple inverter brands through vendor-agnostic abstraction layer!**
 
 ## 🚀 **Project Overview**
@@ -58,19 +56,18 @@ See [Inverter Abstraction Documentation](docs/INVERTER_ABSTRACTION.md) for detai
 
 **For detailed implementation strategy, technical specifications, and current progress, see the [Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md).**
 
-## 📊 **Historic Data Storage**
+## 📊 **Database Storage**
 
-The system currently uses file-based JSON storage with in-memory data limited to 24 hours. For advanced analytics and long-term data retention, comprehensive plans are available:
+The system uses SQLite with automatic schema migrations for persistent storage. For complete details on the database implementation:
 
-- **[Historic Data Storage Plan](docs/HISTORIC_DATA_STORAGE_PLAN.md)**: Complete strategy for time-series databases, relational databases, and cloud storage
-- **[Implementation Roadmap](docs/HISTORIC_DATA_IMPLEMENTATION_ROADMAP.md)**: Step-by-step implementation guide with practical examples
+- **[Database Migration Plan](docs/DATABASE_MIGRATION_PLAN.md)**: Complete migration strategy and current status
+- **[Database Performance Optimization](docs/DATABASE_PERFORMANCE_OPTIMIZATION.md)**: Indexes, batch operations, and performance tuning
 
-**Future Enhancements Ready for Implementation:**
-- **Time-Series Database**: InfluxDB/TimescaleDB for high-frequency energy data
-- **Relational Database**: PostgreSQL/SQLite for structured data and analytics
-- **Data Compression**: Gzip compression for efficient storage
-- **Cloud Archival**: Automated archival to AWS S3, Google Cloud, or Azure
-- **Advanced Analytics**: Complex data analysis and trend reporting
+**Key Features:**
+- **Automatic Schema Migrations**: Database upgrades automatically on startup
+- **Composite Indexes**: Optimized queries for common access patterns
+- **Batch Operations**: Efficient bulk inserts for high-frequency data
+- **Data Retention**: Configurable cleanup of old data
 
 ### 🔧 **Database Schema Migrations**
 
@@ -153,7 +150,6 @@ The system includes an automatic schema migration mechanism that ensures databas
 - **Kompas Peak Hours Details**: Clear indication when charging blocked due to grid reduction requirements
 - **Better User Experience**: Immediate visibility into battery state and decision context
 - **All Tests Passing**: 404/405 tests passing (99.75% pass rate) - All previously failing tests fixed
-- **See [SOC Display Enhancement Documentation](docs/SOC_DISPLAY_ENHANCEMENT.md) for complete details**
 
 ### **Dynamic SOC Threshold Update (November 2025)**
 - **Peak Hour Flexibility**: `battery_selling.smart_timing.dynamic_soc_thresholds.require_peak_hours` is now `false`, letting premium price windows trigger selling outside `[17, 21]` when SoC thresholds are met.
@@ -227,7 +223,6 @@ The system includes an automatic schema migration mechanism that ensures databas
 
 ### **New Documentation**
 - [Smart Critical Charging Guide](docs/SMART_CRITICAL_CHARGING.md)
-- [Optimization Rules Implementation](docs/OPTIMIZATION_RULES_IMPLEMENTATION.md)
 - [Enhanced Dashboard Documentation](docs/ENHANCED_DASHBOARD.md)
 - [Battery Energy Selling Guide](docs/README_battery_selling.md)
 
@@ -700,6 +695,11 @@ python src/master_coordinator.py
 python src/fast_charge.py --status
 ```
 
+### **CI/Test Maintenance Notes**
+- **Home Assistant workflow disabled**: This repository is no longer linked to Home Assistant; `.github/workflows/hassfest.yaml` is disabled
+- **Test fixtures centralized**: Database fixtures (`temp_db`, `storage_config`, `storage`) in `test/conftest.py`
+- **Test status**: 533 passed, 2 skipped (verified locally)
+
 ## 🔧 **Configuration**
 
 ### **Electricity Tariff Configuration**
@@ -799,9 +799,8 @@ coordinator:
 ### **🎯 Master Coordinator**
 - **[README_MASTER_COORDINATOR.md](docs/README_MASTER_COORDINATOR.md)** - Master Coordinator documentation and usage
 
-### **🌐 Public Access**
-- **[README_ngrok_public_access.md](docs/README_ngrok_public_access.md)** - Expose your web UI to the public internet using ngrok
-  - **🔒 Security Note**: Authtokens are stored securely by ngrok and never committed to Git
+### **🌐 Remote Access**
+- **[REMOTE_LOG_ACCESS.md](docs/REMOTE_LOG_ACCESS.md)** - Remote access guide including web dashboard, API, and ngrok public access
 
 ### **🛡️ Safety Compliance**
 - **[GOODWE_LYNX_D_SAFETY_COMPLIANCE.md](docs/GOODWE_LYNX_D_SAFETY_COMPLIANCE.md)** - GoodWe Lynx-D safety compliance documentation

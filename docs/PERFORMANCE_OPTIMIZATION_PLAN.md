@@ -496,5 +496,4 @@ time curl http://localhost:8080/api/system_metrics
 
 ### Related Documentation
 - `docs/DATABASE_PERFORMANCE_OPTIMIZATION.md` - Detailed database optimization guide
-- `PERFORMANCE_OPTIMIZATION_SUMMARY.md` - Phase 4 implementation summary
-- `IMPLEMENTATION_STATUS.md` - Overall implementation status
+- `docs/DATABASE_MIGRATION_PLAN.md` - Complete migration strategy and status

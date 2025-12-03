@@ -521,7 +521,6 @@ Voltage Ride Through (VRT):
 - ☎️ +48 22 299 96 93
 
 **Twoja dokumentacja:**
-- `docs/OFFGRID_PROBLEM_ANALYSIS_20251027.md` - główna analiza
 - `docs/GOODWE_SEMS_BACKUP_CONFIGURATION.md` - konfiguracja SEMS
 - `out/SEMS_QUICK_GUIDE.txt` - szybki przewodnik
 

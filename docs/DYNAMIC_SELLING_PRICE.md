@@ -209,7 +209,6 @@ Potential improvements:
 ## Related Documentation
 
 - [Battery Selling Engine](README_battery_selling.md)
-- [Smart Timing](OPTIMIZATION_RULES_IMPLEMENTATION.md)
 - [Sell-Then-Buy Prevention](COST_SAVINGS_EXPLAINED.md)
 - [Master Coordinator](README_MASTER_COORDINATOR.md)
 

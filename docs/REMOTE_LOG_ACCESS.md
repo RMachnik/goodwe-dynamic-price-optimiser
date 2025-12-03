@@ -152,6 +152,36 @@ server {
 ### **3. SSL/HTTPS (Optional)**
 For secure access, use a reverse proxy with SSL or configure the Flask app with SSL certificates.
 
+### **4. Public Access via ngrok (Optional)**
+
+For quick public access without port forwarding or DNS setup, use ngrok:
+
+```bash
+# Install ngrok
+brew install ngrok/ngrok/ngrok  # macOS
+# Or download from https://ngrok.com/download
+
+# Configure authtoken (get from https://dashboard.ngrok.com/get-started/your-authtoken)
+ngrok config add-authtoken YOUR_AUTHTOKEN_HERE
+
+# Start tunnel to your web server
+ngrok http 8080
+
+# Or use the automated script
+./scripts/start_ngrok_tunnel.sh
+```
+
+**ngrok Features:**
+- **HTTPS**: Automatic encryption for all traffic
+- **Temporary URLs**: URLs change when tunnel restarts (free tier)
+- **No Port Forwarding**: Works behind NAT/firewalls
+- **Mobile Access**: Works on any device with internet
+
+**Security Notes:**
+- Anyone with the ngrok URL can access your dashboard
+- Consider adding authentication for production use
+- URLs change on restart (unless using paid subdomain)
+
 ## 🔒 **Security Considerations**
 
 ### **Network Security**

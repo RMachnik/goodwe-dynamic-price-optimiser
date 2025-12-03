@@ -100,7 +100,6 @@ smart_critical_charging:
 - **Enhanced Logging**: All decision logs include SOC at moment of decision
 - **Implementation Time**: 1 day
 - **Test Coverage**: All 404/405 tests passing (99.75% pass rate)
-- **Documentation**: `docs/SOC_DISPLAY_ENHANCEMENT.md`
 
 #### **Documentation Cleanup** ✅ **COMPLETED**
 - **Removed**: 7 outdated completion summaries from docs/ directory

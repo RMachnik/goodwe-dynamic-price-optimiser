@@ -418,9 +418,8 @@ Problem:
 
 ### Dalsze kroki:
 1. ✅ Sprawdź SEMS (ten dokument)
-2. ✅ Przeczytaj analizę: `docs/OFFGRID_PROBLEM_ANALYSIS_20251027.md`
-3. ✅ Zobacz wykresy: `out/offgrid_*.png`
-4. ✅ Zaplanuj konsultację z elektrykiem/instalatorem
+2. ✅ Zobacz wykresy: `out/offgrid_*.png`
+3. ✅ Zaplanuj konsultację z elektrykiem/instalatorem
 
 ---
 
