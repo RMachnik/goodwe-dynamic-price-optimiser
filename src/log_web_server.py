@@ -1983,6 +1983,14 @@ class LogWebServer:
                                         
                                         const execution = getExecutionStatus(decision);
                                         
+                                        // Get current price (charging uses current_price, selling uses current_price_pln)
+                                        const currentPrice = decision.current_price || decision.current_price_pln || 0;
+                                        const getPriceColor = (price) => {
+                                            if (price <= 0.30) return '#28a745'; // Green - cheap
+                                            if (price <= 0.50) return '#ffc107'; // Yellow - medium
+                                            return '#dc3545'; // Red - expensive
+                                        };
+                                        
                                         return `
                                             <div class="decision-item ${decisionClass}" style="padding: 15px; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 10px;">
                                                 <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
@@ -1990,11 +1998,18 @@ class LogWebServer:
                                                         <div style="font-size: 14px; color: var(--text-muted); margin-bottom: 5px;">${new Date(decision.timestamp).toLocaleTimeString()}</div>
                                                         <div style="font-weight: 600; font-size: 16px; margin-bottom: 5px; text-transform: capitalize;">${decision.action.replace('_', ' ')}</div>
                                                         <div style="color: var(--text-muted); font-size: 14px;">${decision.reason || decision.reasoning || 'No reason provided'}</div>
-                                                        ${execution.soc ? `
-                                                            <div style="margin-top: 8px; display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; background: ${getSocColor(execution.soc)}22; border: 1px solid ${getSocColor(execution.soc)}; border-radius: 8px;">
-                                                                <span style="font-size: 13px; font-weight: 600; color: ${getSocColor(execution.soc)};">${execution.status === 'EXECUTED' ? '⚡' : '🔋'} ${execution.soc}%</span>
-                                                            </div>
-                                                        ` : ''}
+                                                        <div style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px;">
+                                                            ${execution.soc ? `
+                                                                <div style="display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; background: ${getSocColor(execution.soc)}22; border: 1px solid ${getSocColor(execution.soc)}; border-radius: 8px;">
+                                                                    <span style="font-size: 13px; font-weight: 600; color: ${getSocColor(execution.soc)};">${execution.status === 'EXECUTED' ? '⚡' : '🔋'} ${execution.soc}%</span>
+                                                                </div>
+                                                            ` : ''}
+                                                            ${currentPrice > 0 ? `
+                                                                <div style="display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; background: ${getPriceColor(currentPrice)}22; border: 1px solid ${getPriceColor(currentPrice)}; border-radius: 8px;">
+                                                                    <span style="font-size: 13px; font-weight: 600; color: ${getPriceColor(currentPrice)};">💰 ${currentPrice.toFixed(3)} PLN/kWh</span>
+                                                                </div>
+                                                            ` : ''}
+                                                        </div>
                                                     </div>
                                                     <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 5px;">
                                                         <div style="background: ${getDecisionColor(decision.action)}; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600;">
@@ -2016,6 +2031,10 @@ class LogWebServer:
                                                 
                                                 ${decision.action !== 'wait' ? `
                                                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 10px; padding: 10px; background: var(--bg-color); border-radius: 6px;">
+                                                        <div class="metric">
+                                                            <span class="metric-label" style="font-size: 12px; color: var(--text-muted);">Price:</span>
+                                                            <span class="metric-value" style="font-weight: 600; color: ${getPriceColor(currentPrice)};">${currentPrice > 0 ? currentPrice.toFixed(3) + ' PLN/kWh' : 'N/A'}</span>
+                                                        </div>
                                                         <div class="metric">
                                                             <span class="metric-label" style="font-size: 12px; color: var(--text-muted);">Energy:</span>
                                                             <span class="metric-value" style="font-weight: 600;">${(decision.energy_kwh || 0).toFixed(2)} kWh</span>

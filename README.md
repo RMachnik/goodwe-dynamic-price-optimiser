@@ -72,6 +72,50 @@ The system currently uses file-based JSON storage with in-memory data limited to
 - **Cloud Archival**: Automated archival to AWS S3, Google Cloud, or Azure
 - **Advanced Analytics**: Complex data analysis and trend reporting
 
+### 🔧 **Database Schema Migrations**
+
+The system includes an automatic schema migration mechanism that ensures database compatibility across versions.
+
+**How it works:**
+1. On application startup, `SQLiteStorage` checks the current schema version in the `schema_version` table
+2. If the database version is lower than `SCHEMA_VERSION` in `src/database/schema.py`, pending migrations are applied
+3. Each migration is recorded in `schema_version` with a timestamp and description
+
+**Adding a new migration:**
+
+1. **Increment `SCHEMA_VERSION`** in `src/database/schema.py`:
+   ```python
+   SCHEMA_VERSION = 3  # Was 2, now 3
+   ```
+
+2. **Add migration entry** to `MIGRATIONS` list in `src/database/schema.py`:
+   ```python
+   MIGRATIONS = [
+       (1, "Initial schema", []),
+       (2, "Add price snapshot fields", []),
+       # New migration:
+       (3, "Add new_column to energy_data", [
+           "ALTER TABLE energy_data ADD COLUMN new_column REAL DEFAULT 0;",
+       ]),
+   ]
+   ```
+
+3. **Run tests** to verify migration works:
+   ```bash
+   python -m pytest test/test_database_infrastructure.py::TestMigrations -v
+   ```
+
+**Key files:**
+- `src/database/schema.py` - Schema definitions, version, and migrations
+- `src/database/sqlite_storage.py` - Migration execution logic (`_run_migrations()`)
+- `test/test_database_infrastructure.py` - Migration tests (`TestMigrations` class)
+
+**Important notes:**
+- Migrations are idempotent - running them multiple times is safe
+- Always test migrations on a copy of production data before deploying
+- Schema version is tracked in the `schema_version` table
+- Use `IF NOT EXISTS` and `IF EXISTS` clauses for safety
+
 ## 🆕 **Latest Updates (October 2025)**
 
 ### **Codebase Cleanup** 🧹

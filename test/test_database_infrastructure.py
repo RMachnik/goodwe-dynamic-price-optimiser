@@ -711,4 +711,230 @@ class TestIntegration:
         await manager.shutdown()
         os.unlink(backup_path)
 
+
+class TestMigrations:
+    """Test database migration mechanism"""
+    
+    @pytest.fixture
+    def temp_db(self):
+        """Create temporary database for testing"""
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = f.name
+        
+        yield db_path
+        
+        # Cleanup
+        try:
+            os.unlink(db_path)
+        except:
+            pass
+    
+    @pytest.fixture
+    def storage_config(self, temp_db):
+        """Create storage configuration"""
+        return StorageConfig(
+            db_path=temp_db,
+            max_retries=3,
+            retry_delay=0.1,
+            connection_pool_size=5,
+            batch_size=10,
+            enable_fallback=True,
+            fallback_to_file=True
+        )
+    
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_migration_on_fresh_database(self, storage_config):
+        """Test that migrations run on a fresh database"""
+        from database.schema import SCHEMA_VERSION
+        
+        storage = SQLiteStorage(storage_config)
+        assert await storage.connect()
+        
+        # Check schema version was recorded
+        current_version = await storage._get_current_schema_version()
+        assert current_version == SCHEMA_VERSION
+        
+        # Verify schema_version table has entries
+        async with storage._connection.execute(
+            "SELECT version, description FROM schema_version ORDER BY version"
+        ) as cursor:
+            rows = await cursor.fetchall()
+            assert len(rows) >= 1  # At least one migration recorded
+            # Last version should match SCHEMA_VERSION
+            assert rows[-1][0] == SCHEMA_VERSION
+        
+        await storage.disconnect()
+    
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_migration_skipped_when_up_to_date(self, storage_config):
+        """Test that migrations are skipped when database is already up to date"""
+        from database.schema import SCHEMA_VERSION
+        
+        # First connection - runs migrations
+        storage1 = SQLiteStorage(storage_config)
+        assert await storage1.connect()
+        version1 = await storage1._get_current_schema_version()
+        await storage1.disconnect()
+        
+        # Second connection - should skip migrations
+        storage2 = SQLiteStorage(storage_config)
+        assert await storage2.connect()
+        version2 = await storage2._get_current_schema_version()
+        await storage2.disconnect()
+        
+        # Version should be the same
+        assert version1 == version2 == SCHEMA_VERSION
+    
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_schema_version_table_created(self, storage_config):
+        """Test that schema_version table is created"""
+        storage = SQLiteStorage(storage_config)
+        assert await storage.connect()
+        
+        # Check schema_version table exists
+        async with storage._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
+        ) as cursor:
+            rows = await cursor.fetchall()
+            assert len(rows) == 1
+            assert rows[0][0] == 'schema_version'
+        
+        await storage.disconnect()
+    
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_migration_records_applied_at_timestamp(self, storage_config):
+        """Test that migrations record applied_at timestamp"""
+        storage = SQLiteStorage(storage_config)
+        assert await storage.connect()
+        
+        # Verify applied_at is recorded for each migration
+        async with storage._connection.execute(
+            "SELECT version, applied_at FROM schema_version ORDER BY version"
+        ) as cursor:
+            rows = await cursor.fetchall()
+            for version, applied_at in rows:
+                assert applied_at is not None, f"Migration {version} missing applied_at"
+                # Verify timestamp format (ISO format)
+                assert len(applied_at) >= 10, f"Invalid timestamp format for migration {version}"
+        
+        await storage.disconnect()
+    
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_migration_descriptions_recorded(self, storage_config):
+        """Test that migration descriptions are recorded"""
+        from database.schema import MIGRATIONS
+        
+        storage = SQLiteStorage(storage_config)
+        assert await storage.connect()
+        
+        # Verify descriptions match MIGRATIONS list
+        async with storage._connection.execute(
+            "SELECT version, description FROM schema_version ORDER BY version"
+        ) as cursor:
+            rows = await cursor.fetchall()
+            db_migrations = {row[0]: row[1] for row in rows}
+            
+            for version, description, _ in MIGRATIONS:
+                if version in db_migrations:
+                    assert db_migrations[version] == description, \
+                        f"Migration {version} description mismatch"
+        
+        await storage.disconnect()
+    
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_get_current_schema_version_empty_db(self, temp_db):
+        """Test _get_current_schema_version returns 0 for empty schema_version table"""
+        import aiosqlite
+        
+        # Create database with schema_version table but no entries
+        async with aiosqlite.connect(temp_db) as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS schema_version (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    description TEXT
+                )
+            """)
+            await conn.commit()
+        
+        # Connect storage (should detect version 0 and run migrations)
+        storage_config = StorageConfig(
+            db_path=temp_db,
+            max_retries=3,
+            retry_delay=0.1,
+            connection_pool_size=5,
+            batch_size=10,
+            enable_fallback=True,
+            fallback_to_file=True
+        )
+        storage = SQLiteStorage(storage_config)
+        assert await storage.connect()
+        
+        # After connect, migrations should have run
+        from database.schema import SCHEMA_VERSION
+        current_version = await storage._get_current_schema_version()
+        assert current_version == SCHEMA_VERSION
+        
+        await storage.disconnect()
+    
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_migrations_are_idempotent(self, storage_config):
+        """Test that running migrations multiple times is safe"""
+        from database.schema import SCHEMA_VERSION
+        
+        # Connect and disconnect multiple times
+        for i in range(3):
+            storage = SQLiteStorage(storage_config)
+            assert await storage.connect()
+            version = await storage._get_current_schema_version()
+            assert version == SCHEMA_VERSION, f"Iteration {i}: version mismatch"
+            await storage.disconnect()
+        
+        # Verify only one entry per version in schema_version
+        import aiosqlite
+        async with aiosqlite.connect(storage_config.db_path) as conn:
+            async with conn.execute(
+                "SELECT version, COUNT(*) FROM schema_version GROUP BY version HAVING COUNT(*) > 1"
+            ) as cursor:
+                duplicates = await cursor.fetchall()
+                assert len(duplicates) == 0, f"Duplicate migrations found: {duplicates}"
+    
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_all_core_tables_created(self, storage_config):
+        """Test that all core tables are created after migrations"""
+        storage = SQLiteStorage(storage_config)
+        assert await storage.connect()
+        
+        expected_tables = [
+            'schema_version',
+            'energy_data',
+            'system_state',
+            'coordinator_decisions',
+            'charging_sessions',
+            'battery_selling_sessions',
+            'weather_data',
+            'price_forecasts',
+            'pv_forecasts'
+        ]
+        
+        async with storage._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ) as cursor:
+            rows = await cursor.fetchall()
+            existing_tables = [row[0] for row in rows]
+        
+        for table in expected_tables:
+            assert table in existing_tables, f"Table {table} not created"
+        
+        await storage.disconnect()
+
+
 # Tests are implemented as pytest test functions; remove script-style runner.

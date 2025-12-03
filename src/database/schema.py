@@ -1,7 +1,17 @@
 
 # SQL Schema Definitions for GoodWe Dynamic Price Optimiser
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # Increment when schema changes
+
+# Table: schema_version
+# Tracks database schema version for migrations
+CREATE_SCHEMA_VERSION_TABLE = """
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER PRIMARY KEY,
+    applied_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    description TEXT
+);
+"""
 
 # Table: energy_data
 # Stores high-frequency energy readings (every 5 mins or less)
@@ -146,6 +156,7 @@ CREATE_INDEXES = [
 ]
 
 ALL_TABLES = [
+    CREATE_SCHEMA_VERSION_TABLE,  # Must be first for migrations to work
     CREATE_ENERGY_DATA_TABLE,
     CREATE_SYSTEM_STATE_TABLE,
     CREATE_DECISIONS_TABLE,
@@ -154,4 +165,17 @@ ALL_TABLES = [
     CREATE_WEATHER_DATA_TABLE,
     CREATE_PRICE_FORECASTS_TABLE,
     CREATE_PV_FORECASTS_TABLE
+]
+
+# Migration definitions
+# Each migration is a tuple: (version, description, list of SQL statements)
+# Migrations are applied in order for versions > current db version
+MIGRATIONS = [
+    # Version 1: Initial schema (no migration needed, tables created via ALL_TABLES)
+    (1, "Initial schema", []),
+    
+    # Version 2: Add price snapshot fields to coordinator_decisions parameters
+    # No schema change needed - parameters is JSON field that stores dynamic data
+    # This migration just marks that the code now saves additional fields
+    (2, "Add price snapshot fields (current_price_pln, energy_kwh, costs) to decisions", []),
 ]

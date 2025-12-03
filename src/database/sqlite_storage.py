@@ -17,7 +17,9 @@ from .schema import (
     CREATE_SELLING_SESSIONS_TABLE,
     CREATE_WEATHER_DATA_TABLE,
     ALL_TABLES,
-    CREATE_INDEXES
+    CREATE_INDEXES,
+    SCHEMA_VERSION,
+    MIGRATIONS
 )
 
 
@@ -116,12 +118,12 @@ class SQLiteStorage(DataStorageInterface):
         return False
 
     async def _init_schema(self):
-        """Initialize database schema."""
+        """Initialize database schema and run migrations."""
         if not self._connection:
             return
             
         async with self._connection.cursor() as cursor:
-            # Create tables
+            # Create tables (including schema_version table)
             for table_sql in ALL_TABLES:
                 await cursor.execute(table_sql)
             
@@ -130,6 +132,71 @@ class SQLiteStorage(DataStorageInterface):
                 await cursor.execute(index_sql)
                 
         await self._connection.commit()
+        
+        # Run migrations
+        await self._run_migrations()
+
+    async def _get_current_schema_version(self) -> int:
+        """Get the current schema version from the database."""
+        if not self._connection:
+            return 0
+        
+        try:
+            async with self._connection.execute(
+                "SELECT MAX(version) FROM schema_version"
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row and row[0] else 0
+        except Exception:
+            # Table might not exist yet or be empty
+            return 0
+
+    async def _run_migrations(self):
+        """Run any pending database migrations."""
+        if not self._connection:
+            return
+        
+        current_version = await self._get_current_schema_version()
+        target_version = SCHEMA_VERSION
+        
+        if current_version >= target_version:
+            self.logger.debug(f"Database schema is up to date (version {current_version})")
+            return
+        
+        self.logger.info(f"Running database migrations from version {current_version} to {target_version}")
+        
+        for version, description, sql_statements in MIGRATIONS:
+            if version <= current_version:
+                continue
+            if version > target_version:
+                break
+            
+            self.logger.info(f"Applying migration v{version}: {description}")
+            
+            try:
+                async with self._connection.cursor() as cursor:
+                    # Execute all SQL statements for this migration
+                    for sql in sql_statements:
+                        if sql.strip():
+                            self.logger.debug(f"Executing: {sql[:100]}...")
+                            await cursor.execute(sql)
+                    
+                    # Record the migration
+                    await cursor.execute(
+                        "INSERT INTO schema_version (version, description) VALUES (?, ?)",
+                        (version, description)
+                    )
+                
+                await self._connection.commit()
+                self.logger.info(f"✅ Migration v{version} applied successfully")
+                
+            except Exception as e:
+                self.logger.error(f"❌ Migration v{version} failed: {e}")
+                # Don't continue with further migrations if one fails
+                raise
+        
+        final_version = await self._get_current_schema_version()
+        self.logger.info(f"Database schema updated to version {final_version}")
 
     async def disconnect(self) -> None:
         """Close connection."""
@@ -371,8 +438,9 @@ class SQLiteStorage(DataStorageInterface):
                     
                     # Store all extra fields in parameters JSON
                     params = decision.get('parameters', {})
-                    extra_fields = ['should_charge', 'confidence', 'current_price', 'cheapest_price', 
-                                   'cheapest_hour', 'battery_soc', 'pv_power', 'consumption', 'decision_score']
+                    extra_fields = ['should_charge', 'confidence', 'current_price', 'current_price_pln', 'cheapest_price', 
+                                   'cheapest_hour', 'battery_soc', 'pv_power', 'consumption', 'decision_score',
+                                   'energy_kwh', 'estimated_cost_pln', 'estimated_savings_pln', 'expected_revenue_pln']
                     for field in extra_fields:
                         if field in decision:
                             params[field] = decision[field]
@@ -421,8 +489,9 @@ class SQLiteStorage(DataStorageInterface):
                                     params = json.loads(d['parameters'])
                                     d['parameters'] = params
                                     # Flatten parameter fields to top level for compatibility
-                                    for key in ['should_charge', 'confidence', 'current_price', 'cheapest_price',
-                                                'cheapest_hour', 'battery_soc', 'pv_power', 'consumption', 'decision_score']:
+                                    for key in ['should_charge', 'confidence', 'current_price', 'current_price_pln', 'cheapest_price',
+                                                'cheapest_hour', 'battery_soc', 'pv_power', 'consumption', 'decision_score',
+                                                'energy_kwh', 'estimated_cost_pln', 'estimated_savings_pln', 'expected_revenue_pln']:
                                         if key in params:
                                             d[key] = params[key]
                                 except:
