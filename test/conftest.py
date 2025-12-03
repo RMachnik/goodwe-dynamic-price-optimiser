@@ -121,11 +121,12 @@ def isolated_config():
 @pytest.fixture
 def custom_config():
 	"""
-	Factory fixture for creating custom test configuration files.
+	Fixture that provides a factory function for creating custom test configuration files.
 	
-	This fixture returns a function that creates a temporary config file
+	This fixture returns a factory function that creates temporary config files
 	with user-specified settings, allowing tests to customize configuration
-	as needed.
+	as needed. Multiple config files can be created within a single test, and
+	all are automatically cleaned up after test completion.
 	
 	Returns:
 		function: Factory function that accepts config dict and returns config path

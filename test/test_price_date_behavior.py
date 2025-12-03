@@ -130,7 +130,7 @@ class TestPriceDateBehavior(unittest.TestCase):
             # FIX: Use asyncio.run() to await the coroutine
             result = asyncio.run(self.charger.fetch_today_prices())
             
-            # Verify the API was called with the correct date
+            # Verify the API was called with the correct date (2025-09-06)
             mock_get.assert_called_once()
             call_args = mock_get.call_args
             self.assertIn('2025-09-06', call_args[0][0])
