@@ -686,15 +686,23 @@ class MasterCoordinator:
             estimated_savings_pln = 0
             
             if should_charge:
-                # Calculate energy needed based on battery capacity and current SOC
-                battery_capacity = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)
-                current_soc = self.current_data.get('battery', {}).get('soc_percent', 0)
-                target_soc = 80.0  # Target 80% SOC
-                energy_needed = battery_capacity * (target_soc - current_soc) / 100.0
-                energy_kwh = max(0, min(energy_needed, 5.0))  # Cap at 5kWh per decision
+                # Check if this is a partial charge with explicit energy requirement
+                if decision_record['decision'].get('partial_charge', False):
+                    # Use the actual values from partial charging decision
+                    energy_kwh = decision_record['decision'].get('required_kwh', 0)
+                    target_soc = decision_record['decision'].get('target_soc', 80)
+                    
+                    logger.debug(f"Partial charge decision: {energy_kwh:.2f} kWh to {target_soc}% SOC")
+                else:
+                    # Calculate energy needed based on battery capacity and current SOC
+                    battery_capacity = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)
+                    current_soc = self.current_data.get('battery', {}).get('soc_percent', 0)
+                    target_soc = 80.0  # Target 80% SOC
+                    energy_needed = battery_capacity * (target_soc - current_soc) / 100.0
+                    energy_kwh = max(0, min(energy_needed, 5.0))  # Cap at 5kWh per decision
                 
                 # Calculate cost based on current price
-                if current_price > 0:
+                if current_price > 0 and energy_kwh > 0:
                     # current_price is already in PLN/kWh (converted on line 623)
                     estimated_cost_pln = energy_kwh * current_price
                     

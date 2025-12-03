@@ -1902,6 +1902,21 @@ class LogWebServer:
                                             
                                             // If all values are 0, likely not executed - determine why
                                             if (energy === 0 && cost === 0 && savings === 0) {
+                                                // Check if this is a charge decision that hasn't completed yet
+                                                const isChargeAction = decision.action === 'charge' || decision.action === 'fast_charge';
+                                                const hasPositivePrice = decision.current_price > 0;
+                                                
+                                                // If it's a charge action with positive price but 0 energy, it might be in progress
+                                                if (isChargeAction && hasPositivePrice) {
+                                                    return { 
+                                                        status: 'IN_PROGRESS', 
+                                                        color: '#ffc107', 
+                                                        icon: '⏳',
+                                                        reason: `Charging in progress (${socText})`,
+                                                        soc: batterySoc
+                                                    };
+                                                }
+                                                
                                                 // Analyze the reason to determine blocking cause
                                                 // Battery selling decisions use 'reasoning', charging uses 'reason'
                                                 const reason = decision.reason || decision.reasoning || '';
