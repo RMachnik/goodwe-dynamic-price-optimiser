@@ -1,7 +1,7 @@
 
 # SQL Schema Definitions for GoodWe Dynamic Price Optimiser
 
-SCHEMA_VERSION = 2  # Increment when schema changes
+SCHEMA_VERSION = 3  # Increment when schema changes
 
 # Table: schema_version
 # Tracks database schema version for migrations
@@ -146,13 +146,32 @@ CREATE TABLE IF NOT EXISTS pv_forecasts (
 
 # Indexes for performance
 CREATE_INDEXES = [
+    # Single-column indexes for timestamp-based queries
     "CREATE INDEX IF NOT EXISTS idx_energy_timestamp ON energy_data(timestamp);",
     "CREATE INDEX IF NOT EXISTS idx_state_timestamp ON system_state(timestamp);",
     "CREATE INDEX IF NOT EXISTS idx_decisions_timestamp ON coordinator_decisions(timestamp);",
     "CREATE INDEX IF NOT EXISTS idx_sessions_start ON charging_sessions(start_time);",
     "CREATE INDEX IF NOT EXISTS idx_weather_timestamp ON weather_data(timestamp);",
     "CREATE INDEX IF NOT EXISTS idx_price_timestamp ON price_forecasts(timestamp);",
-    "CREATE INDEX IF NOT EXISTS idx_pv_timestamp ON pv_forecasts(timestamp);"
+    "CREATE INDEX IF NOT EXISTS idx_pv_timestamp ON pv_forecasts(timestamp);",
+    
+    # Composite indexes for common query patterns
+    "CREATE INDEX IF NOT EXISTS idx_decisions_type_time ON coordinator_decisions(decision_type, timestamp);",
+    "CREATE INDEX IF NOT EXISTS idx_sessions_status_start ON charging_sessions(status, start_time);",
+    "CREATE INDEX IF NOT EXISTS idx_selling_status_start ON battery_selling_sessions(status, start_time);",
+    
+    # Indexes for forecast queries (date-based lookups)
+    "CREATE INDEX IF NOT EXISTS idx_price_forecast_date ON price_forecasts(forecast_date, hour);",
+    "CREATE INDEX IF NOT EXISTS idx_pv_forecast_date ON pv_forecasts(forecast_date, hour);",
+    
+    # Index for energy data range queries with filtering
+    "CREATE INDEX IF NOT EXISTS idx_energy_timestamp_soc ON energy_data(timestamp, battery_soc);",
+    
+    # Index for system state filtering
+    "CREATE INDEX IF NOT EXISTS idx_state_timestamp_state ON system_state(timestamp, state);",
+    
+    # Index for weather source queries
+    "CREATE INDEX IF NOT EXISTS idx_weather_source_time ON weather_data(source, timestamp);"
 ]
 
 ALL_TABLES = [
@@ -178,4 +197,16 @@ MIGRATIONS = [
     # No schema change needed - parameters is JSON field that stores dynamic data
     # This migration just marks that the code now saves additional fields
     (2, "Add price snapshot fields (current_price_pln, energy_kwh, costs) to decisions", []),
+    
+    # Version 3: Add performance indexes for common query patterns
+    (3, "Add composite and specialized indexes for query optimization", [
+        "CREATE INDEX IF NOT EXISTS idx_decisions_type_time ON coordinator_decisions(decision_type, timestamp);",
+        "CREATE INDEX IF NOT EXISTS idx_sessions_status_start ON charging_sessions(status, start_time);",
+        "CREATE INDEX IF NOT EXISTS idx_selling_status_start ON battery_selling_sessions(status, start_time);",
+        "CREATE INDEX IF NOT EXISTS idx_price_forecast_date ON price_forecasts(forecast_date, hour);",
+        "CREATE INDEX IF NOT EXISTS idx_pv_forecast_date ON pv_forecasts(forecast_date, hour);",
+        "CREATE INDEX IF NOT EXISTS idx_energy_timestamp_soc ON energy_data(timestamp, battery_soc);",
+        "CREATE INDEX IF NOT EXISTS idx_state_timestamp_state ON system_state(timestamp, state);",
+        "CREATE INDEX IF NOT EXISTS idx_weather_source_time ON weather_data(source, timestamp);"
+    ]),
 ]

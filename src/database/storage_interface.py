@@ -15,6 +15,9 @@ class StorageConfig:
     batch_size: int = 100
     enable_fallback: bool = True
     fallback_to_file: bool = False
+    # Data retention settings (in days, 0 = no retention/keep forever)
+    retention_days: int = 30
+    enable_auto_cleanup: bool = False
 
 class DataStorageInterface(ABC):
     """Abstract base class for data storage implementations."""
@@ -117,6 +120,29 @@ class DataStorageInterface(ABC):
     @abstractmethod
     async def get_pv_forecasts(self, date_str: str) -> List[Dict[str, Any]]:
         """Retrieve PV forecasts for a date."""
+        pass
+
+    @abstractmethod
+    async def cleanup_old_data(self, retention_days: int) -> Dict[str, int]:
+        """
+        Remove data older than retention_days.
+        
+        Args:
+            retention_days: Number of days to retain data
+            
+        Returns:
+            Dictionary with count of deleted rows per table
+        """
+        pass
+
+    @abstractmethod
+    async def get_database_stats(self) -> Dict[str, Any]:
+        """
+        Get database statistics (row counts, size, etc.).
+        
+        Returns:
+            Dictionary with database statistics
+        """
         pass
 
 
