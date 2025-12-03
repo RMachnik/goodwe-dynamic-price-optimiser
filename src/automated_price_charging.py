@@ -1054,11 +1054,40 @@ class AutomatedPriceCharger:
             Charging decision dict if partial charging recommended, None otherwise
         """
         try:
-            # Check if current price is below critical threshold
-            critical_threshold = self.get_critical_price_threshold()
-            if current_price > critical_threshold:
-                logger.debug(f"Partial charging blocked: current price {current_price:.3f} > threshold {critical_threshold:.3f}")
-                return None
+            # SOC-aware price threshold for partial charging
+            # At high SOC, be very conservative about partial charging at high prices
+            if battery_soc >= 60:
+                # Above 60% SOC: only allow partial charge if price is reasonable
+                # Use 50% of critical threshold or best_window price + 20% margin, whichever is lower
+                max_acceptable_price = min(
+                    self.get_critical_price_threshold() * 0.5,
+                    best_window['price_kwh'] * 1.2
+                )
+                if current_price > max_acceptable_price:
+                    logger.info(
+                        f"Partial charging blocked at {battery_soc}% SOC: "
+                        f"current price {current_price:.3f} > max acceptable {max_acceptable_price:.3f} PLN/kWh "
+                        f"(window price: {best_window['price_kwh']:.3f}, hours away: {best_window['hours_to_wait']:.1f}h)"
+                    )
+                    return None
+            elif battery_soc >= 40:
+                # 40-59% SOC: moderate threshold (70% of critical)
+                max_acceptable_price = min(
+                    self.get_critical_price_threshold() * 0.7,
+                    best_window['price_kwh'] * 1.3
+                )
+                if current_price > max_acceptable_price:
+                    logger.info(
+                        f"Partial charging blocked at {battery_soc}% SOC: "
+                        f"current price {current_price:.3f} > max acceptable {max_acceptable_price:.3f} PLN/kWh"
+                    )
+                    return None
+            else:
+                # Below 40% SOC: use full critical threshold
+                critical_threshold = self.get_critical_price_threshold()
+                if current_price > critical_threshold:
+                    logger.debug(f"Partial charging blocked: current price {current_price:.3f} > threshold {critical_threshold:.3f}")
+                    return None
             
             # Calculate how many hours until best window
             hours_to_window = best_window['hours_to_wait']
@@ -1088,6 +1117,18 @@ class AutomatedPriceCharger:
             
             # Partial charging is viable
             target_soc = min(100, int((required_soc_kwh / battery_capacity_kwh) * 100))
+            
+            # Calculate cost comparison
+            partial_charge_cost = required_energy_kwh * current_price
+            wait_and_charge_cost = required_energy_kwh * best_window['price_kwh']
+            cost_difference = partial_charge_cost - wait_and_charge_cost
+            
+            logger.info(
+                f"💡 Partial charging analysis at {battery_soc}% SOC: "
+                f"Charge {required_energy_kwh:.1f} kWh now at {current_price:.3f} PLN/kWh (cost: {partial_charge_cost:.2f} PLN) "
+                f"vs wait {hours_to_window:.1f}h for {best_window['price_kwh']:.3f} PLN/kWh (cost: {wait_and_charge_cost:.2f} PLN). "
+                f"Extra cost: {cost_difference:.2f} PLN"
+            )
             
             return {
                 'should_charge': True,
