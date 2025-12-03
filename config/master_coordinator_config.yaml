@@ -2,6 +2,10 @@
 # This configuration orchestrates all components of the energy management system
 # Unified configuration combining master coordinator and fast charging settings
 
+# Global System Configuration
+system:
+  timezone: "Europe/Warsaw"  # System timezone for all time-based operations
+
 # Inverter Configuration
 inverter:
   vendor: "goodwe"  # Inverter vendor: goodwe, fronius, sma, huawei, etc.
@@ -332,12 +336,14 @@ weather_integration:
   # IMGW API Configuration (Official Polish Weather Service)
   imgw:
     enabled: true
+    api_base_url: "https://danepubliczne.imgw.pl/api/data/synop/station"  # IMGW API base URL
     station: "krakow"  # Nearest station to Mników, Małopolska
     update_interval_minutes: 15
     
   # Open-Meteo API Configuration (Free Weather Forecasts)
   openmeteo:
     enabled: true
+    api_url: "https://api.open-meteo.com/v1/forecast"  # Open-Meteo API URL
     forecast_days: 1  # 1 day forecast for D+1 planning
     update_interval_minutes: 60
     

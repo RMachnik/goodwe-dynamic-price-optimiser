@@ -63,7 +63,8 @@ class AutomatedPriceCharger:
         
         self.goodwe_charger = GoodWeFastCharger(config_for_deps)
         self.data_collector = EnhancedDataCollector(config_for_deps)
-        self.price_api_url = "https://api.raporty.pse.pl/api/csdac-pln"
+        # Get price API URL from config with fallback
+        self.price_api_url = self.config.get('price_analysis', {}).get('api_url', 'https://api.raporty.pse.pl/api/csdac-pln')
         self.current_schedule = None
         self.is_charging = False
         self.charging_start_time = None
@@ -170,7 +171,9 @@ class AutomatedPriceCharger:
         self.partial_min_charge_kwh = partial_charging_config.get('min_partial_charge_kwh', 2.0)  # kWh
         self.partial_session_tracking_file = partial_charging_config.get('session_tracking_file', 'out/partial_charging_sessions.json')
         self.partial_daily_reset_hour = partial_charging_config.get('daily_reset_hour', 6)  # 24h format
-        self.partial_timezone = partial_charging_config.get('timezone', 'Europe/Warsaw')
+        # Get timezone from partial_charging config, fall back to global system timezone, then default
+        system_timezone = self.config.get('system', {}).get('timezone', 'Europe/Warsaw')
+        self.partial_timezone = partial_charging_config.get('timezone', system_timezone)
         
         # Preventive partial charging configuration (nested in partial_charging)
         self.preventive_partial_enabled = partial_charging_config.get('preventive_enabled', True)

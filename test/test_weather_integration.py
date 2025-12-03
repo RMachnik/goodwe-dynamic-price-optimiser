@@ -27,22 +27,27 @@ class TestWeatherDataCollector(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         """Set up test fixtures"""
         self.config = {
+            'system': {
+                'timezone': 'Europe/Warsaw'
+            },
             'weather_integration': {
                 'enabled': True,
                 'imgw': {
                     'enabled': True,
+                    'api_base_url': 'https://danepubliczne.imgw.pl/api/data/synop/station',
                     'station': 'krakow',
                     'update_interval_minutes': 15
                 },
                 'openmeteo': {
                     'enabled': True,
+                    'api_url': 'https://api.open-meteo.com/v1/forecast',
                     'forecast_days': 1,
                     'update_interval_minutes': 60
                 },
                 'location': {
                     'latitude': 50.1,
-                    'longitude': 19.7,
-                    'timezone': 'Europe/Warsaw'
+                    'longitude': 19.7
+                    # timezone now inherited from system.timezone
                 },
                 'processing': {
                     'forecast_hours': 24,
@@ -530,11 +535,26 @@ class TestWeatherIntegrationIntegration(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         """Set up test fixtures"""
         self.config = {
+            'system': {
+                'timezone': 'Europe/Warsaw'
+            },
             'weather_integration': {
                 'enabled': True,
-                'imgw': {'enabled': True, 'station': 'krakow'},
-                'openmeteo': {'enabled': True, 'forecast_days': 1},
-                'location': {'latitude': 50.1, 'longitude': 19.7, 'timezone': 'Europe/Warsaw'},
+                'imgw': {
+                    'enabled': True,
+                    'api_base_url': 'https://danepubliczne.imgw.pl/api/data/synop/station',
+                    'station': 'krakow'
+                },
+                'openmeteo': {
+                    'enabled': True,
+                    'api_url': 'https://api.open-meteo.com/v1/forecast',
+                    'forecast_days': 1
+                },
+                'location': {
+                    'latitude': 50.1,
+                    'longitude': 19.7
+                    # timezone now inherited from system.timezone
+                },
                 'processing': {'forecast_hours': 24, 'cache_duration_minutes': 30}
             },
             'coordinator': {

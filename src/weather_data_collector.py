@@ -28,17 +28,21 @@ class WeatherDataCollector:
         self.config = config
         self.weather_config = config.get('weather_integration', {})
         
+        # Get global system timezone as fallback
+        system_timezone = config.get('system', {}).get('timezone', 'Europe/Warsaw')
+        
         # Location configuration (Mników, Małopolska, Poland)
         self.location = {
             'latitude': self.weather_config.get('location', {}).get('latitude', 50.1),
             'longitude': self.weather_config.get('location', {}).get('longitude', 19.7),
-            'timezone': self.weather_config.get('location', {}).get('timezone', 'Europe/Warsaw')
+            'timezone': self.weather_config.get('location', {}).get('timezone', system_timezone)
         }
         
         # API endpoints
         self.imgw_station = self.weather_config.get('imgw', {}).get('station', 'krakow')
-        self.imgw_endpoint = f"https://danepubliczne.imgw.pl/api/data/synop/station/{self.imgw_station}"
-        self.openmeteo_endpoint = "https://api.open-meteo.com/v1/forecast"
+        imgw_base_url = self.weather_config.get('imgw', {}).get('api_base_url', 'https://danepubliczne.imgw.pl/api/data/synop/station')
+        self.imgw_endpoint = f"{imgw_base_url}/{self.imgw_station}"
+        self.openmeteo_endpoint = self.weather_config.get('openmeteo', {}).get('api_url', 'https://api.open-meteo.com/v1/forecast')
         
         # Configuration
         self.enabled = self.weather_config.get('enabled', True)

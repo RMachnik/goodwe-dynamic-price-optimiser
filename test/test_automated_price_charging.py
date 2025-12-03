@@ -25,6 +25,9 @@ from automated_price_charging import AutomatedPriceCharger
 def mock_config():
     """Create mock configuration for testing"""
     return {
+        'system': {
+            'timezone': 'Europe/Warsaw'
+        },
         'timing_awareness': {
             'smart_critical_charging': {
                 'enabled': True,
@@ -48,8 +51,8 @@ def mock_config():
                     'max_partial_sessions_per_day': 4,
                     'min_partial_charge_kwh': 2.0,
                     'session_tracking_file': 'out/partial_charging_sessions.json',
-                    'daily_reset_hour': 6,
-                    'timezone': 'Europe/Warsaw'
+                    'daily_reset_hour': 6
+                    # timezone now inherited from system.timezone
                 }
             }
         },
@@ -61,6 +64,9 @@ def mock_config():
         },
         'data_collection': {
             'buffer_size': 30240
+        },
+        'price_analysis': {
+            'api_url': 'https://api.raporty.pse.pl/api/csdac-pln'
         }
     }
 

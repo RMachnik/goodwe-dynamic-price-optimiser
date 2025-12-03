@@ -19,6 +19,9 @@ from automated_price_charging import AutomatedPriceCharger
 def mock_config():
     """Minimal config for AutomatedPriceCharger with preventive charging enabled."""
     return {
+        'system': {
+            'timezone': 'Europe/Warsaw'
+        },
         'smart_critical_charging': {
             'enabled': True,
             'critical_threshold': 15,
@@ -31,7 +34,7 @@ def mock_config():
                         'min_partial_charge_kwh': 2.0,
                         'session_tracking_file': '/tmp/test_partial_sessions.json',
                         'daily_reset_hour': 6,
-                        'timezone': 'Europe/Warsaw',
+                        # timezone now inherited from system.timezone
                         'preventive_enabled': True,
                         'preventive_scan_ahead_hours': 12,
                         'preventive_min_savings_percent': 30,
@@ -48,6 +51,9 @@ def mock_config():
             'enabled': False,
             'fallback_high_price': 1.35,
             'fallback_critical_price': 1.00,
+        },
+        'price_analysis': {
+            'api_url': 'https://api.raporty.pse.pl/api/csdac-pln'
         },
         'logging': {'level': 'INFO'}
     }
