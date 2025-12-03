@@ -141,3 +141,41 @@ class CompositeStorage(DataStorageInterface):
 
     async def get_pv_forecasts(self, date_str: str) -> List[Dict[str, Any]]:
         return await self._read_with_fallback('get_pv_forecasts', date_str)
+
+    async def cleanup_old_data(self, retention_days: int) -> Dict[str, int]:
+        """
+        Remove data older than retention_days from all backends.
+        
+        Args:
+            retention_days: Number of days to retain data
+            
+        Returns:
+            Dictionary with count of deleted rows per table from primary storage
+        """
+        # Execute cleanup on all backends, but return only primary results
+        tasks = []
+        tasks.append(self.primary.cleanup_old_data(retention_days))
+        for secondary in self.secondaries:
+            tasks.append(secondary.cleanup_old_data(retention_days))
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Return primary result if successful, otherwise empty dict
+        if isinstance(results[0], dict):
+            return results[0]
+        else:
+            self.logger.error(f"Primary cleanup failed: {results[0]}")
+            return {}
+
+    async def get_database_stats(self) -> Dict[str, Any]:
+        """
+        Get database statistics from primary storage.
+        
+        Returns:
+            Dictionary with database statistics
+        """
+        try:
+            return await self.primary.get_database_stats()
+        except Exception as e:
+            self.logger.error(f"Failed to get database stats: {e}")
+            return {}
