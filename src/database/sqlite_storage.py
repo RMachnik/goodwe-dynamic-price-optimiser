@@ -217,10 +217,32 @@ class SQLiteStorage(DataStorageInterface):
             return False
 
     async def save_energy_data(self, data: List[Dict[str, Any]]) -> bool:
-        """Save a batch of energy readings."""
+        """Save a batch of energy readings with optimized batch processing."""
         if not self._connection or not data:
             return False
-            
+        
+        # Use configured batch size for very large datasets
+        batch_size = getattr(self.config, 'batch_size', 100)
+        
+        # If data is small, process in one batch
+        if len(data) <= batch_size:
+            return await self._save_energy_data_batch(data)
+        
+        # For large datasets, process in chunks
+        total_batches = (len(data) + batch_size - 1) // batch_size
+        self.logger.debug(f"Processing {len(data)} records in {total_batches} batches of {batch_size}")
+        
+        for i in range(0, len(data), batch_size):
+            batch = data[i:i + batch_size]
+            success = await self._save_energy_data_batch(batch)
+            if not success:
+                self.logger.error(f"Failed to save batch {i//batch_size + 1}/{total_batches}")
+                return False
+        
+        return True
+    
+    async def _save_energy_data_batch(self, data: List[Dict[str, Any]]) -> bool:
+        """Internal method to save a single batch of energy data."""
         async with self._connection_semaphore:  # Connection pooling
             try:
                 async def _do_save():
@@ -264,15 +286,17 @@ class SQLiteStorage(DataStorageInterface):
                             item_copy['timestamp'] = datetime.now().isoformat()
                             
                         processed_data.append(item_copy)
-                        
+                    
+                    # Use a transaction for batch insert
                     await self._connection.executemany(query, processed_data)
                     await self._connection.commit()
                     return True
                 
                 return await self._execute_with_retry(_do_save)
             except Exception as e:
-                self.logger.error(f"Error saving energy data: {e}")
+                self.logger.error(f"Error saving energy data batch: {e}")
                 return False
+
 
     async def get_energy_data(self, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
         """Retrieve historical energy data."""
@@ -779,3 +803,206 @@ class SQLiteStorage(DataStorageInterface):
         except Exception as e:
             self.logger.error(f"Error creating backup: {e}")
             return False
+
+    async def cleanup_old_data(self, retention_days: int) -> Dict[str, int]:
+        """
+        Remove data older than retention_days from all time-series tables.
+        
+        Args:
+            retention_days: Number of days to retain data
+            
+        Returns:
+            Dictionary with count of deleted rows per table
+        """
+        if not self._connection or retention_days <= 0:
+            return {}
+        
+        async with self._connection_semaphore:
+            try:
+                from datetime import timedelta
+                cutoff_time = (datetime.now() - timedelta(days=retention_days)).isoformat()
+                
+                results = {}
+                
+                # Define tables and their timestamp columns
+                tables_to_clean = [
+                    ('energy_data', 'timestamp'),
+                    ('system_state', 'timestamp'),
+                    ('coordinator_decisions', 'timestamp'),
+                    ('charging_sessions', 'start_time'),
+                    ('battery_selling_sessions', 'start_time'),
+                    ('weather_data', 'timestamp'),
+                    ('price_forecasts', 'timestamp'),
+                    ('pv_forecasts', 'timestamp')
+                ]
+                
+                for table_name, time_column in tables_to_clean:
+                    try:
+                        # Count rows to be deleted
+                        count_query = f"SELECT COUNT(*) FROM {table_name} WHERE {time_column} < ?"
+                        async with self._connection.execute(count_query, (cutoff_time,)) as cursor:
+                            row = await cursor.fetchone()
+                            count = row[0] if row else 0
+                        
+                        if count > 0:
+                            # Delete old rows
+                            delete_query = f"DELETE FROM {table_name} WHERE {time_column} < ?"
+                            await self._connection.execute(delete_query, (cutoff_time,))
+                            results[table_name] = count
+                            self.logger.info(f"Cleaned {count} rows from {table_name} (older than {retention_days} days)")
+                    except Exception as e:
+                        self.logger.error(f"Error cleaning {table_name}: {e}")
+                        results[table_name] = 0
+                
+                await self._connection.commit()
+                
+                # Run VACUUM to reclaim space (can be slow, run periodically)
+                if sum(results.values()) > 0:
+                    self.logger.info("Running VACUUM to reclaim space...")
+                    await self._connection.execute("VACUUM")
+                    self.logger.info("VACUUM completed")
+                
+                return results
+                
+            except Exception as e:
+                self.logger.error(f"Error during cleanup: {e}")
+                return {}
+
+    async def get_database_stats(self) -> Dict[str, Any]:
+        """
+        Get database statistics including row counts and database size.
+        
+        Returns:
+            Dictionary with database statistics
+        """
+        if not self._connection:
+            return {}
+        
+        try:
+            stats = {}
+            
+            # Get row counts for all tables
+            tables = [
+                'energy_data', 'system_state', 'coordinator_decisions',
+                'charging_sessions', 'battery_selling_sessions',
+                'weather_data', 'price_forecasts', 'pv_forecasts'
+            ]
+            
+            for table in tables:
+                try:
+                    async with self._connection.execute(f"SELECT COUNT(*) FROM {table}") as cursor:
+                        row = await cursor.fetchone()
+                        stats[f'{table}_count'] = row[0] if row else 0
+                except Exception as e:
+                    self.logger.error(f"Error getting count for {table}: {e}")
+                    stats[f'{table}_count'] = 0
+            
+            # Get database file size
+            if self.db_path and os.path.exists(self.db_path):
+                size_bytes = os.path.getsize(self.db_path)
+                stats['database_size_bytes'] = size_bytes
+                stats['database_size_mb'] = round(size_bytes / (1024 * 1024), 2)
+            
+            # Get page count and page size
+            async with self._connection.execute("PRAGMA page_count") as cursor:
+                row = await cursor.fetchone()
+                stats['page_count'] = row[0] if row else 0
+            
+            async with self._connection.execute("PRAGMA page_size") as cursor:
+                row = await cursor.fetchone()
+                stats['page_size'] = row[0] if row else 0
+            
+            # Get schema version
+            try:
+                async with self._connection.execute("SELECT MAX(version) FROM schema_version") as cursor:
+                    row = await cursor.fetchone()
+                    stats['schema_version'] = row[0] if row and row[0] else 0
+            except Exception:
+                stats['schema_version'] = 0
+            
+            return stats
+            
+        except Exception as e:
+            self.logger.error(f"Error getting database stats: {e}")
+            return {}
+
+    async def analyze_query_performance(self, query: str, params: tuple = ()) -> Dict[str, Any]:
+        """
+        Analyze query performance using EXPLAIN QUERY PLAN.
+        
+        Args:
+            query: SQL query to analyze
+            params: Query parameters
+            
+        Returns:
+            Dictionary with query plan and performance info
+        """
+        if not self._connection:
+            return {}
+        
+        try:
+            result = {
+                'query': query,
+                'query_plan': [],
+                'indexes_used': []
+            }
+            
+            # Get query plan
+            explain_query = f"EXPLAIN QUERY PLAN {query}"
+            async with self._connection.execute(explain_query, params) as cursor:
+                rows = await cursor.fetchall()
+                for row in rows:
+                    plan_detail = dict(row)
+                    result['query_plan'].append(plan_detail)
+                    
+                    # Extract index usage from detail
+                    detail_str = str(plan_detail.get('detail', ''))
+                    if 'USING INDEX' in detail_str.upper():
+                        # Extract index name
+                        import re
+                        match = re.search(r'USING INDEX (\w+)', detail_str, re.IGNORECASE)
+                        if match:
+                            result['indexes_used'].append(match.group(1))
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing query: {e}")
+            return {'error': str(e)}
+
+    async def optimize_database(self) -> Dict[str, Any]:
+        """
+        Run database optimization commands (ANALYZE, VACUUM).
+        
+        Returns:
+            Dictionary with optimization results
+        """
+        if not self._connection:
+            return {'success': False, 'error': 'Not connected'}
+        
+        try:
+            results = {}
+            
+            # Run ANALYZE to update query optimizer statistics
+            self.logger.info("Running ANALYZE to update statistics...")
+            await self._connection.execute("ANALYZE")
+            results['analyze'] = 'completed'
+            
+            # Run VACUUM to reclaim space and defragment
+            # Note: VACUUM can be slow on large databases
+            self.logger.info("Running VACUUM to optimize database...")
+            await self._connection.execute("VACUUM")
+            results['vacuum'] = 'completed'
+            
+            # Get updated stats
+            stats = await self.get_database_stats()
+            results['database_stats'] = stats
+            
+            self.logger.info("Database optimization completed successfully")
+            return {'success': True, 'results': results}
+            
+        except Exception as e:
+            self.logger.error(f"Error optimizing database: {e}")
+            return {'success': False, 'error': str(e)}
+
+

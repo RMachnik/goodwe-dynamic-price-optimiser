@@ -249,3 +249,50 @@ class FileStorage(DataStorageInterface):
         """Not implemented for files - returns empty."""
         return []
 
+    async def cleanup_old_data(self, retention_days: int) -> Dict[str, int]:
+        """
+        Cleanup old JSON files (stub implementation).
+        File-based storage typically doesn't implement automatic cleanup.
+        
+        Returns:
+            Empty dictionary as files are not automatically cleaned up
+        """
+        self.logger.warning("Automatic cleanup not implemented for file storage")
+        return {}
+
+    async def get_database_stats(self) -> Dict[str, Any]:
+        """
+        Get file storage statistics.
+        
+        Returns:
+            Dictionary with file counts and sizes
+        """
+        try:
+            stats = {}
+            
+            # Count files in energy_data directory
+            if os.path.exists(self.energy_data_dir):
+                files = [f for f in os.listdir(self.energy_data_dir) if f.endswith('.json')]
+                stats['energy_data_files'] = len(files)
+                
+                # Calculate total size
+                total_size = sum(
+                    os.path.getsize(os.path.join(self.energy_data_dir, f)) 
+                    for f in files
+                )
+                stats['total_size_bytes'] = total_size
+                stats['total_size_mb'] = round(total_size / (1024 * 1024), 2)
+            else:
+                stats['energy_data_files'] = 0
+                stats['total_size_bytes'] = 0
+                stats['total_size_mb'] = 0
+            
+            stats['storage_type'] = 'file'
+            
+            return stats
+            
+        except Exception as e:
+            self.logger.error(f"Error getting file storage stats: {e}")
+            return {}
+
+
