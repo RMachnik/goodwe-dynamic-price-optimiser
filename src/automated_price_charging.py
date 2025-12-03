@@ -824,8 +824,8 @@ class AutomatedPriceCharger:
             return self.min_charging_session_duration
 
     def _get_consumption_forecast(self) -> float:
-            """Return fallback house consumption forecast in kW for interim analysis."""
-            return float(self.interim_fallback_consumption)
+        """Return fallback house consumption forecast in kW for interim analysis."""
+        return float(self.interim_fallback_consumption)
 
     def _calculate_window_duration(self, window_start: datetime, price_data: Dict, max_price_kwh: float) -> float:
         """Calculate consecutive hours from `window_start` with price <= `max_price_kwh`.
