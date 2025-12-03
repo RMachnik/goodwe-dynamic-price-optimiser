@@ -386,6 +386,7 @@ class MasterCoordinator:
             if (datetime.now() - self.last_save_time).total_seconds() >= 300:
                 try:
                     await self.data_collector.save_data_to_file()
+                    await self._save_system_state()
                     self.last_save_time = datetime.now()
                     logger.debug("Data saved to storage")
                 except Exception as e:

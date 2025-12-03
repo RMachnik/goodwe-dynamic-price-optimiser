@@ -3413,7 +3413,12 @@ class LogWebServer:
                 if state_time_str:
                     try:
                         state_time = datetime.fromisoformat(state_time_str.replace('Z', '+00:00'))
-                        state_age = (datetime.now(state_time.tzinfo) - state_time).total_seconds()
+                        # Handle both naive and timezone-aware timestamps
+                        if state_time.tzinfo is not None:
+                            now = datetime.now(state_time.tzinfo)
+                        else:
+                            now = datetime.now()
+                        state_age = (now - state_time).total_seconds()
                         if state_age < 120:  # 2 minutes freshness
                             # Extract current_data from the state
                             current_data = latest_state.get('current_data', {})
@@ -3820,7 +3825,8 @@ class LogWebServer:
                 return real_data
             
             # Fallback to mock data if no real data available, but use real price data
-            logger.warning("No real inverter data available, using mock data for demonstration")
+            if self._should_log_message("No real inverter data available"):
+                logger.warning("No real inverter data available, using mock data for demonstration")
             current_time = datetime.now()
             
             # Mock current system state with real price data (includes L1/L2/L3 currents for testing)
