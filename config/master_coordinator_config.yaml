@@ -347,11 +347,11 @@ weather_integration:
     forecast_days: 1  # 1 day forecast for D+1 planning
     update_interval_minutes: 60
     
-  # Location Configuration (Mników, Małopolska, Poland)
+  # Location Configuration (Mnikov, Małopolska, Poland)
   location:
     latitude: 50.1
     longitude: 19.7
-    timezone: "Europe/Warsaw"  # Server timezone now correctly set to Warsaw
+    # Timezone inherited from system.timezone
     
   # Weather Data Processing
   processing:
@@ -484,7 +484,7 @@ timing_awareness:
       min_partial_charge_kwh: 2.0          # Minimum kWh for partial charge
       session_tracking_file: '/opt/goodwe-dynamic-price-optimiser/out/partial_charging_sessions.json'  # Session tracking (runtime state)
       daily_reset_hour: 6                  # Hour to reset daily session counter (24h format)
-      timezone: 'Europe/Warsaw'            # Timezone for session reset (handles DST)
+      # Timezone inherited from system.timezone for session reset (handles DST)
       
       # Preventive partial charging: charge now to avoid expensive periods ahead
       preventive_enabled: true                        # Enable preventive partial charging
