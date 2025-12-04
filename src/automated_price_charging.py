@@ -331,6 +331,8 @@ class AutomatedPriceCharger:
                 kompas_status
             )
             
+            logger.info(f"calculate_final_price: market={market_price:.2f} PLN/MWh ({market_price_kwh:.4f} PLN/kWh), timestamp={timestamp.strftime('%Y-%m-%d %H:%M')}, components.final_price={components.final_price:.4f} PLN/kWh")
+            
             # Return in PLN/MWh for consistency with existing code
             return components.final_price * 1000
         else:
@@ -1573,16 +1575,23 @@ class AutomatedPriceCharger:
         now = datetime.now()
         current_time = now.replace(second=0, microsecond=0)
         
+        logger.info(f"get_current_price: Looking for period matching {current_time.strftime('%Y-%m-%d %H:%M')}")
+        
         # Find the current 15-minute period
         for item in price_data['value']:
             item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
-            if item_time <= current_time < item_time + timedelta(minutes=15):
+            period_end = item_time + timedelta(minutes=15)
+            matches = item_time <= current_time < period_end
+            
+            if matches:
                 market_price_pln_mwh = float(item['csdac_pln'])
                 # Calculate final price with tariff-aware pricing
                 final_price_pln_mwh = self.calculate_final_price(market_price_pln_mwh, item_time, kompas_status)
+                logger.info(f"get_current_price: MATCHED {item['dtime']} -> Market: {market_price_pln_mwh:.2f} PLN/MWh, Final: {final_price_pln_mwh:.2f} PLN/MWh ({final_price_pln_mwh/1000:.4f} PLN/kWh)")
                 # Return in PLN/MWh for consistency with other methods
                 return final_price_pln_mwh
         
+        logger.warning(f"get_current_price: No matching period found for {current_time}")
         return None
     
     def should_start_charging(self, price_data: Dict, 

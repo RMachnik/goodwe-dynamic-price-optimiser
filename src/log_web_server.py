@@ -3381,7 +3381,10 @@ class LogWebServer:
             # Prices can change during the day, so shorter cache is better
             cached_data = self._get_cached_data(cache_key, ttl=300)  # Cache for 5 minutes
             if cached_data:
+                logger.debug(f"Price cache HIT for {cache_key}: current={cached_data.get('current_price_pln_kwh')} PLN/kWh")
                 return cached_data
+            
+            logger.debug(f"Price cache MISS for {cache_key}, fetching fresh data...")
             
             # Use cached AutomatedPriceCharger instance to avoid expensive re-initialization
             charger = self._get_or_create_price_charger()
@@ -3400,15 +3403,20 @@ class LogWebServer:
                 loop.close()
             
             if not price_data or 'value' not in price_data:
+                logger.warning("No price data returned from API")
                 return None
+            
+            logger.debug(f"Fetched {len(price_data['value'])} price records from API")
             
             # Get current price using the charger's method (returns PLN/MWh)
             current_price = charger.get_current_price(price_data)
             if current_price is None:
+                logger.warning(f"get_current_price returned None for time {now}")
                 return None
             
             # Convert from PLN/MWh to PLN/kWh for display
             current_price_kwh = current_price / 1000
+            logger.debug(f"Current price from get_current_price: {current_price_kwh:.4f} PLN/kWh (period: {current_period.strftime('%H:%M')})")
             
             # Find cheapest price and calculate statistics
             prices = []

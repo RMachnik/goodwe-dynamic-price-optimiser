@@ -67,6 +67,10 @@ electricity_tariff:
       peak_hours:
         start: 7
         end: 22
+      # G12 has two off-peak periods: 22-07 (night) and 13-15 (afternoon valley)
+      off_peak_windows:
+        - start: 13
+          end: 15
       prices:
         peak: 0.3566
         off_peak: 0.0749

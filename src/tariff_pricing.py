@@ -133,12 +133,28 @@ class TariffPricingCalculator:
         start_hour = peak_hours.get('start', 6)
         end_hour = peak_hours.get('end', 22)
         
+        # G12 special case: 13-15 is off-peak (afternoon valley)
+        off_peak_windows = config.get('off_peak_windows', [])
+        
         hour = timestamp.hour
+        
+        # Check if hour falls in any off-peak window
+        for window in off_peak_windows:
+            window_start = window.get('start', 0)
+            window_end = window.get('end', 0)
+            if window_start <= hour < window_end:
+                prices = config.get('prices', {})
+                price = prices.get('off_peak', 0.0)
+                logger.debug(f"Hour {hour} is OFF-PEAK (window {window_start}-{window_end}): {price} PLN/kWh")
+                return price
+        
+        # Otherwise check standard peak/off-peak logic
         is_peak = start_hour <= hour < end_hour
         
         prices = config.get('prices', {})
         price = prices.get('peak' if is_peak else 'off_peak', 0.0)
         
+        logger.debug(f"Hour {hour} is {'PEAK' if is_peak else 'OFF-PEAK'} (standard): {price} PLN/kWh")
         return price
     
     def _get_kompas_based_price(
