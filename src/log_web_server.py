@@ -3859,10 +3859,12 @@ class LogWebServer:
                 cache_age = time.time() - last_refresh
                 if cache_age < 3600:  # Fresh: <1 hour
                     cached_data['data_source'] = 'background_cache'
+                    logger.debug(f"Price cache HIT: current={cached_data.get('current_price_pln_kwh')} PLN/kWh (age: {cache_age:.0f}s)")
                     return cached_data
             
             # Skip disk cache and go directly to fetch for immediate/fresh data
             # This ensures tests with mocked data work correctly
+            logger.debug("Price cache MISS, fetching fresh data...")
             logger.warning("⚠️ Cache unavailable, fetching price data directly")
             result = self._fetch_price_data_directly()
             
@@ -3905,15 +3907,20 @@ class LogWebServer:
                 loop.close()
             
             if not price_data or 'value' not in price_data:
+                logger.warning("No price data returned from API")
                 return None
+            
+            logger.debug(f"Fetched {len(price_data['value'])} price records from API")
             
             # Get current price using the charger's method (returns PLN/MWh)
             current_price = charger.get_current_price(price_data)
             if current_price is None:
+                logger.warning(f"get_current_price returned None")
                 return None
             
             # Convert from PLN/MWh to PLN/kWh for display
             current_price_kwh = current_price / 1000
+            logger.debug(f"Current price from get_current_price: {current_price_kwh:.4f} PLN/kWh")
             
             # Find cheapest price and calculate statistics
             prices = []
