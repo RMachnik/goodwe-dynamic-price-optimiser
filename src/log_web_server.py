@@ -3495,24 +3495,37 @@ class LogWebServer:
                             logger.debug(f"State file {latest_file.name} is empty, skipping")
                         else:
                             try:
-                                real_data = json.loads(file_content)
+                                # Handle NDJSON format (newline-delimited JSON) - parse the last valid line
+                                lines = file_content.split('\n')
+                                real_data = None
+                                for line in reversed(lines):
+                                    line = line.strip()
+                                    if line:
+                                        try:
+                                            real_data = json.loads(line)
+                                            break
+                                        except json.JSONDecodeError:
+                                            continue
                                 
-                                # Extract relevant data
-                                current_data = real_data.get('current_data', {})
-                                
-                                # Convert to dashboard format
-                                dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
-                                
-                                if dashboard_data:
-                                    # Cache the result
-                                    self._set_cached_data('real_inverter_data', dashboard_data)
+                                if real_data is None:
+                                    logger.debug(f"State file {latest_file.name} contains no valid JSON lines")
+                                else:
+                                    # Extract relevant data
+                                    current_data = real_data.get('current_data', {})
                                     
-                                    if self._should_log_message("Loaded fresh data from coordinator state file"):
-                                        logger.info(f"Loaded fresh data from {latest_file.name} (age: {file_age:.1f}s)")
+                                    # Convert to dashboard format
+                                    dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
                                     
-                                    return dashboard_data
-                            except json.JSONDecodeError as je:
-                                logger.debug(f"State file {latest_file.name} has invalid JSON: {je}")
+                                    if dashboard_data:
+                                        # Cache the result
+                                        self._set_cached_data('real_inverter_data', dashboard_data)
+                                        
+                                        if self._should_log_message("Loaded fresh data from coordinator state file"):
+                                            logger.info(f"Loaded fresh data from {latest_file.name} (age: {file_age:.1f}s)")
+                                        
+                                        return dashboard_data
+                            except Exception as e:
+                                logger.debug(f"Error reading state file {latest_file.name}: {e}")
             except Exception as e:
                 logger.warning(f"Failed to read coordinator state file: {e}")
 
@@ -3602,9 +3615,23 @@ class LogWebServer:
                 return None
             
             try:
-                real_data = json.loads(file_content)
-            except json.JSONDecodeError as je:
-                logger.warning(f"State file {latest_file.name} has invalid JSON: {je}")
+                # Handle NDJSON format (newline-delimited JSON) - parse the last valid line
+                lines = file_content.split('\n')
+                real_data = None
+                for line in reversed(lines):
+                    line = line.strip()
+                    if line:
+                        try:
+                            real_data = json.loads(line)
+                            break
+                        except json.JSONDecodeError:
+                            continue
+                
+                if real_data is None:
+                    logger.warning(f"State file {latest_file.name} contains no valid JSON lines")
+                    return None
+            except Exception as e:
+                logger.warning(f"Error reading state file {latest_file.name}: {e}")
                 return None
             
             # Extract relevant data from the real system
