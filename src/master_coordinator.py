@@ -1063,8 +1063,36 @@ class MasterCoordinator:
             # Set a short cooldown to avoid immediately starting after a wait decision
             # Exceptions: critical/emergency decisions can override cooldown
             if waiting_for_window and priority not in ['critical', 'emergency']:
-                # Default 15-minute cooldown
-                self._wait_cooldown_until = now + timedelta(minutes=15)
+                # Calculate intelligent cooldown that doesn't overshoot the target window
+                cooldown_minutes = 15  # Default cooldown
+                
+                # If we have a specific next_window time, ensure cooldown doesn't block it
+                next_window_str = decision.get('next_window')
+                if next_window_str:
+                    try:
+                        # Parse next_window time (format: "HH:MM")
+                        window_hour, window_minute = map(int, next_window_str.split(':'))
+                        next_window_time = now.replace(hour=window_hour, minute=window_minute, second=0, microsecond=0)
+                        
+                        # If window is tomorrow, add a day
+                        if next_window_time <= now:
+                            next_window_time += timedelta(days=1)
+                        
+                        # Calculate minutes until window
+                        minutes_to_window = (next_window_time - now).total_seconds() / 60
+                        
+                        # Ensure we wake up at least 5 minutes before the window (margin for evaluation)
+                        # But don't make cooldown negative or too short
+                        if minutes_to_window > 5:
+                            cooldown_minutes = min(cooldown_minutes, minutes_to_window - 5)
+                        else:
+                            cooldown_minutes = max(1, minutes_to_window - 1)  # Wake up 1 min before at minimum
+                        
+                        logger.debug(f"Next window in {minutes_to_window:.1f} min; adjusted cooldown to {cooldown_minutes:.1f} min")
+                    except Exception as e:
+                        logger.debug(f"Could not parse next_window '{next_window_str}': {e}")
+                
+                self._wait_cooldown_until = now + timedelta(minutes=cooldown_minutes)
                 logger.info(
                     f"Wait decision applied; starting cooldown until {self._wait_cooldown_until.strftime('%H:%M')}"
                 )
