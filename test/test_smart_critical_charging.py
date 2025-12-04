@@ -42,7 +42,7 @@ def test_smart_critical_charging():
             'cheapest_price': 0.4,
             'cheapest_hour': 23,
             'expected_action': 'charge',
-            'expected_reason': 'Emergency battery level'
+            'expected_reason': 'emergency tier'
         },
                 {
                     'name': 'Critical Level (8% SOC) - Acceptable Price',
@@ -51,7 +51,7 @@ def test_smart_critical_charging():
                     'cheapest_price': 0.4,
                     'cheapest_hour': 23,
                     'expected_action': 'charge',
-                    'expected_reason': 'acceptable price'
+                    'expected_reason': 'proactive charging'  # Updated for new proactive charging logic
                 },
             {
                 'name': 'Critical Level (8% SOC) - High Price, Good Savings Soon',
