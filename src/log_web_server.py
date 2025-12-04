@@ -285,7 +285,7 @@ class LogWebServer:
                 logger.warning("⚠️ Database query returned None - check connection")
                 self._storage_has_data = False
             elif len(test_data) == 0:
-                logger.warning("⚠️ Database is EMPTY - run migration script: python scripts/migrate_json_to_db.py")
+                logger.warning("⚠️ Database is EMPTY - run migration script to populate: python scripts/migrate_json_to_db.py")
                 self._storage_has_data = False
             else:
                 logger.info(f"✅ Database validated: {len(test_data)} decisions available (query: {duration_ms:.0f}ms)")
@@ -677,8 +677,8 @@ class LogWebServer:
             
             # Calculate efficiency score from recent data
             efficiency_score = 70.0  # Default
-            if db_decisions:
-                avg_confidence = sum(d.get('confidence', 0) for d in db_decisions) / len(db_decisions) if db_decisions else 0
+            if db_decisions and len(db_decisions) > 0:
+                avg_confidence = sum(d.get('confidence', 0) for d in db_decisions) / len(db_decisions)
                 efficiency_score = avg_confidence * 100
             
             metrics = {
