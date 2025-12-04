@@ -117,12 +117,18 @@ class LogWebServer:
         self.snapshot_manager = DailySnapshotManager(project_root, config=self.config)
         
         # Initialize storage layer for database access
+        # Main thread storage (for Flask request handlers)
         self.storage = None
         self._storage_connected = False
+        
+        # Background thread will create its own storage instance
+        self._background_storage = None
+        self._background_storage_connected = False
+        
         if StorageFactory:
             try:
                 self.storage = StorageFactory.create_storage(self.config.get('data_storage', {}))
-                logger.info("Storage layer initialized for LogWebServer")
+                logger.info("Storage layer initialized for LogWebServer main thread")
                 # Connect storage in a background thread to avoid blocking
                 self._connect_storage_async()
             except Exception as e:
@@ -132,12 +138,49 @@ class LogWebServer:
         self._price_charger = None
         self._price_charger_lock = threading.Lock()
         
+        # Background refresh infrastructure
+        self._background_cache = {
+            'inverter_data': None,
+            'price_data': None,
+            'metrics_data': None,
+            'coordinator_pid': None,
+            'coordinator_running': None,
+            'data_source': None,
+            'last_inverter_refresh': 0,
+            'last_price_refresh': 0,
+            'last_metrics_refresh': 0,
+            'last_pid_check': 0,
+            'last_inverter_error': None,
+            'last_price_error': None,
+            'last_metrics_error': None
+        }
+        self._background_cache_lock = threading.Lock()
+        self._stop_background_thread = threading.Event()
+        self._background_thread = None
+        self._cached_coordinator_pid = None
+        
+        # Storage health tracking
+        self._storage_has_data = False
+        self._storage_consecutive_failures = 0
+        self._storage_last_reconnect_attempt = 0
+        
+        # Price cache file management
+        self._price_cache_file = Path(__file__).parent.parent / 'data' / 'price_cache.json'
+        
         # Setup routes
         self._setup_routes()
         
         # Log streaming
         self.log_queue = Queue()
         self.clients = set()
+        
+        # Validate database health after storage connection
+        # Give the async connection thread a moment to complete
+        time.sleep(0.5)
+        self._validate_database_health()
+        
+        # Start background refresh thread
+        self._start_background_refresh()
     
     def _connect_storage_async(self):
         """Connect storage layer in a background thread."""
@@ -162,6 +205,146 @@ class LogWebServer:
         
         thread = threading.Thread(target=connect_in_thread, daemon=True)
         thread.start()
+    
+    def _init_background_storage(self):
+        """Initialize separate storage instance for background thread (thread-safety)."""
+        if not StorageFactory:
+            return
+        
+        try:
+            self._background_storage = StorageFactory.create_storage(self.config.get('data_storage', {}))
+            logger.info("Initializing background thread storage connection...")
+            
+            # Connect in this thread's event loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                connected = loop.run_until_complete(self._background_storage.connect())
+                self._background_storage_connected = connected
+                if connected:
+                    logger.info("✅ Background storage connected successfully")
+                else:
+                    logger.error("❌ Background storage connection failed")
+            finally:
+                # Don't close loop - background thread will reuse it
+                pass
+        except Exception as e:
+            logger.error(f"Failed to initialize background storage: {e}", exc_info=True)
+            self._background_storage_connected = False
+    
+    def _run_async_storage_with_timeout(self, coro, timeout=10.0, use_background=False):
+        """Run async storage operation with timeout protection.
+        
+        Args:
+            coro: Coroutine to execute
+            timeout: Max execution time in seconds
+            use_background: If True, use background thread's storage instance
+        """
+        storage_instance = self._background_storage if use_background else self.storage
+        connected = self._background_storage_connected if use_background else self._storage_connected
+        
+        if not storage_instance or not connected:
+            return None
+        
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # Wrap in timeout
+                result = loop.run_until_complete(asyncio.wait_for(coro, timeout=timeout))
+                return result
+            except asyncio.TimeoutError:
+                logger.error(f"⏱️ Storage query timeout after {timeout}s")
+                return None
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.error(f"Storage query failed: {e}", exc_info=True)
+            return None
+    
+    def _validate_database_health(self):
+        """Validate database has data and is properly migrated."""
+        if not self.storage or not self._storage_connected:
+            logger.info("📁 Database not available - will use file storage")
+            self._storage_has_data = False
+            return
+        
+        try:
+            # Test query to check data availability
+            now = datetime.now()
+            test_start = now - timedelta(hours=24)
+            
+            start_time = time.time()
+            test_data = self._run_async_storage_with_timeout(
+                self.storage.get_decisions(test_start, now),
+                timeout=5.0
+            )
+            duration_ms = (time.time() - start_time) * 1000
+            
+            if test_data is None:
+                logger.warning("⚠️ Database query returned None - check connection")
+                self._storage_has_data = False
+            elif len(test_data) == 0:
+                logger.warning("⚠️ Database is EMPTY - run migration script: python scripts/migrate_json_to_db.py")
+                self._storage_has_data = False
+            else:
+                logger.info(f"✅ Database validated: {len(test_data)} decisions available (query: {duration_ms:.0f}ms)")
+                self._storage_has_data = True
+                
+        except Exception as e:
+            logger.error(f"Database health check failed: {e}", exc_info=True)
+            self._storage_has_data = False
+    
+    def _load_price_from_disk(self) -> Optional[Dict[str, Any]]:
+        """Load price data from disk cache with validation."""
+        if not self._price_cache_file.exists():
+            return None
+        
+        try:
+            with open(self._price_cache_file, 'r') as f:
+                cached = json.load(f)
+            
+            # Validate freshness (<24 hours)
+            cache_age = time.time() - cached.get('cache_timestamp', 0)
+            if cache_age > 86400:  # 24 hours
+                logger.debug(f"Price disk cache expired (age: {cache_age/3600:.1f}h)")
+                return None
+            
+            # Validate business_date (today or tomorrow for next-day prices)
+            cached_date = cached.get('business_date', '')
+            today = datetime.now().strftime('%Y-%m-%d')
+            tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            
+            if cached_date not in [today, tomorrow]:
+                logger.debug(f"Price disk cache date mismatch: {cached_date} not in [{today}, {tomorrow}]")
+                return None
+            
+            logger.info(f"✅ Loaded price data from disk cache (age: {cache_age/60:.1f}min)")
+            return cached.get('price_data')
+            
+        except Exception as e:
+            logger.warning(f"Failed to load price cache from disk: {e}")
+            return None
+    
+    def _save_price_to_disk(self, price_data: Dict[str, Any]):
+        """Save price data to disk cache."""
+        try:
+            self._price_cache_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            cache_obj = {
+                'price_data': price_data,
+                'cache_timestamp': time.time(),
+                'business_date': datetime.now().strftime('%Y-%m-%d'),
+                'created_at': datetime.now().isoformat()
+            }
+            
+            with open(self._price_cache_file, 'w') as f:
+                json.dump(cache_obj, f, indent=2)
+            
+            logger.info("💾 Saved price data to disk cache")
+            
+        except Exception as e:
+            logger.warning(f"Failed to save price cache to disk: {e}")
     
     def _get_cached_data(self, key: str, ttl: int = None) -> Optional[Any]:
         """Get data from cache if not expired"""
@@ -222,6 +405,312 @@ class LogWebServer:
             self._last_request_times[endpoint] = current_time
         
         return False
+    
+    def _start_background_refresh(self):
+        """Start background data refresh thread."""
+        def background_loop():
+            threading.current_thread().name = 'background_refresh'
+            logger.info("Background refresh thread started")
+            
+            # Initialize background thread's own storage instance
+            self._init_background_storage()
+            
+            # Pre-build monthly snapshots (non-blocking, happens in background)
+            try:
+                now = datetime.now()
+                logger.info("Pre-building monthly snapshots...")
+                self.snapshot_manager.get_monthly_summary(now.year, now.month)
+                logger.info("Monthly snapshots ready")
+            except Exception as e:
+                logger.warning(f"Failed to pre-build snapshots: {e}")
+            
+            # Read refresh intervals from config
+            web_config = self.config.get('web_server', {})
+            inverter_interval = max(10, min(600, web_config.get('background_refresh_interval_seconds', 30)))
+            price_interval = max(60, min(3600, web_config.get('price_refresh_interval_seconds', 300)))
+            metrics_interval = max(30, min(600, web_config.get('metrics_refresh_interval_seconds', 60)))
+            pid_interval = max(30, min(300, web_config.get('coordinator_pid_check_interval_seconds', 60)))
+            
+            logger.info(f"Refresh intervals: inverter={inverter_interval}s, price={price_interval}s, metrics={metrics_interval}s")
+            
+            last_inverter = last_price = last_metrics = last_pid = 0
+            
+            while not self._stop_background_thread.is_set():
+                try:
+                    now = time.time()
+                    
+                    # Refresh coordinator PID
+                    if now - last_pid >= pid_interval:
+                        self._refresh_coordinator_pid()
+                        last_pid = now
+                    
+                    # Refresh inverter data
+                    if now - last_inverter >= inverter_interval:
+                        self._refresh_inverter_data()
+                        last_inverter = now
+                    
+                    # Refresh price data
+                    if now - last_price >= price_interval:
+                        self._refresh_price_data()
+                        last_price = now
+                    
+                    # Refresh metrics data
+                    if now - last_metrics >= metrics_interval:
+                        self._refresh_metrics_data()
+                        last_metrics = now
+                    
+                except Exception as e:
+                    logger.warning(f"Background refresh error: {e}", exc_info=True)
+                
+                # Interruptible sleep
+                self._stop_background_thread.wait(timeout=5.0)
+            
+            # Cleanup on exit
+            if self._background_storage and self._background_storage_connected:
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        loop.run_until_complete(self._background_storage.disconnect())
+                        logger.info("Background storage disconnected")
+                    finally:
+                        loop.close()
+                except Exception as e:
+                    logger.warning(f"Error disconnecting background storage: {e}")
+            
+            logger.info("Background refresh thread stopped")
+        
+        self._background_thread = threading.Thread(target=background_loop, daemon=True, name='background_refresh')
+        self._background_thread.start()
+    
+    def _refresh_coordinator_pid(self):
+        """Refresh coordinator PID cache (called from background thread)."""
+        try:
+            import psutil
+            
+            # Check if cached PID is still valid
+            if self._cached_coordinator_pid:
+                try:
+                    proc = psutil.Process(self._cached_coordinator_pid)
+                    if proc.is_running() and 'master_coordinator.py' in ' '.join(proc.cmdline()):
+                        # PID still valid
+                        with self._background_cache_lock:
+                            self._background_cache['coordinator_pid'] = self._cached_coordinator_pid
+                            self._background_cache['coordinator_running'] = True
+                            self._background_cache['last_pid_check'] = time.time()
+                        return
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            
+            # Need to find coordinator PID
+            coordinator_running = False
+            coordinator_pid = None
+            
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    if proc.info['cmdline'] and any('master_coordinator.py' in cmd for cmd in proc.info['cmdline']):
+                        coordinator_running = True
+                        coordinator_pid = proc.info['pid']
+                        self._cached_coordinator_pid = coordinator_pid
+                        logger.debug(f"Found coordinator PID: {coordinator_pid}")
+                        break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            with self._background_cache_lock:
+                self._background_cache['coordinator_pid'] = coordinator_pid
+                self._background_cache['coordinator_running'] = coordinator_running
+                self._background_cache['last_pid_check'] = time.time()
+                
+        except Exception as e:
+            logger.warning(f"Error refreshing coordinator PID: {e}")
+    
+    def _refresh_price_data(self):
+        """Refresh price data in background thread (uses background storage instance)."""
+        try:
+            # Try disk cache first
+            cached = self._load_price_from_disk()
+            if cached:
+                with self._background_cache_lock:
+                    self._background_cache['price_data'] = cached
+                    self._background_cache['last_price_refresh'] = time.time()
+                    self._background_cache['last_price_error'] = None
+                return
+            
+            # Extract logic from _get_real_price_data() - fetch from PSE API
+            from automated_price_charging import AutomatedPriceCharger
+            
+            charger = AutomatedPriceCharger(str(Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"))
+            
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                price_data = loop.run_until_complete(
+                    asyncio.wait_for(charger.fetch_price_data_for_date(today), timeout=30.0)
+                )
+            finally:
+                loop.close()
+            
+            if not price_data or 'value' not in price_data:
+                raise Exception("Price API returned no data")
+            
+            # Process price data (calculate cheapest, average, etc.)
+            current_price = charger.get_current_price(price_data)
+            if current_price is None:
+                raise Exception("Could not determine current price")
+            
+            current_price_kwh = current_price / 1000
+            
+            # Find cheapest and calculate stats
+            prices = []
+            for item in price_data['value']:
+                market_price = float(item['csdac_pln'])
+                try:
+                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                except ValueError:
+                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M:%S')
+                
+                final_price = charger.calculate_final_price(market_price, item_time)
+                final_price_kwh = final_price / 1000
+                prices.append((final_price_kwh, item_time.hour))
+            
+            if not prices:
+                raise Exception("No valid prices found")
+            
+            cheapest_price, cheapest_hour = min(prices, key=lambda x: x[0])
+            avg_price = sum(price for price, _ in prices) / len(prices)
+            
+            result = {
+                'current_price_pln_kwh': round(current_price_kwh, 4),
+                'cheapest_price_pln_kwh': round(cheapest_price, 4),
+                'cheapest_hour': f"{cheapest_hour:02d}:00",
+                'average_price_pln_kwh': round(avg_price, 4),
+                'price_trend': 'stable',
+                'data_source': 'PSE API (CSDAC-PLN)',
+                'last_updated': datetime.now().isoformat(),
+                'calculation_method': 'tariff_aware'
+            }
+            
+            # Save to disk
+            self._save_price_to_disk(result)
+            
+            # Update background cache
+            with self._background_cache_lock:
+                self._background_cache['price_data'] = result
+                self._background_cache['last_price_refresh'] = time.time()
+                self._background_cache['last_price_error'] = None
+            
+            logger.info(f"✅ Refreshed price data: {current_price_kwh:.4f} PLN/kWh")
+            
+        except Exception as e:
+            logger.warning(f"Price refresh failed: {e}")
+            with self._background_cache_lock:
+                self._background_cache['last_price_error'] = str(e)
+    
+    def _refresh_inverter_data(self):
+        """Refresh inverter data from coordinator state files (no direct inverter connection)."""
+        try:
+            # Read most recent coordinator state file
+            project_root = Path(__file__).parent.parent
+            state_files = list((project_root / "out").glob("coordinator_state_*.json"))
+            
+            if not state_files:
+                raise Exception("No coordinator state files found")
+            
+            latest_file = max(state_files, key=lambda x: x.stat().st_mtime)
+            file_age = time.time() - latest_file.stat().st_mtime
+            
+            if file_age > 120:  # Older than 2 minutes
+                raise Exception(f"State file too old: {file_age:.0f}s")
+            
+            # Read and parse
+            content = latest_file.read_text().strip()
+            lines = content.split('\n')
+            
+            for line in reversed(lines):
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line)
+                    current_data = data.get('current_data', {})
+                    
+                    # Convert to dashboard format
+                    dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
+                    
+                    if dashboard_data:
+                        with self._background_cache_lock:
+                            self._background_cache['inverter_data'] = dashboard_data
+                            self._background_cache['last_inverter_refresh'] = time.time()
+                            self._background_cache['last_inverter_error'] = None
+                            self._background_cache['data_source'] = dashboard_data.get('data_source', 'real')
+                        
+                        logger.debug(f"✅ Refreshed inverter data from {latest_file.name} (age: {file_age:.1f}s)")
+                        return
+                except json.JSONDecodeError:
+                    continue
+            
+            raise Exception("No valid JSON in state file")
+            
+        except Exception as e:
+            logger.warning(f"Inverter data refresh failed: {e}")
+            with self._background_cache_lock:
+                self._background_cache['last_inverter_error'] = str(e)
+    
+    def _refresh_metrics_data(self):
+        """Refresh metrics data from database (uses background storage instance)."""
+        try:
+            start_time = time.time()
+            
+            # Get monthly summary (database-first)
+            now = datetime.now()
+            monthly_summary = self.snapshot_manager.get_monthly_summary(now.year, now.month)
+            
+            # Get recent decisions (last 24h) for efficiency score
+            yesterday = now - timedelta(hours=24)
+            db_decisions = self._run_async_storage_with_timeout(
+                self._background_storage.get_decisions(yesterday, now) if self._background_storage else None,
+                timeout=10.0,
+                use_background=True
+            )
+            
+            # Calculate efficiency score from recent data
+            efficiency_score = 70.0  # Default
+            if db_decisions:
+                avg_confidence = sum(d.get('confidence', 0) for d in db_decisions) / len(db_decisions) if db_decisions else 0
+                efficiency_score = avg_confidence * 100
+            
+            metrics = {
+                'timestamp': now.isoformat(),
+                'total_decisions': monthly_summary.get('total_decisions', 0),
+                'charging_count': monthly_summary.get('charging_count', 0),
+                'wait_count': monthly_summary.get('wait_count', 0),
+                'battery_selling_count': 0,
+                'total_energy_charged_kwh': monthly_summary.get('total_energy_kwh', 0),
+                'total_cost_pln': monthly_summary.get('total_cost_pln', 0),
+                'total_savings_pln': monthly_summary.get('total_savings_pln', 0),
+                'savings_percentage': monthly_summary.get('savings_percentage', 0),
+                'avg_confidence': round(monthly_summary.get('avg_confidence', 0) * 100, 1),
+                'avg_cost_per_kwh_pln': monthly_summary.get('avg_cost_per_kwh', 0),
+                'efficiency_score': efficiency_score,
+                'source_breakdown': monthly_summary.get('source_breakdown', {}),
+                'time_range': 'current_month'
+            }
+            
+            duration_ms = (time.time() - start_time) * 1000
+            
+            with self._background_cache_lock:
+                self._background_cache['metrics_data'] = metrics
+                self._background_cache['last_metrics_refresh'] = time.time()
+                self._background_cache['last_metrics_error'] = None
+            
+            logger.info(f"✅ Refreshed metrics data in {duration_ms:.0f}ms")
+            
+        except Exception as e:
+            logger.warning(f"Metrics refresh failed: {e}")
+            with self._background_cache_lock:
+                self._background_cache['last_metrics_error'] = str(e)
     
     def _run_async_storage(self, coro):
         """Run an async storage operation from sync code.
@@ -826,23 +1315,46 @@ class LogWebServer:
         )
     
     def _get_system_status(self) -> Dict[str, Any]:
-        """Get system status information"""
+        """Get system status from background cache."""
         try:
-            # Check if master coordinator is running
-            import psutil
-            coordinator_running = False
-            coordinator_pid = None
+            # Read from background cache (no blocking operations)
+            with self._background_cache_lock:
+                coordinator_pid = self._background_cache.get('coordinator_pid')
+                coordinator_running = self._background_cache.get('coordinator_running', False)
+                data_source = self._background_cache.get('data_source', 'unknown')
+                
+                # Storage health
+                storage_health = {
+                    'connected': self._storage_connected,
+                    'has_data': self._storage_has_data,
+                    'type': 'sqlite' if self.storage else None
+                }
+                
+                # Background worker health
+                cache_ages = {
+                    'inverter_s': time.time() - self._background_cache['last_inverter_refresh'],
+                    'price_s': time.time() - self._background_cache['last_price_refresh'],
+                    'metrics_s': time.time() - self._background_cache['last_metrics_refresh']
+                }
+                
+                bg_health = 'healthy'
+                if not (self._background_thread and self._background_thread.is_alive()):
+                    bg_health = 'failed'
+                elif any(age > 600 for age in cache_ages.values()):
+                    bg_health = 'stale'
+                
+                background_worker = {
+                    'alive': self._background_thread.is_alive() if self._background_thread else False,
+                    'cache_ages': cache_ages,
+                    'health': bg_health,
+                    'last_errors': {
+                        'inverter': self._background_cache['last_inverter_error'],
+                        'price': self._background_cache['last_price_error'],
+                        'metrics': self._background_cache['last_metrics_error']
+                    }
+                }
             
-            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-                try:
-                    if proc.info['cmdline'] and any('master_coordinator.py' in cmd for cmd in proc.info['cmdline']):
-                        coordinator_running = True
-                        coordinator_pid = proc.info['pid']
-                        break
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-            
-            # Get log file sizes
+            # Get log file info (fast - no process iteration)
             log_files = {}
             for log_file in self.log_dir.glob("*.log"):
                 stat = log_file.stat()
@@ -851,45 +1363,22 @@ class LogWebServer:
                     'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
                 }
             
-            # Get data source information
-            try:
-                current_state = self._get_current_system_state()
-                data_source = current_state.get('data_source', 'unknown')
-            except Exception:
-                data_source = 'unknown'
-            
             return {
                 'status': 'running',
                 'timestamp': datetime.now().isoformat(),
                 'coordinator_running': coordinator_running,
                 'coordinator_pid': coordinator_pid,
+                'data_source': data_source,
                 'log_files': log_files,
                 'server_uptime': time.time() - self.start_time if hasattr(self, 'start_time') else 0,
                 'server_uptime_human': format_uptime_human_readable(time.time() - self.start_time if hasattr(self, 'start_time') else 0),
-                'data_source': data_source
+                'storage': storage_health,
+                'background_worker': background_worker
             }
-        except ImportError:
-            # Get data source information even without psutil
-            try:
-                current_state = self._get_current_system_state()
-                data_source = current_state.get('data_source', 'unknown')
-            except Exception:
-                data_source = 'unknown'
-                
-            return {
-                'status': 'running',
-                'timestamp': datetime.now().isoformat(),
-                'coordinator_running': 'unknown',
-                'note': 'psutil not available for process monitoring',
-                'data_source': data_source
-            }
+            
         except Exception as e:
-            return {
-                'status': 'error',
-                'error': str(e),
-                'timestamp': datetime.now().isoformat(),
-                'data_source': 'unknown'
-            }
+            logger.error(f"Error getting system status: {e}", exc_info=True)
+            return {'status': 'error', 'error': str(e), 'timestamp': datetime.now().isoformat()}
     
     def _get_dashboard_template(self) -> str:
         """Get HTML dashboard template"""
@@ -2885,26 +3374,71 @@ class LogWebServer:
         }
 
     def start(self):
-        """Start the web server"""
+        """Start the web server with signal handlers."""
+        import signal
+        import sys
+        
+        def signal_handler(signum, frame):
+            logger.info(f"Received signal {signum}, shutting down...")
+            self.shutdown()
+            sys.exit(0)
+        
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
+        
         self.start_time = time.time()
         self._running = True
         logger.info(f"Starting log web server on {self.host}:{self.port}")
+        
         try:
             self.app.run(host=self.host, port=self.port, debug=False, threaded=True)
         except OSError as e:
             if e.errno == 48:  # Address already in use
                 logger.error(f"Port {self.port} is already in use")
+                self.shutdown()
                 self._running = False
                 raise RuntimeError(f"Port {self.port} is already in use") from e
             else:
+                self.shutdown()
                 self._running = False
                 raise
     
+    def shutdown(self):
+        """Gracefully shutdown background thread and storage connections."""
+        logger.info("Shutting down LogWebServer...")
+        
+        # Signal background thread to stop
+        if self._stop_background_thread:
+            self._stop_background_thread.set()
+        
+        # Wait for background thread to finish
+        if self._background_thread and self._background_thread.is_alive():
+            logger.info("Waiting for background thread to stop...")
+            self._background_thread.join(timeout=5.0)
+            if self._background_thread.is_alive():
+                logger.warning("Background thread did not stop gracefully")
+            else:
+                logger.info("Background thread stopped")
+        
+        # Disconnect main storage
+        if self.storage and self._storage_connected:
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(self.storage.disconnect())
+                    logger.info("Main storage disconnected")
+                finally:
+                    loop.close()
+            except Exception as e:
+                logger.warning(f"Error disconnecting main storage: {e}")
+        
+        logger.info("LogWebServer shutdown complete")
+    
     def stop(self):
-        """Stop the web server"""
+        """Stop the web server."""
         logger.info("Stopping log web server")
-        # Flask doesn't have a built-in stop method, so we'll use a different approach
-        # This would typically be handled by the process manager
+        self.shutdown()  # Call graceful shutdown
         self._running = False
     
     def is_running(self):
@@ -3114,102 +3648,50 @@ class LogWebServer:
         return sorted(decisions, key=lambda x: x['timestamp'], reverse=True)
     
     def _get_system_metrics(self) -> Dict[str, Any]:
-        """Get system performance metrics including historical data"""
+        """Get metrics from background cache."""
         try:
-            # Use monthly snapshot data for Cost & Savings (much faster than reading all files)
+            # Check background cache first
+            with self._background_cache_lock:
+                cached_data = self._background_cache.get('metrics_data')
+                last_refresh = self._background_cache.get('last_metrics_refresh', 0)
+            
+            if cached_data:
+                cache_age = time.time() - last_refresh
+                if cache_age < 120:  # Fresh: <2 min
+                    return cached_data
+            
+            # Cache miss/stale - calculate directly (will be slow)
+            logger.warning(f"⚠️ Metrics cache unavailable, calculating directly")
+            
+            # Fallback: Use monthly snapshot data
             now = datetime.now()
             monthly_summary = self.snapshot_manager.get_monthly_summary(now.year, now.month)
             
-            # Get recent decisions for Performance Metrics (last 24h only)
-            decision_data = self._get_decision_history(time_range='24h')
-            all_decisions = decision_data.get('decisions', [])
+            # Calculate efficiency score from monthly data
+            efficiency_score = 70.0  # Default
+            avg_confidence = monthly_summary.get('avg_confidence', 0)
+            if avg_confidence > 0:
+                efficiency_score = avg_confidence * 100
             
-            if not all_decisions:
-                # If no recent decisions, use monthly data for everything
-                return {
-                    'timestamp': datetime.now().isoformat(),
-                    'total_decisions': monthly_summary.get('total_decisions', 0),
-                    'total_count': monthly_summary.get('total_decisions', 0),
-                    'charging_decisions': monthly_summary.get('charging_count', 0),
-                    'wait_decisions': monthly_summary.get('wait_count', 0),
-                    'battery_selling_decisions': 0,
-                    'charging_count': monthly_summary.get('charging_count', 0),
-                    'wait_count': monthly_summary.get('wait_count', 0),
-                    'battery_selling_count': 0,
-                    'total_energy_charged_kwh': monthly_summary.get('total_energy_kwh', 0),
-                    'total_cost_pln': monthly_summary.get('total_cost_pln', 0),
-                    'total_savings_pln': monthly_summary.get('total_savings_pln', 0),
-                    'savings_percentage': monthly_summary.get('savings_percentage', 0),
-                    'avg_confidence': round(monthly_summary.get('avg_confidence', 0) * 100, 2),
-                    'avg_energy_per_charge_kwh': round(monthly_summary.get('total_energy_kwh', 0) / monthly_summary.get('charging_count', 1), 2) if monthly_summary.get('charging_count', 0) > 0 else 0,
-                    'avg_cost_per_kwh_pln': monthly_summary.get('avg_cost_per_kwh', 0),
-                    'decision_breakdown': {},
-                    'source_breakdown': monthly_summary.get('source_breakdown', {}),
-                    'efficiency_score': 50.0,  # Default mid-range
-                    'time_range': 'current_month'
-                }
-            
-            # Calculate recent decision metrics for efficiency score
-            total_decisions = len(all_decisions)
-            
-            # Categorize recent decisions
-            charging_decisions = []
-            wait_decisions = []
-            battery_selling_decisions = []
-            
-            for decision in all_decisions:
-                action = decision.get('action', '')
-                decision_data_type = decision.get('decision', '')
-                
-                if action == 'battery_selling' or decision_data_type == 'battery_selling':
-                    battery_selling_decisions.append(decision)
-                elif action in ['charge', 'charging', 'start_pv_charging', 'start_grid_charging']:
-                    charging_decisions.append(decision)
-                elif action == 'wait':
-                    wait_decisions.append(decision)
-                else:
-                    wait_decisions.append(decision)
-            
-            # Calculate averages from recent decisions (for efficiency score)
-            avg_confidence = sum(d.get('confidence', 0) for d in all_decisions) / total_decisions if total_decisions > 0 else monthly_summary.get('avg_confidence', 0)
-            
-            # Decision type breakdown (recent decisions only)
-            decision_breakdown = {}
-            for decision in all_decisions:
-                action = decision.get('action', 'unknown')
-                decision_breakdown[action] = decision_breakdown.get(action, 0) + 1
-            
-            # Calculate efficiency score based on recent decisions
-            efficiency_score = self._calculate_efficiency_score(all_decisions) if all_decisions else 50.0
-            
-            # Return combined data: Monthly Cost & Savings + Recent Performance Metrics
             return {
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': now.isoformat(),
                 'total_decisions': monthly_summary.get('total_decisions', 0),
-                'total_count': monthly_summary.get('total_decisions', 0),
-                'charging_decisions': monthly_summary.get('charging_count', 0),
-                'wait_decisions': monthly_summary.get('wait_count', 0),
-                'battery_selling_decisions': 0,
-                # Also provide the field names expected by the frontend
                 'charging_count': monthly_summary.get('charging_count', 0),
                 'wait_count': monthly_summary.get('wait_count', 0),
                 'battery_selling_count': 0,
-                # Monthly Cost & Savings data (from snapshots - fast!)
                 'total_energy_charged_kwh': monthly_summary.get('total_energy_kwh', 0),
                 'total_cost_pln': monthly_summary.get('total_cost_pln', 0),
                 'total_savings_pln': monthly_summary.get('total_savings_pln', 0),
                 'savings_percentage': monthly_summary.get('savings_percentage', 0),
-                'avg_cost_per_kwh_pln': monthly_summary.get('avg_cost_per_kwh', 0),
-                # Performance metrics (from recent data)
                 'avg_confidence': round(avg_confidence * 100, 1),
-                'avg_energy_per_charge_kwh': round(monthly_summary.get('total_energy_kwh', 0) / monthly_summary.get('charging_count', 1), 2) if monthly_summary.get('charging_count', 0) > 0 else 0,
-                'decision_breakdown': decision_breakdown,
-                'source_breakdown': monthly_summary.get('source_breakdown', {}),
+                'avg_cost_per_kwh_pln': monthly_summary.get('avg_cost_per_kwh', 0),
                 'efficiency_score': efficiency_score,
+                'source_breakdown': monthly_summary.get('source_breakdown', {}),
                 'time_range': 'current_month'
             }
+            
         except Exception as e:
-            logger.error(f"Error getting system metrics: {e}")
+            logger.error(f"Error getting metrics: {e}", exc_info=True)
             return {'error': str(e)}
     
     def _get_historical_decisions(self) -> List[Dict[str, Any]]:
@@ -3366,373 +3848,96 @@ class LogWebServer:
             return self._price_charger
     
     def _get_real_price_data(self) -> Optional[Dict[str, Any]]:
-        """Get real price data using AutomatedPriceCharger (correct SC calculation) with caching"""
+        """Get price data from background cache."""
         try:
-            from datetime import datetime, timedelta
-            import asyncio
+            # Check background cache first
+            with self._background_cache_lock:
+                cached_data = self._background_cache.get('price_data')
+                last_refresh = self._background_cache.get('last_price_refresh', 0)
             
-            # Create cache key based on current 15-minute period to ensure prices update correctly
-            # This ensures cache is invalidated when we move to a new price period
-            now = datetime.now()
-            current_period = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
-            cache_key = f'real_price_data_{current_period.strftime("%Y%m%d_%H%M")}'
-            
-            # Check cache first (cache for 5 minutes to balance freshness and performance)
-            # Prices can change during the day, so shorter cache is better
-            cached_data = self._get_cached_data(cache_key, ttl=300)  # Cache for 5 minutes
             if cached_data:
-                logger.debug(f"Price cache HIT for {cache_key}: current={cached_data.get('current_price_pln_kwh')} PLN/kWh")
-                return cached_data
+                cache_age = time.time() - last_refresh
+                if cache_age < 3600:  # Fresh: <1 hour
+                    cached_data['data_source'] = 'background_cache'
+                    return cached_data
             
-            logger.debug(f"Price cache MISS for {cache_key}, fetching fresh data...")
+            # Fallback: try disk cache
+            disk_data = self._load_price_from_disk()
+            if disk_data:
+                disk_data['data_source'] = 'disk_cache'
+                return disk_data
             
-            # Use cached AutomatedPriceCharger instance to avoid expensive re-initialization
-            charger = self._get_or_create_price_charger()
-            if charger is None:
-                return None
-            
-            # Fetch current day's price data (async call wrapped in sync context)
-            today = datetime.now().strftime('%Y-%m-%d')
-            
-            # Run async method in sync context
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                price_data = loop.run_until_complete(charger.fetch_price_data_for_date(today))
-            finally:
-                loop.close()
-            
-            if not price_data or 'value' not in price_data:
-                logger.warning("No price data returned from API")
-                return None
-            
-            logger.debug(f"Fetched {len(price_data['value'])} price records from API")
-            
-            # Get current price using the charger's method (returns PLN/MWh)
-            current_price = charger.get_current_price(price_data)
-            if current_price is None:
-                logger.warning(f"get_current_price returned None for time {now}")
-                return None
-            
-            # Convert from PLN/MWh to PLN/kWh for display
-            current_price_kwh = current_price / 1000
-            logger.debug(f"Current price from get_current_price: {current_price_kwh:.4f} PLN/kWh (period: {current_period.strftime('%H:%M')})")
-            
-            # Find cheapest price and calculate statistics
-            prices = []
-            for item in price_data['value']:
-                market_price = float(item['csdac_pln'])
-                # Parse timestamp from price data item for accurate tariff calculation
-                try:
-                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
-                except ValueError:
-                    # Try alternative format
-                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M:%S')
-                # Pass timestamp to calculate_final_price for accurate tariff calculation
-                final_price = charger.calculate_final_price(market_price, item_time)
-                final_price_kwh = final_price / 1000  # Convert to PLN/kWh
-                prices.append((final_price_kwh, item_time.hour))
-            
-            if not prices:
-                return None
-            
-            # Find cheapest price
-            cheapest_price, cheapest_hour = min(prices, key=lambda x: x[0])
-            
-            # Calculate average price
-            avg_price = sum(price for price, _ in prices) / len(prices)
-            
-            result = {
-                'current_price_pln_kwh': round(current_price_kwh, 4) if current_price_kwh else 0.0,
-                'cheapest_price_pln_kwh': round(cheapest_price, 4),
-                'cheapest_hour': f"{cheapest_hour:02d}:00",
-                'average_price_pln_kwh': round(avg_price, 4),
-                'price_trend': 'stable',  # Could be enhanced with trend analysis
-                'data_source': 'PSE API (CSDAC-PLN)',
-                'last_updated': datetime.now().isoformat(),
-                'calculation_method': 'tariff_aware'  # Indicate calculation method for debugging
-            }
-            
-            # Cache the result with period-specific key (5 minute TTL ensures fresh data)
-            self._set_cached_data(cache_key, result)
-            logger.debug(f"Price data calculated: current={current_price_kwh:.4f} PLN/kWh, cheapest={cheapest_price:.4f} PLN/kWh at {cheapest_hour:02d}:00 (period: {current_period.strftime('%H:%M')})")
-            return result
+            logger.warning("⚠️ Price data not available in cache, using fallback")
+            return None
             
         except Exception as e:
-            logger.error(f"Failed to fetch real price data using AutomatedPriceCharger: {e}")
+            logger.error(f"Error getting price data: {e}", exc_info=True)
             return None
 
     def _get_real_inverter_data(self) -> Optional[Dict[str, Any]]:
-        """Get real data from GoodWe inverter or master coordinator"""
+        """Get inverter data from background cache with staleness detection."""
         try:
-            # Check cache first (cache for 60 seconds to reduce inverter requests)
-            cached_data = self._get_cached_data('real_inverter_data', ttl=60)
+            # Check background cache first
+            with self._background_cache_lock:
+                cached_data = self._background_cache.get('inverter_data')
+                last_refresh = self._background_cache.get('last_inverter_refresh', 0)
+            
             if cached_data:
-                return cached_data
+                cache_age = time.time() - last_refresh
+                
+                if cache_age < 300:  # Fresh: <5 min
+                    cached_data['data_source'] = 'background_cache'
+                    cached_data['cache_age_seconds'] = cache_age
+                    return cached_data
+                elif cache_age < 600:  # Stale but usable: 5-10 min
+                    logger.warning(f"⚠️ Inverter cache stale ({cache_age:.0f}s), but returning anyway")
+                    cached_data['data_source'] = 'background_cache_stale'
+                    cached_data['cache_age_seconds'] = cache_age
+                    return cached_data
             
-            # OPTIMIZATION 1: Try storage layer (database) first for recent system state
-            system_states = self._run_async_storage(
-                self.storage.get_system_state(limit=1) if self.storage else None
-            )
-            if system_states and len(system_states) > 0:
-                latest_state = system_states[0]
-                # Check if state is fresh (less than 2 minutes old)
-                state_time_str = latest_state.get('timestamp', '')
-                if state_time_str:
-                    try:
-                        state_time = datetime.fromisoformat(state_time_str.replace('Z', '+00:00'))
-                        # Handle both naive and timezone-aware timestamps
-                        if state_time.tzinfo is not None:
-                            now = datetime.now(state_time.tzinfo)
-                        else:
-                            now = datetime.now()
-                        state_age = (now - state_time).total_seconds()
-                        if state_age < 120:  # 2 minutes freshness
-                            # Extract current_data from the state
-                            current_data = latest_state.get('current_data', {})
-                            if current_data:
-                                dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
-                                if dashboard_data:
-                                    self._set_cached_data('real_inverter_data', dashboard_data)
-                                    logger.debug(f"Loaded fresh data from storage layer (age: {state_age:.1f}s)")
-                                    return dashboard_data
-                    except Exception as e:
-                        logger.warning(f"Failed to parse state timestamp from storage: {e}")
+            # Cache too old or missing - fallback to direct file reading
+            logger.warning("❌ Inverter background cache unavailable, falling back to file reading")
             
-            # OPTIMIZATION 2: Try to read from coordinator state file SECOND
-            # This avoids slow inverter connections if the coordinator is running and updating state
+            # Fallback: Try to read from coordinator state file directly
             project_root = Path(__file__).parent.parent
             try:
-                # Find latest state file
-                # Optimization: Sort by filename (contains timestamp) to avoid stat() calls
                 data_files = sorted(list((project_root / "out").glob("coordinator_state_*.json")), 
                                   key=lambda x: x.name, reverse=True)
                 
                 if data_files:
                     latest_file = data_files[0]
-                    # Check if file is fresh (less than 2 minutes old)
-                    # We still need one stat call here, but it's just one
                     file_age = time.time() - latest_file.stat().st_mtime
                     
-                    if file_age < 120:  # 2 minutes freshness
-                        # Read file content first to handle empty or partial files
+                    if file_age < 300:  # 5 minutes freshness for fallback
                         file_content = latest_file.read_text().strip()
-                        if not file_content:
-                            logger.debug(f"State file {latest_file.name} is empty, skipping")
-                        else:
-                            try:
-                                # Handle NDJSON format (newline-delimited JSON) - parse the last valid line
-                                lines = file_content.split('\n')
-                                real_data = None
-                                for line in reversed(lines):
-                                    line = line.strip()
-                                    if line:
-                                        try:
-                                            real_data = json.loads(line)
-                                            break
-                                        except json.JSONDecodeError:
-                                            continue
-                                
-                                if real_data is None:
-                                    logger.debug(f"State file {latest_file.name} contains no valid JSON lines")
-                                else:
-                                    # Extract relevant data
-                                    current_data = real_data.get('current_data', {})
-                                    
-                                    # Convert to dashboard format
-                                    dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
-                                    
-                                    if dashboard_data:
-                                        # Cache the result
-                                        self._set_cached_data('real_inverter_data', dashboard_data)
-                                        
-                                        if self._should_log_message("Loaded fresh data from coordinator state file"):
-                                            logger.info(f"Loaded fresh data from {latest_file.name} (age: {file_age:.1f}s)")
-                                        
-                                        return dashboard_data
-                            except Exception as e:
-                                logger.debug(f"Error reading state file {latest_file.name}: {e}")
-            except Exception as e:
-                logger.warning(f"Failed to read coordinator state file: {e}")
-
-            # If no fresh file, try to get real-time data directly from the inverter
-            try:
-                # Add src directory to path if not already there
-                import sys
-                src_path = Path(__file__).parent
-                if str(src_path) not in sys.path:
-                    sys.path.insert(0, str(src_path))
-                
-                from fast_charge import GoodWeFastCharger
-                import asyncio
-                import threading
-                
-                # Use a separate thread to avoid event loop conflicts
-                result_container = {'data': None, 'error': None}
-                
-                def run_async_collection():
-                    try:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        try:
-                            # Get data directly from inverter
-                            config_path = Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"
-                            charger = GoodWeFastCharger(config_path)
-                            loop.run_until_complete(charger.connect_inverter())
-                            status = loop.run_until_complete(charger.get_inverter_status())
+                        if file_content:
+                            lines = file_content.split('\n')
+                            real_data = None
+                            for line in reversed(lines):
+                                line = line.strip()
+                                if line:
+                                    try:
+                                        real_data = json.loads(line)
+                                        break
+                                    except json.JSONDecodeError:
+                                        continue
                             
-                            # Format data for dashboard
-                            dashboard_data = self._convert_inverter_status_to_dashboard_format(status)
-                            result_container['data'] = dashboard_data
-                        finally:
-                            loop.close()
-                    except Exception as e:
-                        result_container['error'] = e
-                
-                # Run in a separate thread
-                thread = threading.Thread(target=run_async_collection)
-                thread.start()
-                thread.join(timeout=10)  # 10 second timeout
-                
-                if result_container['error']:
-                    raise result_container['error']
-                
-                real_data = result_container['data']
-                if real_data:
-                    
-                    # Cache the result
-                    self._set_cached_data('real_inverter_data', real_data)
-                    
-                    # Log success (reduced frequency with deduplication)
-                    current_time = time.time()
-                    if current_time - self._last_real_data_time > 60:
-                        success_msg = "Successfully retrieved real inverter data with L1/L2/L3 currents"
-                        if self._should_log_message(success_msg):
-                            logger.info(success_msg)
-                        self._last_real_data_time = current_time
-                    
-                    return real_data
-                    
+                            if real_data:
+                                current_data = real_data.get('current_data', {})
+                                dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
+                                
+                                if dashboard_data:
+                                    dashboard_data['data_source'] = 'fallback_direct'
+                                    dashboard_data['cache_age_seconds'] = file_age
+                                    logger.info(f"Loaded data from {latest_file.name} (fallback, age: {file_age:.1f}s)")
+                                    return dashboard_data
             except Exception as e:
-                logger.warning(f"Failed to get real-time data from inverter: {e}")
-                return None
+                logger.error(f"Fallback file reading failed: {e}")
             
-            # Fallback: Check for recent state files
-            project_root = Path(__file__).parent.parent
-            data_files = list((project_root / "out").glob("coordinator_state_*.json"))
-            
-            if not data_files:
-                logger.info("No coordinator state files found")
-                return None
-            
-            # Get the most recent data file
-            latest_file = max(data_files, key=lambda x: x.stat().st_mtime)
-            
-            # Check if the file is recent (within last 7 days for service data)
-            file_age = datetime.now().timestamp() - latest_file.stat().st_mtime
-            if file_age > 604800:  # 7 days
-                logger.warning(f"Latest data file is {file_age/86400:.1f} days old")
-                return None
-            
-            # Read file content safely to handle empty or partial files
-            file_content = latest_file.read_text().strip()
-            if not file_content:
-                logger.debug(f"State file {latest_file.name} is empty")
-                return None
-            
-            try:
-                # Handle NDJSON format (newline-delimited JSON) - parse the last valid line
-                lines = file_content.split('\n')
-                real_data = None
-                for line in reversed(lines):
-                    line = line.strip()
-                    if line:
-                        try:
-                            real_data = json.loads(line)
-                            break
-                        except json.JSONDecodeError:
-                            continue
-                
-                if real_data is None:
-                    logger.warning(f"State file {latest_file.name} contains no valid JSON lines")
-                    return None
-            except Exception as e:
-                logger.warning(f"Error reading state file {latest_file.name}: {e}")
-                return None
-            
-            # Extract relevant data from the real system
-            current_data = real_data.get('current_data', {})
-            battery_data = current_data.get('battery', {})
-            pv_data = current_data.get('photovoltaic', {})
-            consumption_data = current_data.get('house_consumption', {})
-            grid_data = current_data.get('grid', {})
-            
-            # Convert real data to dashboard format
-            state = {
-                'timestamp': real_data.get('timestamp', datetime.now().isoformat()),
-                'data_source': 'real_inverter',
-                'battery': {
-                    'soc_percent': battery_data.get('soc_percent', 'Unknown'),
-                    'temperature_c': battery_data.get('temperature', 'Unknown'),
-                    'charging_status': 'charging' if battery_data.get('charging_status', False) else 'idle',
-                    'health_status': 'good' if battery_data.get('soc_percent', 0) > 20 else 'warning'
-                },
-                'photovoltaic': {
-                    'current_power_w': pv_data.get('current_power_w', 0),
-                    'daily_generation_kwh': pv_data.get('daily_generation_kwh', 0),
-                    'efficiency_percent': pv_data.get('efficiency_percent', 0)
-                },
-                'house_consumption': {
-                    'current_power_w': consumption_data.get('current_power_w', 0),
-                    'daily_consumption_kwh': consumption_data.get('daily_consumption_kwh', 0)
-                },
-                'grid': {
-                    'current_power_w': grid_data.get('current_power_w', 0),
-                    'flow_direction': 'export' if grid_data.get('current_power_w', 0) < 0 else 'import',
-                    'daily_import_kwh': grid_data.get('daily_import_kwh', 0),
-                    'daily_export_kwh': grid_data.get('daily_export_kwh', 0)
-                },
-                'pricing': self._get_real_price_data() or {
-                    'current_price_pln_kwh': real_data.get('pricing', {}).get('current_price_pln_kwh', 0.45),
-                    'average_price_pln_kwh': real_data.get('pricing', {}).get('average_price_pln_kwh', 0.68),
-                    'cheapest_price_pln_kwh': real_data.get('pricing', {}).get('cheapest_price_pln_kwh', 0.23),
-                    'cheapest_hour': real_data.get('pricing', {}).get('cheapest_hour', '02:00'),
-                    'price_trend': real_data.get('pricing', {}).get('price_trend', 'stable')
-                },
-                'weather': {
-                    'condition': current_data.get('weather', {}).get('current_conditions', {}).get('source', 'unknown'),
-                    'temperature_c': current_data.get('weather', {}).get('current_conditions', {}).get('temperature', 20),
-                    'cloud_cover_percent': current_data.get('weather', {}).get('current_conditions', {}).get('cloud_cover_estimated', 50),
-                    'forecast_4h': current_data.get('weather', {}).get('forecast', {}).get('4h_trend', 'stable')
-                },
-                'decision_factors': {
-                    'price_score': real_data.get('decision_factors', {}).get('price_score', 75),
-                    'battery_score': real_data.get('decision_factors', {}).get('battery_score', 70),
-                    'pv_score': real_data.get('decision_factors', {}).get('pv_score', 80),
-                    'consumption_score': real_data.get('decision_factors', {}).get('consumption_score', 75),
-                    'weather_score': real_data.get('decision_factors', {}).get('weather_score', 80),
-                    'overall_confidence': real_data.get('decision_factors', {}).get('overall_confidence', 75)
-                },
-                'recommendations': {
-                    'primary_action': real_data.get('recommendations', {}).get('primary_action', 'wait'),
-                    'reason': real_data.get('recommendations', {}).get('reason', 'Monitoring system conditions'),
-                    'confidence': real_data.get('recommendations', {}).get('confidence', 0.75),
-                    'alternative_actions': real_data.get('recommendations', {}).get('alternative_actions', [])
-                },
-                'system_health': {
-                    'status': 'healthy' if real_data.get('system_health', {}).get('status') == 'healthy' else 'warning',
-                    'last_error': real_data.get('system_health', {}).get('last_error'),
-                    'uptime_hours': real_data.get('uptime_seconds', 0) / 3600 if real_data.get('uptime_seconds') else 0,
-                    'uptime_human': format_uptime_human_readable(real_data.get('uptime_seconds', 0)) if real_data.get('uptime_seconds') else '0s',
-                    'data_quality': real_data.get('system_health', {}).get('data_quality', 'good')
-                }
-            }
-            
-            logger.info(f"Successfully loaded real data from {latest_file.name}")
-            return state
+            return None
             
         except Exception as e:
-            logger.error(f"Error getting real inverter data: {e}")
+            logger.error(f"Error getting inverter data: {e}", exc_info=True)
             return None
     
     def _convert_enhanced_data_to_dashboard_format(self, enhanced_data: Dict[str, Any]) -> Dict[str, Any]:

@@ -7,6 +7,8 @@ Creates and manages daily summaries of charging decisions to avoid recalculating
 import json
 import logging
 import asyncio
+import threading
+import time
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -37,6 +39,10 @@ class DailySnapshotManager:
         self.monthly_snapshots_dir = project_root / "out" / "monthly_snapshots"
         self.monthly_snapshots_dir.mkdir(parents=True, exist_ok=True)
         
+        # Monthly summary caching
+        self._monthly_cache = {}
+        self._monthly_cache_lock = threading.Lock()
+        
         # Initialize storage
         self.storage = None
         try:
@@ -55,23 +61,28 @@ class DailySnapshotManager:
         return self.get_snapshot_path(target_date).exists()
     
     def _run_async(self, coro):
-        """Safely run an async coroutine from sync context.
-        
-        Handles the case where we might already be in an event loop (e.g., Flask request).
-        """
+        """Safely run async coroutine from sync context with timeout."""
         try:
-            # Check if there's already an event loop running
+            # Check if already in async context
             loop = asyncio.get_running_loop()
-            # We're in an async context - can't use asyncio.run
-            # Fall back to synchronous file-based operation
-            logger.debug("Already in async context, skipping database query")
+            logger.debug("Already in async context, cannot nest event loops")
             return None
         except RuntimeError:
-            # No running loop, safe to use asyncio.run
+            # No running loop - safe to create new one (Flask/background thread context)
             try:
-                return asyncio.run(coro)
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    # Add 30s timeout for database operations
+                    result = loop.run_until_complete(asyncio.wait_for(coro, timeout=30.0))
+                    return result
+                except asyncio.TimeoutError:
+                    logger.error("⏱️ Database operation timeout (30s)")
+                    return None
+                finally:
+                    loop.close()
             except Exception as e:
-                logger.error(f"Error running async operation: {e}")
+                logger.error(f"Error running async operation: {e}", exc_info=True)
                 return None
     
     def create_daily_snapshot(self, target_date: date) -> Optional[Dict[str, Any]]:
@@ -256,7 +267,7 @@ class DailySnapshotManager:
         return self.monthly_snapshots_dir / f"monthly_snapshot_{year}{month:02d}.json"
 
     def get_monthly_summary(self, year: int, month: int) -> Dict[str, Any]:
-        """Get aggregated summary for a given month using snapshots
+        """Get aggregated summary for a given month using snapshots with in-memory caching.
         
         Args:
             year: Year (e.g., 2025)
@@ -265,6 +276,16 @@ class DailySnapshotManager:
         Returns:
             Monthly summary dictionary
         """
+        # Check cache first
+        cache_key = f"{year}_{month}"
+        with self._monthly_cache_lock:
+            if cache_key in self._monthly_cache:
+                cached_data, cached_time = self._monthly_cache[cache_key]
+                cache_age = time.time() - cached_time
+                if cache_age < 300:  # 5 minutes
+                    logger.debug(f"Returning cached monthly summary (age: {cache_age:.0f}s)")
+                    return cached_data
+        
         # Check if this is a past month
         today = date.today()
         is_past_month = (year < today.year) or (year == today.year and month < today.month)
@@ -275,7 +296,11 @@ class DailySnapshotManager:
             if monthly_snapshot_path.exists():
                 try:
                     with open(monthly_snapshot_path, 'r') as f:
-                        return json.load(f)
+                        data = json.load(f)
+                        # Cache the result
+                        with self._monthly_cache_lock:
+                            self._monthly_cache[cache_key] = (data, time.time())
+                        return data
                 except Exception as e:
                     logger.error(f"Error loading monthly snapshot {monthly_snapshot_path}: {e}")
         
@@ -411,7 +436,7 @@ class DailySnapshotManager:
         avg_cost_per_kwh = total_cost / total_energy if total_energy > 0 else 0
         savings_percentage = (total_savings / (total_cost + total_savings)) * 100 if (total_cost + total_savings) > 0 else 0
         
-        return {
+        summary = {
             'year': year,
             'month': month,
             'month_name': date(year, month, 1).strftime('%B'),
@@ -431,6 +456,12 @@ class DailySnapshotManager:
             'source_breakdown': source_breakdown,
             'daily_summaries': daily_summaries
         }
+        
+        # Cache result before returning
+        with self._monthly_cache_lock:
+            self._monthly_cache[cache_key] = (summary, time.time())
+        
+        return summary
     
     def create_missing_snapshots(self, days_back: int = 30) -> int:
         """Create snapshots for any missing days in the last N days
