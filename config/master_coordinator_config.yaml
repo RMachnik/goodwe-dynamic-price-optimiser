@@ -230,6 +230,7 @@ coordinator:
 price_analysis:
   api_url: "https://api.raporty.pse.pl/api/csdac-pln"
   update_interval_minutes: 60
+  api_timeout_seconds: 60  # API timeout for fetching price data
   price_thresholds:
     very_low: 200    # PLN/MWh - very low price threshold
     low: 400         # PLN/MWh - low price threshold
@@ -370,6 +371,14 @@ web_server:
   host: "0.0.0.0"             # Host to bind to (0.0.0.0 for all interfaces)
   port: 8080                  # Port to bind to
   cors_enabled: true          # Enable CORS for cross-origin requests
+  
+  # Background refresh configuration for dashboard performance
+  background_refresh_interval_seconds: 30    # Inverter data (coordinator state files)
+  price_refresh_interval_seconds: 300        # Price data (PSE API, 5 min)
+  metrics_refresh_interval_seconds: 60       # Metrics data (database queries, 1 min)
+  coordinator_pid_check_interval_seconds: 60 # PID validation (1 min)
+  cache_staleness_threshold_seconds: 300     # Warn if cache older than this
+  api_timeout_seconds: 60                    # PSE API timeout
 
 # Timing-Aware Charging Configuration
 timing_awareness:
