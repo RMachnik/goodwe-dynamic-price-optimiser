@@ -35,6 +35,17 @@ wheels/
 *.egg
 MANIFEST
 
+# Testing
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+*.cover
+*.py,cover
+.hypothesis/
+test_performance.jsonl
+
 # Virtual environments
 .env
 .venv

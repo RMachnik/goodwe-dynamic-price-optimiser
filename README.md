@@ -811,8 +811,32 @@ coordinator:
 ### **⚡ Automated Price-Based Charging**
 - **[README_automated_charging.md](docs/README_automated_charging.md)** - Intelligent charging based on electricity prices
 
-### **🧪 Testing & Investigation**
+### **🧪 Testing & Quality**
+
+**Test Suite Status:** ![Tests](https://github.com/RMachnik/goodwe-dynamic-price-optimiser/workflows/CI/badge.svg)
+
+- **655 Tests Passing** - 100% pass rate with 0 warnings
+- **14.78s Execution Time** - 7.8% faster than baseline
+- **Phase 1 & 2 Complete** - Fixed async issues, eliminated warnings, established testing standards
+- **Comprehensive Documentation** - See [TESTING_GUIDE.md](docs/TESTING_GUIDE.md) for standards and patterns
 - **Test Scripts** in `test/` directory for connectivity and sensor investigation
+
+**Running Tests:**
+```bash
+# Run all tests
+python -m pytest test/ -q
+
+# Run with coverage
+python -m pytest test/ --cov=src --cov-report=term-missing
+
+# Run performance baseline
+python scripts/test_performance.py
+```
+
+**For Contributors:**
+- All tests use isolated configurations - production config changes don't break tests
+- See [TESTING_GUIDE.md](docs/TESTING_GUIDE.md) for test writing standards
+- Phase 3 & 4 in progress: Coverage enhancement and CI/CD integration
 
 ## 🎯 **Current Status**
 

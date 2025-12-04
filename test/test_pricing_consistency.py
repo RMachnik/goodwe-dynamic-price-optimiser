@@ -186,11 +186,12 @@ class TestPricingConsistency(unittest.TestCase):
         
         # Mock AutomatedPriceCharger
         with patch('automated_price_charging.AutomatedPriceCharger') as mock_charger_class:
+            from unittest.mock import AsyncMock
             mock_charger = Mock()
             mock_charger_class.return_value = mock_charger
             
-            # Mock price data and methods
-            mock_charger.fetch_price_data_for_date.return_value = self.mock_price_data
+            # Mock price data and methods - fetch_price_data_for_date is async!
+            mock_charger.fetch_price_data_for_date = AsyncMock(return_value=self.mock_price_data)
             mock_charger.get_current_price.return_value = 389.2  # PLN/MWh
             mock_charger.calculate_final_price.return_value = 389.2  # PLN/MWh
             
@@ -409,11 +410,12 @@ class TestPricingIntegration(unittest.TestCase):
         server = LogWebServer(self.mock_config)
         
         with patch('automated_price_charging.AutomatedPriceCharger') as mock_charger_class:
+            from unittest.mock import AsyncMock
             mock_charger = Mock()
             mock_charger_class.return_value = mock_charger
             
-            # Mock methods
-            mock_charger.fetch_price_data_for_date.return_value = self.mock_price_data
+            # Mock methods - fetch_price_data_for_date is async!
+            mock_charger.fetch_price_data_for_date = AsyncMock(return_value=self.mock_price_data)
             mock_charger.get_current_price.return_value = 389.2  # PLN/MWh
             mock_charger.calculate_final_price.return_value = 389.2  # PLN/MWh
             

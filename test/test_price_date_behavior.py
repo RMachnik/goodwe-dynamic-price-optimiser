@@ -5,12 +5,13 @@ Verifies that the system correctly handles Polish electricity market day-ahead p
 """
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from datetime import datetime, timedelta
 import sys
 import os
 import yaml
 import tempfile
+import asyncio
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -112,24 +113,24 @@ class TestPriceDateBehavior(unittest.TestCase):
         if hasattr(self, 'temp_config_file') and os.path.exists(self.temp_config_file.name):
             os.unlink(self.temp_config_file.name)
     
-    @patch('requests.get')
+    @patch('aiohttp.ClientSession.get')
     def test_fetch_today_prices_correct_date(self, mock_get):
         """Test that fetch_today_prices uses the correct date"""
-        # Mock successful API response
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = self.mock_price_data_2025_09_06
-        mock_get.return_value = mock_response
+        # Mock successful API response for aiohttp using AsyncMock
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=self.mock_price_data_2025_09_06)
+        mock_get.return_value.__aenter__.return_value = mock_response
         
         # Test with a specific date
         with patch('automated_price_charging.datetime') as mock_datetime:
             mock_datetime.now.return_value = datetime(2025, 9, 6, 10, 30)  # 6.09.2025 10:30
             mock_datetime.strftime = datetime.strftime
             
-            result = self.charger.fetch_today_prices()
+            # FIX: Use asyncio.run() to await the coroutine
+            result = asyncio.run(self.charger.fetch_today_prices())
             
-            # Verify the API was called with the correct date
-            expected_url = "https://api.raporty.pse.pl/api/csdac-pln?$filter=business_date%20eq%20'2025-09-06'"
+            # Verify the API was called with the correct date (2025-09-06)
             mock_get.assert_called_once()
             call_args = mock_get.call_args
             self.assertIn('2025-09-06', call_args[0][0])
@@ -138,21 +139,22 @@ class TestPriceDateBehavior(unittest.TestCase):
             self.assertIsNotNone(result)
             self.assertEqual(len(result['value']), 3)
     
-    @patch('requests.get')
+    @patch('aiohttp.ClientSession.get')
     def test_date_transition_at_midnight(self, mock_get):
         """Test that the system correctly transitions to next day's prices at midnight"""
-        # Mock successful API response for next day
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = self.mock_price_data_2025_09_07
-        mock_get.return_value = mock_response
+        # Mock successful API response for aiohttp using AsyncMock
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=self.mock_price_data_2025_09_07)
+        mock_get.return_value.__aenter__.return_value = mock_response
         
         # Test at midnight (00:00) - need to patch the datetime module properly
         with patch('automated_price_charging.datetime') as mock_datetime:
             mock_datetime.now.return_value = datetime(2025, 9, 7, 0, 0)  # 7.09.2025 00:00
             mock_datetime.strftime = datetime.strftime
             
-            result = self.charger.fetch_today_prices()
+            # FIX: Use asyncio.run() to await the coroutine
+            result = asyncio.run(self.charger.fetch_today_prices())
             
             # Verify the API was called with the correct date (next day)
             call_args = mock_get.call_args
@@ -162,20 +164,21 @@ class TestPriceDateBehavior(unittest.TestCase):
             self.assertIsNotNone(result)
             self.assertEqual(len(result['value']), 2)
     
-    @patch('requests.get')
+    @patch('aiohttp.ClientSession.get')
     def test_price_data_covers_full_day(self, mock_get):
         """Test that price data covers the full day (00:00-24:00)"""
-        # Mock successful API response
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = self.mock_price_data_2025_09_06
-        mock_get.return_value = mock_response
+        # Mock successful API response for aiohttp using AsyncMock
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=self.mock_price_data_2025_09_06)
+        mock_get.return_value.__aenter__.return_value = mock_response
         
         with patch('automated_price_charging.datetime') as mock_datetime:
             mock_datetime.now.return_value = datetime(2025, 9, 6, 15, 30)  # 6.09.2025 15:30
             mock_datetime.strftime = datetime.strftime
             
-            result = self.charger.fetch_today_prices()
+            # FIX: Use asyncio.run() to await the coroutine
+            result = asyncio.run(self.charger.fetch_today_prices())
             
             # Verify the data covers the full day
             self.assertIsNotNone(result)
@@ -224,20 +227,21 @@ class TestPriceDateBehavior(unittest.TestCase):
             # Should return None as the time is outside the data range
             self.assertIsNone(current_price)
     
-    @patch('requests.get')
+    @patch('aiohttp.ClientSession.get')
     def test_publication_timing_correctness(self, mock_get):
         """Test that the system correctly handles publication timing"""
-        # Mock successful API response
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = self.mock_price_data_2025_09_06
-        mock_get.return_value = mock_response
+        # Mock successful API response for aiohttp using AsyncMock
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=self.mock_price_data_2025_09_06)
+        mock_get.return_value.__aenter__.return_value = mock_response
         
         with patch('automated_price_charging.datetime') as mock_datetime:
             mock_datetime.now.return_value = datetime(2025, 9, 6, 14, 0)  # 6.09.2025 14:00 (after publication)
             mock_datetime.strftime = datetime.strftime
             
-            result = self.charger.fetch_today_prices()
+            # FIX: Use asyncio.run() to await the coroutine
+            result = asyncio.run(self.charger.fetch_today_prices())
             
             # Verify the data has the correct publication timestamp
             self.assertIsNotNone(result)
@@ -263,28 +267,30 @@ class TestPriceDateBehavior(unittest.TestCase):
         self.assertEqual(len(business_dates), 1)
         self.assertEqual(list(business_dates)[0], '2025-09-06')
     
-    @patch('requests.get')
+    @patch('aiohttp.ClientSession.get')
     def test_error_handling_no_data(self, mock_get):
         """Test error handling when no price data is available"""
-        # Mock API response with no data
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {'value': []}
-        mock_get.return_value = mock_response
+        # Mock API response with no data for aiohttp using AsyncMock
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value={'value': []})
+        mock_get.return_value.__aenter__.return_value = mock_response
         
-        result = self.charger.fetch_today_prices()
+        # FIX: Use asyncio.run() to await the coroutine
+        result = asyncio.run(self.charger.fetch_today_prices())
         
         # Should return empty data, not None
         self.assertIsNotNone(result)
         self.assertEqual(len(result['value']), 0)
     
-    @patch('requests.get')
+    @patch('aiohttp.ClientSession.get')
     def test_error_handling_api_failure(self, mock_get):
         """Test error handling when API call fails"""
-        # Mock API failure
+        # Mock API failure for aiohttp
         mock_get.side_effect = Exception("Network error")
         
-        result = self.charger.fetch_today_prices()
+        # FIX: Use asyncio.run() to await the coroutine
+        result = asyncio.run(self.charger.fetch_today_prices())
         
         # Should return None on error
         self.assertIsNone(result)
