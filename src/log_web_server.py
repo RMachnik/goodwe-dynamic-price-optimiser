@@ -128,6 +128,10 @@ class LogWebServer:
             except Exception as e:
                 logger.warning(f"Failed to initialize storage layer: {e}. Using file-only fallback.")
         
+        # Cache AutomatedPriceCharger instance to avoid expensive re-initialization
+        self._price_charger = None
+        self._price_charger_lock = threading.Lock()
+        
         # Setup routes
         self._setup_routes()
         
@@ -3348,10 +3352,22 @@ class LogWebServer:
             logger.error(f"Error converting inverter status to dashboard format: {e}")
             return None
     
+    def _get_or_create_price_charger(self):
+        """Get or create AutomatedPriceCharger instance (singleton pattern to avoid expensive re-initialization)"""
+        with self._price_charger_lock:
+            if self._price_charger is None:
+                try:
+                    from automated_price_charging import AutomatedPriceCharger
+                    self._price_charger = AutomatedPriceCharger()
+                    logger.info("Initialized cached AutomatedPriceCharger instance")
+                except Exception as e:
+                    logger.error(f"Failed to initialize AutomatedPriceCharger: {e}")
+                    return None
+            return self._price_charger
+    
     def _get_real_price_data(self) -> Optional[Dict[str, Any]]:
         """Get real price data using AutomatedPriceCharger (correct SC calculation) with caching"""
         try:
-            from automated_price_charging import AutomatedPriceCharger
             from datetime import datetime, timedelta
             import asyncio
             
@@ -3367,8 +3383,10 @@ class LogWebServer:
             if cached_data:
                 return cached_data
             
-            # Use AutomatedPriceCharger for consistent price calculation
-            charger = AutomatedPriceCharger()
+            # Use cached AutomatedPriceCharger instance to avoid expensive re-initialization
+            charger = self._get_or_create_price_charger()
+            if charger is None:
+                return None
             
             # Fetch current day's price data (async call wrapped in sync context)
             today = datetime.now().strftime('%Y-%m-%d')
