@@ -170,7 +170,8 @@ class TestBatterySellingEndToEnd:
                 assert opportunity.expected_revenue_pln > 0
     
     @pytest.mark.asyncio
-    @pytest.mark.timeout(10)
+    @pytest.mark.integration
+    @pytest.mark.timeout(60)  # Increased timeout for real hardware connection
     async def test_battery_selling_with_real_inverter_data(self, config):
         """Test battery selling with real inverter data (if available)"""
         
