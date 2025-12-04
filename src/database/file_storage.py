@@ -6,6 +6,25 @@ from datetime import datetime
 from typing import List, Dict, Any
 from .storage_interface import DataStorageInterface, StorageConfig
 
+def _convert_datetimes_to_iso(obj):
+    """
+    Recursively convert datetime objects to ISO format strings.
+    
+    Args:
+        obj: Object to convert (dict, list, datetime, or any other type)
+        
+    Returns:
+        Converted object with datetime instances replaced by ISO strings
+    """
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {key: _convert_datetimes_to_iso(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_convert_datetimes_to_iso(item) for item in obj]
+    else:
+        return obj
+
 class FileStorage(DataStorageInterface):
     """
     Legacy file-based storage implementation.
@@ -116,16 +135,18 @@ class FileStorage(DataStorageInterface):
             ts = state.get('timestamp')
             if isinstance(ts, str):
                 ts = datetime.fromisoformat(ts)
+            elif isinstance(ts, datetime):
+                pass  # Already datetime
+            else:
+                ts = datetime.now()
             
             filename = os.path.join(self.base_dir, f"coordinator_state_{ts.strftime('%Y%m%d')}.json")
             
-            # Append to file (simulating log-like behavior)
-            state_copy = state.copy()
-            if isinstance(state_copy.get('timestamp'), datetime):
-                state_copy['timestamp'] = state_copy['timestamp'].isoformat()
+            # Deep copy and convert all datetime objects to ISO format strings
+            state_serializable = _convert_datetimes_to_iso(state)
                 
             async with aiofiles.open(filename, 'a') as f:
-                await f.write(json.dumps(state_copy) + "\n")
+                await f.write(json.dumps(state_serializable) + "\n")
                 
             return True
         except Exception as e:

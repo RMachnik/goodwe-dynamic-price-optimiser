@@ -2324,12 +2324,21 @@ class AutomatedPriceCharger:
                 # Get price forecast if available
                 forecast_data = None
                 try:
+                    import asyncio
                     from pse_price_forecast_collector import PSEPriceForecastCollector
+                    
                     forecast_collector = PSEPriceForecastCollector(self.config)
-                    forecast_points = forecast_collector.fetch_price_forecast()
-                    if forecast_points:
-                        forecast_data = [{'price': p.forecasted_price_pln, 'time': p.time, 'confidence': p.confidence}
-                                       for p in forecast_points]
+                    
+                    # Run async method from sync context
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        forecast_points = loop.run_until_complete(forecast_collector.fetch_price_forecast())
+                        if forecast_points:
+                            forecast_data = [{'price': p.forecasted_price_pln, 'time': p.time, 'confidence': p.confidence}
+                                           for p in forecast_points]
+                    finally:
+                        loop.close()
                 except Exception as e:
                     logger.debug(f"Could not fetch forecast data: {e}")
 

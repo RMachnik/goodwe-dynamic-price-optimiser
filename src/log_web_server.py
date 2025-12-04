@@ -3353,6 +3353,7 @@ class LogWebServer:
         try:
             from automated_price_charging import AutomatedPriceCharger
             from datetime import datetime, timedelta
+            import asyncio
             
             # Create cache key based on current 15-minute period to ensure prices update correctly
             # This ensures cache is invalidated when we move to a new price period
@@ -3369,9 +3370,16 @@ class LogWebServer:
             # Use AutomatedPriceCharger for consistent price calculation
             charger = AutomatedPriceCharger()
             
-            # Fetch current day's price data
+            # Fetch current day's price data (async call wrapped in sync context)
             today = datetime.now().strftime('%Y-%m-%d')
-            price_data = charger.fetch_price_data_for_date(today)
+            
+            # Run async method in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                price_data = loop.run_until_complete(charger.fetch_price_data_for_date(today))
+            finally:
+                loop.close()
             
             if not price_data or 'value' not in price_data:
                 return None
