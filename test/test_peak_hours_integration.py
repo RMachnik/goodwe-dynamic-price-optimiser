@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""
+Tests for PSE Peak Hours Integration
+
+This module tests the integration with Polish Power System (PSE) peak hours data,
+including async data fetching, caching behavior, and usage code mappings.
+
+The PSE system provides forecasts for grid load and usage patterns, which are used
+to optimize battery charging and discharging decisions.
+"""
 import sys
 from pathlib import Path
 import json
@@ -13,6 +22,18 @@ from pse_peak_hours_collector import PSEPeakHoursCollector, USAGE_CODE_TO_LABEL
 
 
 def test_usage_code_mapping_complete():
+    """
+    Verify that all PSE usage codes are properly mapped to labels.
+    
+    Tests that the USAGE_CODE_TO_LABEL dictionary contains mappings for
+    all expected usage codes (0-3) used by the PSE system for grid load classification.
+    
+    Expected codes:
+    - 0: Normal usage
+    - 1: Increased usage
+    - 2: High usage warning
+    - 3: Critical usage reduction required
+    """
     assert 0 in USAGE_CODE_TO_LABEL
     assert 1 in USAGE_CODE_TO_LABEL
     assert 2 in USAGE_CODE_TO_LABEL
@@ -20,7 +41,24 @@ def test_usage_code_mapping_complete():
 
 
 def test_parse_and_cache():
-    """Test PSE peak hours parsing and caching with async support"""
+    """
+    Test PSE peak hours parsing and caching with async support.
+    
+    This test verifies:
+    1. Async fetching of peak hours data from PSE API
+    2. Correct parsing of usage forecast codes and labels
+    3. Caching behavior to avoid redundant API calls
+    
+    Scenario:
+    - Mock PSE API response with 2 forecast entries
+    - Fetch data and verify correct parsing
+    - Second fetch should use cache (no API call)
+    
+    Expected behavior:
+    - First call: Makes API request, returns 2 peak hour records
+    - Usage code 3 maps to "WYMAGANE OGRANICZANIE" label
+    - Second call: Uses cache, no API request made
+    """
     # Prepare fake payload for a single active day
     payload = {
         "value": [
