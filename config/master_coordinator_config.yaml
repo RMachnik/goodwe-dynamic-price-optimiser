@@ -451,16 +451,16 @@ timing_awareness:
     
     # Super Low Price Charging
     super_low_price_charging_enabled: true
-      super_low_price_threshold_pln: 0.3  # PLN/kWh - below this is super low price
-      super_low_price_target_soc: 100     # Target 100% SOC during super low prices
-      super_low_price_min_duration_hours: 1.0  # Minimum duration to trigger super low price charging
-      
-      # PV preference during super low prices
-      super_low_price_pv_preference:
-        pv_excellent_threshold_w: 3000    # PV power above this is considered excellent
-        weather_stable_threshold: 0.8    # Weather stability confidence threshold
-        house_usage_low_threshold_w: 1000 # House usage below this is considered low
-        pv_charging_time_limit_hours: 2.0 # Maximum time to wait for PV charging
+    super_low_price_threshold_pln: 0.3  # PLN/kWh - below this is super low price
+    super_low_price_target_soc: 100     # Target 100% SOC during super low prices
+    super_low_price_min_duration_hours: 1.0  # Minimum duration to trigger super low price charging
+    
+    # PV preference during super low prices
+    super_low_price_pv_preference:
+      pv_excellent_threshold_w: 3000    # PV power above this is considered excellent
+      weather_stable_threshold: 0.8    # Weather stability confidence threshold
+      house_usage_low_threshold_w: 1000 # House usage below this is considered low
+      pv_charging_time_limit_hours: 2.0 # Maximum time to wait for PV charging
   
   pv_charging_efficiency: 0.95      # PV charging efficiency (95%)
   grid_charging_efficiency: 0.90    # Grid charging efficiency (90%)
