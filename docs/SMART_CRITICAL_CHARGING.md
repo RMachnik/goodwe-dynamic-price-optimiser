@@ -46,25 +46,35 @@ timing_awareness:
     emergency_override_price: true  # Always charge at emergency level regardless of price
 ```
 
-## Decision Logic
+## Decision Logic (December 2024 - Simplified 4-Tier System)
 
-### Super Low Price Level (≤ 0.3 PLN/kWh) - **HIGHEST PRIORITY**
-- **Action**: Always charge fully from grid (target 100% SOC)
-- **Reason**: Capture super cheap electricity for later PV selling
-- **Override**: Overrides PV charging during super low prices
-- **Economic Benefit**: Up to 66.7% savings compared to normal price charging
+The system now uses a straightforward 4-tier SOC-based approach with bidirectional flip-flop protection:
 
-### Emergency Level (≤ 5% SOC)
+| Tier | SOC Range | Behavior | Price Logic | Confidence |
+|------|-----------|----------|-------------|------------|
+| **Emergency** | <5% | Charge immediately | Ignore price (safety override) | 100% |
+| **Critical** | 5-12% | Adaptive threshold | Uses `_smart_critical_charging_decision()` with market-aware thresholds | High (80-95%) |
+| **Opportunistic** | 12-50% | Charge if cheap-ish | current_price ≤ cheapest_next_12h × 1.15 | Medium (70-75%) |
+| **Normal** | 50%+ | Charge if very cheap | price ≤ 40th percentile OR (≤60th percentile AND SOC < 85%) | Low-Medium (60-65%) |
+
+### Flip-Flop Protection (Bidirectional - 15 minutes)
+- **Prevents rapid start**: Cannot start charging within 15 minutes of stopping
+- **Prevents rapid stop**: Cannot stop charging within 15 minutes of starting
+- **Purpose**: Reduce wear on inverter and battery, prevent decision oscillation
+
+### Tier Details
+
+#### Emergency Level (≤ 5% SOC)
 - **Action**: Always charge immediately
 - **Reason**: Battery safety override
 - **Price**: Ignored (safety first)
 
-### Critical Level (6-12% SOC)
-The system analyzes multiple factors with enhanced intelligence:
+#### Critical Level (5-12% SOC)
+The system uses adaptive thresholds with market awareness (existing `_smart_critical_charging_decision()` logic):
 
 1. **Current Price**
-   - If ≤ 0.35 PLN/kWh → Charge immediately
-   - If > 0.35 PLN/kWh → Continue analysis
+   - If ≤ fallback_critical_price_pln (0.70 PLN/kWh) → Charge immediately
+   - If > 0.70 PLN/kWh → Continue analysis
 
 2. **Dynamic Wait Time Calculation**
    - **High Savings (80%+)**: Wait up to 9 hours (1.5x base wait time)

@@ -428,7 +428,7 @@ timing_awareness:
       
       # Fallback values (used when insufficient data or system startup)
       fallback_high_price_pln: 1.35    # Current fixed value as fallback
-      fallback_critical_price_pln: 1.20  # Current fixed value as fallback
+      fallback_critical_price_pln: 0.70  # Emergency critical pricing (lowered Dec 2024)
     
     # Advanced Optimization Rules
     optimization_rules:
@@ -442,6 +442,12 @@ timing_awareness:
       battery_target_threshold: 80   # Charge proactively if battery below this %
       weather_improvement_hours: 6   # Hours to check for weather improvement
       max_proactive_price_pln: 0.7  # Maximum price for proactive charging (≤ 0.7 PLN/kWh)
+      
+      # Simple Charging Configuration (December 2024)
+      # Replaces complex window/interim/partial logic with 4-tier SOC-based system
+      simple_charging:
+        flip_flop_protection_minutes: 15  # Bidirectional: prevent start after stop & stop after start
+        opportunistic_tolerance_percent: 15  # Charge if within 15% of cheapest price in next 12h
       
       # Rule 3: Super low price charging - prefer PV when excellent, use grid when PV insufficient
       super_low_price_charging_enabled: true
@@ -480,6 +486,10 @@ timing_awareness:
         urgent: 20                         # Below 20%: max 1 postponement
         low: 30                            # Below 30%: max 2 postponements
     
+    # ==================================================================================
+    # DEPRECATED (December 2024): Partial charging removed
+    # See docs/SMART_CRITICAL_CHARGING.md and docs/MIGRATION_SIMPLE_CHARGING.md
+    # ==================================================================================
     # Partial Charging (bridge expensive periods until next cheap window)
     partial_charging:
       enabled: true                        # Enable partial charging logic

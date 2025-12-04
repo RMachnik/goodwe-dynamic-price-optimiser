@@ -1,5 +1,19 @@
 # Interim Cost Analysis Implementation
 
+> **⚠️ DEPRECATED (December 2024)**
+> 
+> This feature has been removed in favor of simplified 4-tier SOC-based charging logic.
+> The complexity of interim cost analysis, window commitment, and partial charging provided
+> marginal benefit compared to simple threshold-based decisions.
+> 
+> See:
+> - [SMART_CRITICAL_CHARGING.md](SMART_CRITICAL_CHARGING.md) for current charging logic
+> - [MIGRATION_SIMPLE_CHARGING.md](MIGRATION_SIMPLE_CHARGING.md) for migration guide
+> 
+> The documentation below is retained for historical reference only.
+
+---
+
 ## Overview
 
 The Interim Cost Analysis feature enhances the GoodWe Dynamic Price Optimiser by accounting for grid consumption costs during waiting periods when evaluating future charging windows. This prevents scenarios where waiting for a cheaper charging window results in higher overall costs due to expensive interim grid consumption.
