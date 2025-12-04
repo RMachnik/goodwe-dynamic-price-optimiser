@@ -3848,7 +3848,7 @@ class LogWebServer:
             return self._price_charger
     
     def _get_real_price_data(self) -> Optional[Dict[str, Any]]:
-        """Get price data from background cache."""
+        """Get price data from background cache with direct fetch fallback."""
         try:
             # Check background cache first
             with self._background_cache_lock:
@@ -3867,11 +3867,87 @@ class LogWebServer:
                 disk_data['data_source'] = 'disk_cache'
                 return disk_data
             
-            logger.warning("⚠️ Price data not available in cache, using fallback")
-            return None
+            # Final fallback: Direct fetch (for tests and edge cases)
+            logger.warning("⚠️ Cache unavailable, fetching price data directly")
+            return self._fetch_price_data_directly()
             
         except Exception as e:
             logger.error(f"Error getting price data: {e}", exc_info=True)
+            return None
+    
+    def _fetch_price_data_directly(self) -> Optional[Dict[str, Any]]:
+        """Fetch price data directly from API (used as fallback when cache is empty)."""
+        try:
+            from automated_price_charging import AutomatedPriceCharger
+            import asyncio
+            
+            # Use cached AutomatedPriceCharger instance to avoid expensive re-initialization
+            charger = self._get_or_create_price_charger()
+            if charger is None:
+                return None
+            
+            # Fetch current day's price data (async call wrapped in sync context)
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            # Run async method in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                price_data = loop.run_until_complete(charger.fetch_price_data_for_date(today))
+            finally:
+                loop.close()
+            
+            if not price_data or 'value' not in price_data:
+                return None
+            
+            # Get current price using the charger's method (returns PLN/MWh)
+            current_price = charger.get_current_price(price_data)
+            if current_price is None:
+                return None
+            
+            # Convert from PLN/MWh to PLN/kWh for display
+            current_price_kwh = current_price / 1000
+            
+            # Find cheapest price and calculate statistics
+            prices = []
+            for item in price_data['value']:
+                market_price = float(item['csdac_pln'])
+                # Parse timestamp from price data item for accurate tariff calculation
+                try:
+                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+                except ValueError:
+                    # Try alternative format
+                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M:%S')
+                # Pass timestamp to calculate_final_price for accurate tariff calculation
+                final_price = charger.calculate_final_price(market_price, item_time)
+                final_price_kwh = final_price / 1000  # Convert to PLN/kWh
+                prices.append((final_price_kwh, item_time.hour))
+            
+            if not prices:
+                return None
+            
+            # Find cheapest price
+            cheapest_price, cheapest_hour = min(prices, key=lambda x: x[0])
+            
+            # Calculate average price
+            avg_price = sum(price for price, _ in prices) / len(prices)
+            
+            result = {
+                'current_price_pln_kwh': round(current_price_kwh, 4) if current_price_kwh else 0.0,
+                'cheapest_price_pln_kwh': round(cheapest_price, 4),
+                'cheapest_hour': f"{cheapest_hour:02d}:00",
+                'average_price_pln_kwh': round(avg_price, 4),
+                'price_trend': 'stable',
+                'data_source': 'direct_fetch',
+                'last_updated': datetime.now().isoformat(),
+                'calculation_method': 'tariff_aware'
+            }
+            
+            logger.debug(f"Price data fetched directly: current={current_price_kwh:.4f} PLN/kWh")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch price data directly: {e}")
             return None
 
     def _get_real_inverter_data(self) -> Optional[Dict[str, Any]]:
