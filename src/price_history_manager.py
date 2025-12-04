@@ -182,16 +182,28 @@ class PriceHistoryManager:
                     with open(json_file, 'r') as f:
                         data = json.load(f)
                     
-                    # Extract timestamp and price from decision file
-                    if 'timestamp' in data and 'current_price_pln_kwh' in data:
-                        timestamp = datetime.fromisoformat(data['timestamp'])
-                        
-                        # Only load recent data within lookback window
-                        if timestamp >= cutoff_time:
-                            price = float(data['current_price_pln_kwh'])
-                            if price > 0:  # Valid price
-                                self.price_cache.append((timestamp.isoformat(), price))
-                                loaded_count += 1
+                    # Extract timestamp - all decision files have this
+                    if 'timestamp' not in data:
+                        continue
+                    
+                    timestamp = datetime.fromisoformat(data['timestamp'])
+                    
+                    # Only load recent data within lookback window
+                    if timestamp < cutoff_time:
+                        continue
+                    
+                    # Try multiple field names for price (charging vs selling decision files)
+                    price = None
+                    if 'current_price' in data and data['current_price'] is not None:
+                        price = float(data['current_price'])
+                    elif 'current_price_pln' in data and data['current_price_pln'] is not None:
+                        price = float(data['current_price_pln'])
+                    elif 'current_price_pln_kwh' in data and data['current_price_pln_kwh'] is not None:
+                        price = float(data['current_price_pln_kwh'])
+                    
+                    if price is not None and price > 0:
+                        self.price_cache.append((timestamp.isoformat(), price))
+                        loaded_count += 1
                 
                 except (json.JSONDecodeError, KeyError, ValueError) as e:
                     logger.debug(f"Skipping file {json_file.name}: {e}")
