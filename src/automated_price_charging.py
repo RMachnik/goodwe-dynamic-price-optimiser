@@ -31,7 +31,6 @@ sys.path.insert(0, str(current_dir))
 
 from fast_charge import GoodWeFastCharger
 from enhanced_data_collector import EnhancedDataCollector
-from enhanced_aggressive_charging import EnhancedAggressiveCharging
 from tariff_pricing import TariffPricingCalculator, PriceComponents
 from price_history_manager import PriceHistoryManager
 from adaptive_threshold_calculator import AdaptiveThresholdCalculator
@@ -74,17 +73,13 @@ class AutomatedPriceCharger:
         self.current_schedule = None
         self.is_charging = False
         self.charging_start_time = None
+        self.charging_stop_time = None  # Track when charging stopped for flip-flop protection
         self.last_decision_time = None
         self.decision_history = []
         
-        # Window commitment mechanism to prevent infinite postponement
-        self.committed_window_time = None  # Time we committed to charge
-        self.committed_window_price = None  # Price at committed window
-        self.window_commitment_timestamp = None  # When commitment was made
-        self.window_postponement_count = 0  # Track how many times we've postponed
-        self.active_charging_session = False  # Track if we started a charging session
-        self.charging_session_start_time = None  # When current session started
-        self.charging_session_start_soc = None  # SOC when session started (for dynamic duration)
+        # Price scan cache for opportunistic tier
+        self._price_scan_cache = {}  # Cache for _find_cheapest_price_next_hours
+        self._price_scan_cache_timestamp = None  # Cache invalidation tracking
 
     def _load_config(self) -> None:
         """Load YAML configuration defensively into `self.config`."""
@@ -153,6 +148,11 @@ class AutomatedPriceCharger:
         self.interim_min_historical_hours = interim_cost_config.get('min_historical_hours', 48)  # hours
         self.interim_lookback_days = interim_cost_config.get('lookback_days', 7)  # days
         
+        # Simple charging configuration (December 2024)
+        simple_charging_config = smart_critical_config.get('simple_charging', {})
+        self.flip_flop_protection_minutes = simple_charging_config.get('flip_flop_protection_minutes', 15)
+        self.opportunistic_tolerance_percent = simple_charging_config.get('opportunistic_tolerance_percent', 15) / 100.0
+        
         # Get interim_cost_config for window commitment config
         interim_cost_config = smart_critical_config.get('interim_cost_analysis', {})
         
@@ -207,6 +207,10 @@ class AutomatedPriceCharger:
         logger.info(f"Partial charging: {'enabled' if self.partial_charging_enabled else 'disabled'} (max {self.partial_max_sessions_per_day} sessions/day)")
         logger.info(f"Preventive partial charging: {'enabled' if self.preventive_partial_enabled else 'disabled'}")
         
+        # Warn about deprecated features (December 2024)
+        if self.interim_cost_enabled or self.partial_charging_enabled or self.window_commitment_enabled or self.preventive_partial_enabled:
+            logger.warning("DEPRECATED config detected (Dec 2024): interim_cost_analysis, partial_charging, window_commitment no longer used. See docs/SMART_CRITICAL_CHARGING.md")
+        
         # Load electricity pricing configuration
         self._load_pricing_config()
         
@@ -244,14 +248,6 @@ class AutomatedPriceCharger:
         self.minimum_price_floor = float(pricing_cfg.get('minimum_price_floor_pln_kwh', 0.0050))
         
         # Tariff configuration for `TariffPricingCalculator` is already passed via `self.config`
-        
-        # Initialize enhanced aggressive charging module
-        try:
-            self.enhanced_aggressive = EnhancedAggressiveCharging(self.config)
-            logger.info("Enhanced aggressive charging module initialized")
-        except Exception as e:
-            logger.error(f"Failed to initialize enhanced aggressive charging: {e}")
-            self.enhanced_aggressive = None
         
         # Initialize adaptive price thresholds
         adaptive_config = self.config.get('timing_awareness', {}).get('smart_critical_charging', {}).get('adaptive_thresholds', {})
@@ -344,1028 +340,6 @@ class AutomatedPriceCharger:
     def apply_minimum_price_floor(self, price: float) -> float:
         """Apply minimum price floor as per Polish regulations"""
         return max(price, self.minimum_price_floor)
-    
-    def _calculate_interim_cost(self, start_time: datetime, end_time: datetime, price_data: Dict) -> float:
-        """
-        Calculate the cost of grid consumption during the interim period (waiting time).
-        
-        This method analyzes historical consumption patterns from the Enhanced Data Collector's
-        7-day buffer to estimate grid consumption costs if we wait from start_time to end_time.
-        
-        Args:
-            start_time: Current time (start of interim period)
-            end_time: Future time (end of interim period, start of charging window)
-            price_data: Dictionary with 'value' list containing price points with 'dtime' and 'csdac_pln'
-        
-        Returns:
-            Estimated grid consumption cost in PLN for the interim period
-        """
-        if not self.interim_cost_enabled:
-            return 0.0
-        
-        try:
-            # Get historical data from Enhanced Data Collector
-            historical_data = self.data_collector.historical_data
-            
-            # Check if we have enough historical data
-            if len(historical_data) < self.interim_min_historical_hours * 180:  # 180 = 3600s/hour / 20s/sample
-                logger.debug(f"Insufficient historical data ({len(historical_data)} samples, need {self.interim_min_historical_hours * 180}), using fallback consumption")
-                # Use fallback consumption rate
-                hours_to_wait = (end_time - start_time).total_seconds() / 3600
-                
-                # Get average price for interim period
-                avg_price = self._get_average_price_for_period(start_time, end_time, price_data)
-                if avg_price is None:
-                    return 0.0
-                
-                interim_cost = hours_to_wait * self.interim_fallback_consumption * avg_price
-                logger.debug(f"Interim cost (fallback): {interim_cost:.2f} PLN ({hours_to_wait:.1f}h × {self.interim_fallback_consumption:.2f} kW × {avg_price:.3f} PLN/kWh)")
-                return interim_cost
-            
-            # Group historical consumption by hour of day (0-23)
-            hourly_consumption = {}  # hour -> [consumption_kw_values]
-            
-            for data_point in historical_data:
-                try:
-                    # Extract timestamp and consumption
-                    timestamp_str = data_point.get('timestamp')
-                    if not timestamp_str:
-                        continue
-                    
-                    # Parse timestamp
-                    if isinstance(timestamp_str, str):
-                        timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-                    else:
-                        timestamp = timestamp_str
-                    
-                    # Get consumption in kW
-                    consumption_kw = data_point.get('house_consumption', {}).get('current_power_kw', 0.0)
-                    if not isinstance(consumption_kw, (int, float)):
-                        continue
-                    
-                    # Group by hour of day
-                    hour = timestamp.hour
-                    if hour not in hourly_consumption:
-                        hourly_consumption[hour] = []
-                    hourly_consumption[hour].append(consumption_kw)
-                    
-                except Exception as e:
-                    logger.debug(f"Error processing historical data point: {e}")
-                    continue
-            
-            # Calculate average consumption for each hour with time-of-day adjustments
-            hourly_avg_consumption = {}
-            for hour in range(24):
-                if hour in hourly_consumption and len(hourly_consumption[hour]) > 0:
-                    avg = sum(hourly_consumption[hour]) / len(hourly_consumption[hour])
-                    
-                    # Apply time-of-day multipliers if enabled
-                    if self.interim_time_of_day_adjustment:
-                        if 18 <= hour < 22:  # Evening peak (18:00-22:00)
-                            avg *= self.interim_evening_peak_multiplier
-                        elif hour >= 22 or hour < 6:  # Night (22:00-06:00)
-                            avg *= self.interim_night_discount_multiplier
-                    
-                    hourly_avg_consumption[hour] = avg
-                else:
-                    # Use fallback for hours with no data
-                    hourly_avg_consumption[hour] = self.interim_fallback_consumption
-            
-            # Calculate interim cost by iterating through each hour in the interim period
-            total_cost = 0.0
-            current_time = start_time
-            
-            while current_time < end_time:
-                hour = current_time.hour
-                
-                # Calculate time fraction for this hour (handles partial hours)
-                next_hour = current_time.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-                if next_hour > end_time:
-                    next_hour = end_time
-                
-                hour_fraction = (next_hour - current_time).total_seconds() / 3600
-                
-                # Get consumption for this hour
-                consumption_kw = hourly_avg_consumption.get(hour, self.interim_fallback_consumption)
-                
-                # Get price for this hour
-                price_pln_kwh = self._get_price_for_hour(current_time, price_data)
-                if price_pln_kwh is None:
-                    price_pln_kwh = 0.6  # Fallback price
-                
-                # Add to total cost
-                hour_cost = hour_fraction * consumption_kw * price_pln_kwh
-                total_cost += hour_cost
-                
-                logger.debug(f"Interim hour {current_time.strftime('%H:%M')}: {hour_fraction:.2f}h × {consumption_kw:.2f} kW × {price_pln_kwh:.3f} PLN/kWh = {hour_cost:.2f} PLN")
-                
-                current_time = next_hour
-            
-            logger.info(f"Interim cost: {total_cost:.2f} PLN for period {start_time.strftime('%H:%M')} to {end_time.strftime('%H:%M')}")
-            return total_cost
-            
-        except Exception as e:
-            logger.error(f"Error calculating interim cost: {e}")
-            return 0.0
-    
-    def _get_average_price_for_period(self, start_time: datetime, end_time: datetime, price_data: Dict) -> Optional[float]:
-        """Get average price for a time period"""
-        try:
-            if not price_data or 'value' not in price_data:
-                return None
-            
-            prices = []
-            for item in price_data['value']:
-                try:
-                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
-                    if start_time <= item_time < end_time:
-                        # Convert from PLN/MWh to PLN/kWh
-                        price_kwh = float(item['csdac_pln']) / 1000
-                        prices.append(price_kwh)
-                except Exception:
-                    continue
-            
-            if prices:
-                return sum(prices) / len(prices)
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error getting average price: {e}")
-            return None
-    
-    def _get_price_for_hour(self, target_time: datetime, price_data: Dict) -> Optional[float]:
-        """Get price for a specific hour"""
-        try:
-            if not price_data or 'value' not in price_data:
-                return None
-            
-            # Find price for the target hour
-            for item in price_data['value']:
-                try:
-                    item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
-                    if item_time.hour == target_time.hour and item_time.date() == target_time.date():
-                        # Convert from PLN/MWh to PLN/kWh
-                        return float(item['csdac_pln']) / 1000
-                except Exception:
-                    continue
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error getting price for hour: {e}")
-            return None
-    
-    def _evaluate_multi_window_with_interim_cost(self, battery_soc_or_data, price_data_or_current_price=None, current_time_or_price_data: Optional[datetime] = None) -> Optional[Dict[str, any]]:
-        """
-        Evaluate multiple future charging windows considering interim grid consumption costs.
-        
-        This method finds optimal charging windows within the evaluation period (default 12h)
-        and calculates net benefit = charging_savings - interim_grid_cost for each window.
-        
-        Includes commitment mechanism to prevent infinite postponement.
-        
-        Supports both calling conventions:
-        - New: (data_dict, price_data, current_time)
-        - Old: (battery_soc_int, current_price_float, price_data)
-        """
-        try:
-            # Handle both old and new calling conventions
-            if isinstance(battery_soc_or_data, dict):
-                # New signature: (data, price_data, current_time)
-                battery_soc = int(battery_soc_or_data.get('battery', {}).get('soc_percent', 0))
-                price_data = price_data_or_current_price
-                current_time = current_time_or_price_data if current_time_or_price_data else datetime.now()
-                # Derive current_price from price_data for current_time
-                current_price = None
-                try:
-                    if price_data and 'value' in price_data:
-                        for item in price_data['value']:
-                            ts = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
-                            if ts == current_time:
-                                current_price = float(item['csdac_pln']) / 1000.0
-                                break
-                    if current_price is None:
-                        first = price_data['value'][0]
-                        current_price = float(first['csdac_pln']) / 1000.0
-                except Exception:
-                    current_price = 0.0
-            else:
-                # Old signature: (battery_soc, current_price, price_data)
-                battery_soc = int(battery_soc_or_data)
-                current_price = float(price_data_or_current_price) if price_data_or_current_price else 0.0
-                price_data = current_time_or_price_data
-                current_time = datetime.now()
-
-            evaluation_end = current_time + timedelta(hours=self.interim_evaluation_window_hours)
-            evaluation_end = current_time + timedelta(hours=self.interim_evaluation_window_hours)
-            
-            # Check if we have a committed window that's now in range
-            if self.window_commitment_enabled and self.committed_window_time:
-                time_to_window = (self.committed_window_time - current_time).total_seconds() / 60
-                
-                # If we're within commitment margin of the window, charge now
-                if 0 <= time_to_window <= self.commitment_margin_minutes:
-                    logger.info(f"🎯 Committed window reached at {self.committed_window_time.strftime('%H:%M')} (price: {self.committed_window_price:.3f} PLN/kWh) - charging now")
-                    self._start_charging_session(battery_soc)
-                    self._clear_window_commitment()
-                    return {
-                        'should_charge': True,
-                        'reason': f"Committed charging window reached ({self.committed_window_time.strftime('%H:%M')})",
-                        'priority': 'high',
-                        'confidence': 0.9,
-                        'charging_session_protected': True
-                    }
-                
-                # If committed window passed, clear it
-                elif time_to_window < 0:
-                    logger.warning(f"⚠️ Committed window at {self.committed_window_time.strftime('%H:%M')} passed - clearing commitment")
-                    self._clear_window_commitment()
-            
-            # SOC-based urgency: determine max allowed postponements based on battery level
-            if self.window_commitment_enabled:
-                max_postponements_allowed = self._get_max_postponements_for_soc(battery_soc)
-                
-                # If we've hit postponement limit, prevent further postponement
-                if self.window_postponement_count >= max_postponements_allowed:
-                    logger.warning(
-                        f"⛔ Max postponements reached ({self.window_postponement_count}/{max_postponements_allowed}) "
-                        f"at SOC {battery_soc}% - forcing charge now"
-                    )
-                    self._start_charging_session(battery_soc)
-                    self._clear_window_commitment()
-                    return {
-                        'should_charge': True,
-                        'reason': f"Max postponements reached at SOC {battery_soc}% - must charge",
-                        'priority': 'high',
-                        'confidence': 0.85,
-                        'charging_session_protected': True
-                    }
-            
-            # Get adaptive critical threshold - windows above this are blocked
-            critical_threshold = float(self.get_critical_price_threshold())
-            
-            # Find all potential charging windows
-            windows = []
-            
-            if not price_data or 'value' not in price_data:
-                logger.debug("No price data available for multi-window evaluation")
-                return None
-            
-            critical_mode = (self._get_max_postponements_for_soc(battery_soc) == 0)
-            for item in price_data['value']:
-                try:
-                    window_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
-                    window_price_mwh = float(item['csdac_pln'])
-                    window_price_kwh = window_price_mwh / 1000
-                    
-                    # Skip windows outside evaluation period
-                    if window_time <= current_time or window_time > evaluation_end:
-                        continue
-                    
-                    # HARD LIMIT: Skip windows above adaptive critical threshold unless in critical mode
-                    if (not critical_mode) and window_price_kwh > critical_threshold:
-                        logger.debug(f"Window {window_time.strftime('%H:%M')}: {window_price_kwh:.3f} PLN/kWh > threshold {critical_threshold:.3f} PLN/kWh - BLOCKED")
-                        continue
-                    
-                    # NEW: Check if window is long enough to complete charging
-                    required_charging_hours = self._calculate_required_charging_duration(battery_soc) / 60.0
-                    
-                    # Calculate how long prices stay good (below critical threshold)
-                    window_duration_hours = self._calculate_window_duration(window_time, price_data, critical_threshold)
-                    
-                    # Skip if window too short to complete charge
-                    if window_duration_hours < required_charging_hours:
-                        logger.debug(
-                            f"Window {window_time.strftime('%H:%M')}: duration {window_duration_hours:.1f}h < "
-                            f"required {required_charging_hours:.1f}h - TOO SHORT"
-                        )
-                        continue
-                    
-                    # Calculate charging savings (vs current price)
-                    charge_kwh = 10.0  # Assume 10 kWh charge for calculation
-                    charging_savings = (current_price - window_price_kwh) * charge_kwh
-                    
-                    # Calculate interim cost (grid consumption while waiting)
-                    interim_cost = self._calculate_interim_cost(current_time, window_time, price_data)
-                    
-                    # Calculate net benefit
-                    net_benefit = charging_savings - interim_cost
-                    
-                    windows.append({
-                        'time': window_time,
-                        'price_kwh': window_price_kwh,
-                        'charging_savings': charging_savings,
-                        'interim_cost': interim_cost,
-                        'net_benefit': net_benefit,
-                        'hours_to_wait': (window_time - current_time).total_seconds() / 3600,
-                        'window_duration_hours': window_duration_hours,
-                        'required_charging_hours': required_charging_hours
-                    })
-                    
-                    logger.info(
-                        f"Window {window_time.strftime('%H:%M')}: "
-                        f"price={window_price_kwh:.3f} PLN/kWh, "
-                        f"duration={window_duration_hours:.1f}h (need {required_charging_hours:.1f}h), "
-                        f"savings={charging_savings:.2f} PLN, "
-                        f"interim_cost={interim_cost:.2f} PLN, "
-                        f"net_benefit={net_benefit:.2f} PLN"
-                    )
-                    
-                except Exception as e:
-                    logger.debug(f"Error processing window: {e}")
-                    continue
-            
-            if not windows:
-                logger.debug("No valid charging windows found within evaluation period")
-                return None
-            
-            # Sort windows by net benefit (highest first)
-            windows.sort(key=lambda w: w['net_benefit'], reverse=True)
-            best_window = windows[0]
-            
-            # At critical SOC (allowance==0), ensure we commit to a window to prevent chasing endlessly improving prices
-            max_allowed = self._get_max_postponements_for_soc(battery_soc)
-            if self.window_commitment_enabled and max_allowed == 0 and not self.committed_window_time:
-                self._commit_to_window(best_window['time'], best_window['price_kwh'])
-                logger.info(
-                    f"💡 Critical SOC commit: window at {best_window['time'].strftime('%H:%M')} "
-                    f"({best_window['price_kwh']:.3f} PLN/kWh, net benefit: {best_window['net_benefit']:.2f} PLN)"
-                )
-
-            # Check if best window has positive net benefit above threshold
-            if best_window['net_benefit'] > self.interim_net_savings_threshold:
-                # Waiting is beneficial - check for partial charging option
-                if self.partial_charging_enabled:
-                    partial_decision = self._evaluate_partial_charging(
-                        battery_soc, best_window, current_time, current_price
-                    )
-                    if partial_decision:
-                        return partial_decision
-                
-                # Handle window commitment to prevent infinite postponement
-                if self.window_commitment_enabled:
-                    # If we don't have a committed window yet, or the new window is significantly better
-                    if not self.committed_window_time:
-                        # First time committing to a window
-                        self._commit_to_window(best_window['time'], best_window['price_kwh'])
-                        logger.info(
-                            f"💡 Committing to window at {best_window['time'].strftime('%H:%M')} "
-                            f"({best_window['price_kwh']:.3f} PLN/kWh, net benefit: {best_window['net_benefit']:.2f} PLN)"
-                        )
-                    elif best_window['time'] != self.committed_window_time:
-                        # Window has changed - this is a postponement
-                        self.window_postponement_count += 1
-                        logger.info(
-                            f"📅 Window moved from {self.committed_window_time.strftime('%H:%M')} to {best_window['time'].strftime('%H:%M')} "
-                            f"(postponement #{self.window_postponement_count})"
-                        )
-                        self._commit_to_window(best_window['time'], best_window['price_kwh'])
-                
-                # Wait for best window (no partial charge needed/possible)
-                return {
-                    'should_charge': False,
-                    'reason': (
-                        f"Better window at {best_window['time'].strftime('%H:%M')} "
-                        f"({best_window['price_kwh']:.3f} PLN/kWh): "
-                        f"net benefit {best_window['net_benefit']:.2f} PLN "
-                        f"(savings {best_window['charging_savings']:.2f} PLN - "
-                        f"interim cost {best_window['interim_cost']:.2f} PLN)"
-                    ),
-                    'priority': 'medium',
-                    'confidence': 0.8,
-                    'next_window': best_window['time'].strftime('%H:%M'),
-                    'net_benefit': best_window['net_benefit']
-                }
-            else:
-                # No beneficial window found - charge now
-                logger.info(
-                    f"Best window net benefit {best_window['net_benefit']:.2f} PLN "
-                    f"<= threshold {self.interim_net_savings_threshold} PLN - charging now"
-                )
-                
-                # Keep commitment for tracking; charging now without clearing commitment
-                return {
-                    'should_charge': True,
-                    'reason': (
-                        f"No beneficial future window found "
-                        f"(best: {best_window['time'].strftime('%H:%M')} "
-                        f"with net benefit {best_window['net_benefit']:.2f} PLN) - charge now"
-                    ),
-                    'priority': 'medium',
-                    'confidence': 0.75
-                }
-            
-        except Exception as e:
-            logger.error(f"Error in multi-window evaluation: {e}")
-            return None
-    
-    def _commit_to_window(self, window_time: datetime, window_price: float):
-        """Commit to charging at a specific window time"""
-        self.committed_window_time = window_time
-        self.committed_window_price = window_price
-        self.window_commitment_timestamp = datetime.now()
-    
-    def _clear_window_commitment(self):
-        """Clear window commitment and reset postponement counter"""
-        self.committed_window_time = None
-        self.committed_window_price = None
-        self.window_commitment_timestamp = None
-        self.window_postponement_count = 0
-    
-    def _get_max_postponements_for_soc(self, battery_soc: int) -> int:
-        """
-        Determine maximum allowed postponements based on battery SOC level.
-        Lower SOC = fewer postponements allowed (more urgency).
-        """
-        # Treat 'critical' as strictly below threshold to allow urgent at boundary
-        if battery_soc < self.soc_urgency_thresholds['critical']:
-            return 0  # No postponements - charge immediately
-        elif battery_soc < self.soc_urgency_thresholds['urgent']:
-            return 1  # Allow only 1 postponement
-        elif battery_soc < self.soc_urgency_thresholds['low']:
-            return 2  # Allow 2 postponements
-        else:
-            return self.max_window_postponements  # Normal limit
-    
-    def _calculate_required_charging_duration(self, current_soc: int, target_soc: int = None) -> float:
-        """
-        Calculate required charging duration in minutes based on SOC difference.
-        
-        Args:
-            current_soc: Current battery SOC percentage
-            target_soc: Target SOC percentage (defaults to fast_charging target_soc)
-        
-        Returns:
-            Required charging duration in minutes
-        """
-        try:
-            # Get target SOC from config if not provided
-            if target_soc is None:
-                target_soc = self.config.get('fast_charging', {}).get('target_soc', 100)
-            
-            # Get battery capacity from config
-            battery_capacity_kwh = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)
-            
-            # Get charging power (percentage of max)
-            power_percentage = self.config.get('fast_charging', {}).get('power_percentage', 90) / 100.0
-            max_charging_power_w = self.config.get('charging', {}).get('max_power', 10000)
-            charging_power_kw = (max_charging_power_w * power_percentage) / 1000.0
-            
-            # Calculate energy needed
-            soc_difference = max(0, target_soc - current_soc)
-            energy_needed_kwh = (soc_difference / 100.0) * battery_capacity_kwh
-            
-            # Calculate time needed (hours) with charging efficiency
-            charging_efficiency = 0.90  # 90% charging efficiency
-            charging_time_hours = energy_needed_kwh / (charging_power_kw * charging_efficiency)
-            
-            # Convert to minutes and add buffer
-            charging_time_minutes = charging_time_hours * 60
-            buffer_multiplier = 1.0 + (self.protection_duration_buffer_percent / 100.0)
-            buffered_time_minutes = charging_time_minutes * buffer_multiplier
-            
-            logger.debug(
-                f"Required charging time: {charging_time_minutes:.1f} min "
-                f"(+{self.protection_duration_buffer_percent}% buffer -> {buffered_time_minutes:.1f} min)"
-            )
-            return buffered_time_minutes
-
-        except Exception as e:
-            logger.error(f"Error calculating required charging duration: {e}")
-            return self.min_charging_session_duration
-
-    def _get_consumption_forecast(self) -> float:
-        """Return fallback house consumption forecast in kW for interim analysis."""
-        return float(self.interim_fallback_consumption)
-
-    def _calculate_window_duration(self, window_start: datetime, price_data: Dict, max_price_kwh: float) -> float:
-        """Calculate consecutive hours from `window_start` with price <= `max_price_kwh`.
-        Returns duration in hours.
-        """
-        if not price_data or 'value' not in price_data:
-            return 0.0
-        # Build map of timestamps to price (kWh)
-        prices = {}
-        for item in price_data['value']:
-            ts = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
-            prices[ts] = float(item['csdac_pln']) / 1000.0
-        # Walk forward hour by hour
-        duration = 0.0
-        current = window_start
-        while True:
-            price = prices.get(current)
-            if price is None or price > max_price_kwh:
-                break
-            duration += 1.0
-            current += timedelta(hours=1)
-        return duration
-
-    def _scan_for_high_prices_ahead(self, current_price: float, price_data: Dict, 
-                                     current_time: datetime) -> List[Dict[str, any]]:
-        """
-        Scan ahead for high-price periods that would force expensive charging.
-        
-        Args:
-            current_price: Current electricity price in PLN/kWh
-            price_data: Dictionary with 'value' list containing price points
-            current_time: Current datetime
-        
-        Returns:
-            List of high-price periods sorted by start time (soonest first),
-            or empty list if none found. Each period: {start, end, avg_price_kwh, duration_hours}
-        """
-        try:
-            # Get adaptive high price threshold
-            high_threshold = self.get_high_price_threshold()
-            
-            # Early exit if current price is already high
-            if current_price >= high_threshold:
-                logger.debug(f"Preventive scan blocked: current price {current_price:.3f} >= threshold {high_threshold:.3f}")
-                return []
-            
-            if not price_data or 'value' not in price_data:
-                logger.debug("Preventive scan: no price data available")
-                return []
-            
-            logger.debug(f"Scanning for high prices ahead (threshold: {high_threshold:.3f} PLN/kWh)...")
-            
-            # Build list of hourly prices
-            scan_end = current_time + timedelta(hours=self.preventive_scan_ahead_hours)
-            hourly_prices = []
-            
-            for item in price_data['value']:
-                try:
-                    ts = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
-                    if current_time <= ts < scan_end:
-                        price_kwh = float(item['csdac_pln']) / 1000.0  # PLN/MWh → PLN/kWh
-                        hourly_prices.append({'time': ts, 'price': price_kwh})
-                except (KeyError, ValueError, TypeError) as e:
-                    logger.debug(f"Skipping malformed price item: {e}")
-                    continue
-            
-            if not hourly_prices:
-                logger.debug("Preventive scan: no future prices in scan window")
-                return []
-            
-            # Sort by time
-            hourly_prices.sort(key=lambda x: x['time'])
-            
-            # Group consecutive high-price hours into periods
-            periods = []
-            current_period = None
-            
-            for hour in hourly_prices:
-                if hour['price'] > high_threshold:
-                    if current_period is None:
-                        # Start new period
-                        current_period = {
-                            'start': hour['time'],
-                            'end': hour['time'],
-                            'prices': [hour['price']]
-                        }
-                    else:
-                        # Extend current period if consecutive
-                        if (hour['time'] - current_period['end']).total_seconds() <= 3600:  # Within 1 hour
-                            current_period['end'] = hour['time']
-                            current_period['prices'].append(hour['price'])
-                        else:
-                            # Gap detected - save current and start new
-                            if len(current_period['prices']) >= self.preventive_min_high_price_duration_hours:
-                                periods.append(current_period)
-                            current_period = {
-                                'start': hour['time'],
-                                'end': hour['time'],
-                                'prices': [hour['price']]
-                            }
-                else:
-                    # Low price - end current period if exists
-                    if current_period is not None:
-                        if len(current_period['prices']) >= self.preventive_min_high_price_duration_hours:
-                            periods.append(current_period)
-                        current_period = None
-            
-            # Don't forget last period
-            if current_period is not None:
-                if len(current_period['prices']) >= self.preventive_min_high_price_duration_hours:
-                    periods.append(current_period)
-            
-            # Format results
-            results = []
-            for period in periods:
-                results.append({
-                    'start': period['start'],
-                    'end': period['end'],
-                    'avg_price_kwh': sum(period['prices']) / len(period['prices']),
-                    'duration_hours': len(period['prices'])
-                })
-            
-            if results:
-                logger.info(f"Found {len(results)} high-price period(s): {results[0]['duration_hours']:.0f}h @{results[0]['avg_price_kwh']:.3f} PLN/kWh starting at {results[0]['start'].strftime('%H:%M')}")
-            else:
-                logger.debug(f"No high-price periods ≥{self.preventive_min_high_price_duration_hours}h found in next {self.preventive_scan_ahead_hours}h")
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error scanning for high prices ahead: {e}")
-            return []
-
-    def _calculate_battery_drain_forecast(self, current_soc: int, drain_duration_hours: float) -> Dict[str, float]:
-        """
-        Forecast battery drain during a period of grid consumption.
-        
-        Args:
-            current_soc: Current battery SOC percentage
-            drain_duration_hours: Duration of drain period in hours
-        
-        Returns:
-            Dict with predicted_soc (%), energy_deficit_kwh, hours_until_critical
-        """
-        try:
-            # Use conservative consumption estimate with safety margin
-            consumption_kw = self.interim_fallback_consumption * (1 + self.partial_safety_margin)
-            
-            # Calculate energy drain
-            energy_drain_kwh = consumption_kw * drain_duration_hours
-            
-            # Convert to SOC percentage
-            drain_percent = (energy_drain_kwh / self.battery_capacity_kwh) * 100
-            predicted_soc = max(0, int(current_soc - drain_percent))
-            
-            # Calculate energy deficit if below critical
-            if predicted_soc < self.preventive_critical_soc_forecast:
-                energy_deficit_kwh = ((self.preventive_critical_soc_forecast - predicted_soc) / 100.0) * self.battery_capacity_kwh
-            else:
-                energy_deficit_kwh = 0.0
-            
-            # Calculate hours until critical
-            if drain_percent > 0:
-                drain_rate_percent_per_hour = drain_percent / drain_duration_hours
-                soc_above_critical = current_soc - self.preventive_critical_soc_forecast
-                hours_until_critical = soc_above_critical / drain_rate_percent_per_hour if drain_rate_percent_per_hour > 0 else 999.0
-            else:
-                hours_until_critical = 999.0
-            
-            logger.debug(
-                f"Drain forecast: {current_soc}% → {predicted_soc}% over {drain_duration_hours:.1f}h "
-                f"({drain_percent:.0f}% drain, {energy_deficit_kwh:.1f} kWh deficit)"
-            )
-            
-            return {
-                'predicted_soc': predicted_soc,
-                'energy_deficit_kwh': energy_deficit_kwh,
-                'hours_until_critical': hours_until_critical
-            }
-            
-        except Exception as e:
-            logger.error(f"Error calculating battery drain forecast: {e}")
-            return {'predicted_soc': current_soc, 'energy_deficit_kwh': 0.0, 'hours_until_critical': 999.0}
-
-    def _start_charging_session(self, start_soc: int) -> None:
-        """Start charging session and set protection duration."""
-        self.active_charging_session = True
-        self.charging_session_start_time = datetime.now()
-        self.charging_session_start_soc = int(start_soc)
-        if self.dynamic_protection_duration:
-            minutes = self._calculate_required_charging_duration(self.charging_session_start_soc)
-            self.session_protection_until = self.charging_session_start_time + timedelta(minutes=minutes)
-        else:
-            self.session_protection_until = self.charging_session_start_time + timedelta(minutes=self.min_charging_session_duration)
-
-    def end_charging_session(self) -> None:
-        """End active charging session and clear protection."""
-        self.active_charging_session = False
-        self.charging_session_start_time = None
-        self.charging_session_start_soc = None
-        self.session_protection_until = None
-
-    def is_charging_session_protected(self) -> bool:
-        """Return True if current time is within session protection window."""
-        if not self.active_charging_session or not getattr(self, 'session_protection_until', None):
-            return False
-        # If dynamic protection is enabled, recompute end time from start time so test time shifts are respected
-        if self.dynamic_protection_duration and self.charging_session_start_time is not None:
-            minutes = self._calculate_required_charging_duration(self.charging_session_start_soc)
-            dynamic_until = self.charging_session_start_time + timedelta(minutes=minutes)
-            return datetime.now() <= dynamic_until
-        return datetime.now() <= self.session_protection_until
-    
-    def _evaluate_partial_charging(self, battery_soc: int, best_window: Dict, 
-                                  current_time: datetime, current_price: float) -> Optional[Dict[str, any]]:
-        """
-        Evaluate whether partial charging is beneficial to bridge the gap to the next window.
-        
-        Args:
-            battery_soc: Current battery SOC percentage
-            best_window: Dictionary with best future window details
-            current_time: Current datetime
-            current_price: Current electricity price in PLN/kWh
-        
-        Returns:
-            Charging decision dict if partial charging recommended, None otherwise
-        """
-        try:
-            # SOC-aware price threshold for partial charging
-            # At high SOC, be very conservative about partial charging at high prices
-            if battery_soc >= 60:
-                # Above 60% SOC: only allow partial charge if price is reasonable
-                # Use 50% of critical threshold or best_window price + 20% margin, whichever is lower
-                max_acceptable_price = min(
-                    self.get_critical_price_threshold() * 0.5,
-                    best_window['price_kwh'] * 1.2
-                )
-                if current_price > max_acceptable_price:
-                    logger.info(
-                        f"Partial charging blocked at {battery_soc}% SOC: "
-                        f"current price {current_price:.3f} > max acceptable {max_acceptable_price:.3f} PLN/kWh "
-                        f"(window price: {best_window['price_kwh']:.3f}, hours away: {best_window['hours_to_wait']:.1f}h)"
-                    )
-                    return None
-            elif battery_soc >= 40:
-                # 40-59% SOC: moderate threshold (70% of critical)
-                max_acceptable_price = min(
-                    self.get_critical_price_threshold() * 0.7,
-                    best_window['price_kwh'] * 1.3
-                )
-                if current_price > max_acceptable_price:
-                    logger.info(
-                        f"Partial charging blocked at {battery_soc}% SOC: "
-                        f"current price {current_price:.3f} > max acceptable {max_acceptable_price:.3f} PLN/kWh"
-                    )
-                    return None
-            else:
-                # Below 40% SOC: use full critical threshold
-                critical_threshold = self.get_critical_price_threshold()
-                if current_price > critical_threshold:
-                    logger.debug(f"Partial charging blocked: current price {current_price:.3f} > threshold {critical_threshold:.3f}")
-                    return None
-            
-            # Calculate how many hours until best window
-            hours_to_window = best_window['hours_to_wait']
-            
-            # Estimate energy consumption until window (using historical averages + safety margin)
-            avg_consumption_kw = self.interim_fallback_consumption  # Use fallback as conservative estimate
-            required_energy_kwh = hours_to_window * avg_consumption_kw * (1 + self.partial_safety_margin)
-            
-            # Check if required energy meets minimum
-            if required_energy_kwh < self.partial_min_charge_kwh:
-                logger.debug(f"Partial charge too small: {required_energy_kwh:.2f} kWh < minimum {self.partial_min_charge_kwh} kWh")
-                return None
-            
-            # Check if we have battery capacity for partial charge
-            battery_capacity_kwh = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)
-            current_energy_kwh = (battery_soc / 100.0) * battery_capacity_kwh
-            required_soc_kwh = current_energy_kwh + required_energy_kwh
-            
-            if required_soc_kwh > battery_capacity_kwh:
-                logger.debug(f"Insufficient battery capacity for partial charge: need {required_soc_kwh:.2f} kWh, have {battery_capacity_kwh} kWh")
-                return None
-            
-            # Check session limits
-            if not self._check_partial_session_limits():
-                logger.info("Partial charging session limit reached for today")
-                return None
-            
-            # Partial charging is viable
-            target_soc = min(100, int((required_soc_kwh / battery_capacity_kwh) * 100))
-            
-            # Calculate cost comparison
-            partial_charge_cost = required_energy_kwh * current_price
-            wait_and_charge_cost = required_energy_kwh * best_window['price_kwh']
-            cost_difference = partial_charge_cost - wait_and_charge_cost
-            
-            logger.info(
-                f"💡 Partial charging analysis at {battery_soc}% SOC: "
-                f"Charge {required_energy_kwh:.1f} kWh now at {current_price:.3f} PLN/kWh (cost: {partial_charge_cost:.2f} PLN) "
-                f"vs wait {hours_to_window:.1f}h for {best_window['price_kwh']:.3f} PLN/kWh (cost: {wait_and_charge_cost:.2f} PLN). "
-                f"Extra cost: {cost_difference:.2f} PLN"
-            )
-            
-            return {
-                'should_charge': True,
-                'reason': (
-                    f"Partial charge to {target_soc}% "
-                    f"({required_energy_kwh:.1f} kWh) to bridge {hours_to_window:.1f}h "
-                    f"until better window at {best_window['time'].strftime('%H:%M')} "
-                    f"({best_window['price_kwh']:.3f} PLN/kWh)"
-                ),
-                'priority': 'medium',
-                'confidence': 0.7,
-                'partial_charge': True,
-                'target_soc': target_soc,
-                'required_kwh': required_energy_kwh,
-                'next_window': best_window['time'].strftime('%H:%M')
-            }
-            
-        except Exception as e:
-            logger.error(f"Error evaluating partial charging: {e}")
-            return None
-
-    def _evaluate_preventive_partial_charging(self, battery_soc: int, current_price: float,
-                                             price_data: Dict, current_time: datetime) -> Optional[Dict[str, any]]:
-        """
-        Evaluate whether preventive partial charging is beneficial to avoid expensive charging later.
-        
-        This charges now during cheap period to avoid being forced to charge at expensive
-        rates when battery drains during upcoming high-price period.
-        
-        Args:
-            battery_soc: Current battery SOC percentage
-            current_price: Current electricity price in PLN/kWh
-            price_data: Dictionary with price data
-            current_time: Current datetime
-        
-        Returns:
-            Charging decision dict if preventive charging recommended, None otherwise
-        """
-        try:
-            # Early checks
-            if not self.preventive_partial_enabled:
-                return None
-            
-            # Check session limits first (before expensive calculations)
-            if not self._check_partial_session_limits():
-                logger.debug("Preventive charging blocked: session limit reached")
-                return None
-            
-            # Check if current price is below critical threshold
-            critical_threshold = self.get_critical_price_threshold()
-            if current_price > critical_threshold:
-                logger.debug(f"Preventive charging blocked: current price {current_price:.3f} > critical threshold {critical_threshold:.3f}")
-                return None
-            
-            # Only trigger in middle SOC range (30-60%)
-            if battery_soc < 30 or battery_soc > 60:
-                logger.debug(f"Preventive charging blocked: SOC {battery_soc}% outside range 30-60%")
-                return None
-            
-            # Scan for high-price periods ahead
-            high_price_periods = self._scan_for_high_prices_ahead(current_price, price_data, current_time)
-            if not high_price_periods:
-                logger.debug("Preventive charging: no high-price periods detected")
-                return None
-            
-            # Evaluate soonest high-price period
-            period = high_price_periods[0]
-            period_start = period['start']
-            period_duration = period['duration_hours']
-            period_avg_price = period['avg_price_kwh']
-            
-            # Calculate battery drain during high-price period
-            drain_forecast = self._calculate_battery_drain_forecast(battery_soc, period_duration)
-            predicted_soc = drain_forecast['predicted_soc']
-            energy_deficit_kwh = drain_forecast['energy_deficit_kwh']
-            
-            # Skip if predicted SOC stays above critical
-            if predicted_soc >= self.preventive_critical_soc_forecast:
-                logger.debug(
-                    f"Preventive charging not needed: predicted SOC {predicted_soc}% >= "
-                    f"critical {self.preventive_critical_soc_forecast}%"
-                )
-                return None
-            
-            # Calculate energy to add (at least minimum charge)
-            energy_to_add_kwh = max(energy_deficit_kwh, self.partial_min_charge_kwh)
-            
-            # Calculate target SOC
-            current_energy_kwh = (battery_soc / 100.0) * self.battery_capacity_kwh
-            target_energy_kwh = current_energy_kwh + energy_to_add_kwh
-            
-            if target_energy_kwh > self.battery_capacity_kwh:
-                logger.debug(f"Preventive charging blocked: insufficient capacity ({target_energy_kwh:.1f} > {self.battery_capacity_kwh} kWh)")
-                return None
-            
-            target_soc = min(100, int((target_energy_kwh / self.battery_capacity_kwh) * 100))
-            
-            # Economic calculation: charge now vs charge later
-            charge_now_cost = current_price * energy_to_add_kwh
-            charge_later_cost = period_avg_price * energy_deficit_kwh
-            
-            savings_pln = charge_later_cost - charge_now_cost
-            savings_percent = (savings_pln / charge_later_cost * 100) if charge_later_cost > 0 else 0
-            
-            # Check if savings meet threshold
-            if savings_percent < self.preventive_min_savings_percent:
-                logger.debug(
-                    f"Preventive charging blocked: savings {savings_percent:.0f}% < "
-                    f"threshold {self.preventive_min_savings_percent}%"
-                )
-                return None
-            
-            # Preventive charging is beneficial
-            hours_to_period = (period_start - current_time).total_seconds() / 3600
-            
-            reason = (
-                f"Preventive charging: save {savings_pln:.2f} PLN ({savings_percent:.0f}%) "
-                f"by charging now at {current_price:.3f} vs later at {period_avg_price:.3f} PLN/kWh. "
-                f"Battery would drop to {predicted_soc}% during {period_duration:.0f}h expensive period "
-                f"starting in {hours_to_period:.1f}h at {period_start.strftime('%H:%M')}"
-            )
-            
-            logger.info(f"⚡ {reason}")
-            
-            return {
-                'should_charge': True,
-                'reason': reason,
-                'priority': 'medium',
-                'confidence': 0.75,
-                'preventive_partial': True,
-                'target_soc': target_soc,
-                'required_kwh': energy_to_add_kwh,
-                'savings_pln': savings_pln,
-                'savings_percent': savings_percent
-            }
-            
-        except Exception as e:
-            logger.error(f"Error evaluating preventive partial charging: {e}")
-            return None
-
-    def _check_partial_session_limits(self) -> bool:
-        """Check if partial charging session limits allow another session today"""
-        try:
-            import json
-            import os
-            from pathlib import Path
-            
-            # Ensure data directory exists
-            session_file_path = Path(self.partial_session_tracking_file)
-            session_file_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Load session tracking data
-            if session_file_path.exists():
-                with open(session_file_path, 'r') as f:
-                    session_data = json.load(f)
-            else:
-                session_data = {'sessions': []}
-            
-            # Get current date in Warsaw timezone
-            current_time = datetime.now(self.warsaw_tz)
-            current_date = current_time.date()
-            
-            # Get daily reset hour in Warsaw timezone
-            reset_time = current_time.replace(hour=self.partial_daily_reset_hour, minute=0, second=0, microsecond=0)
-            if current_time.hour < self.partial_daily_reset_hour:
-                # Before reset time, use yesterday's date for comparison
-                reset_time = reset_time - timedelta(days=1)
-            
-            # Filter sessions for current day (after reset time)
-            today_sessions = []
-            for session in session_data['sessions']:
-                try:
-                    session_time = datetime.fromisoformat(session['timestamp'])
-                    # Make timezone-aware if not already
-                    if session_time.tzinfo is None:
-                        session_time = self.warsaw_tz.localize(session_time)
-                    
-                    if session_time >= reset_time:
-                        today_sessions.append(session)
-                except Exception as e:
-                    logger.debug(f"Error parsing session timestamp: {e}")
-                    continue
-            
-            # Check if we've reached the limit
-            if len(today_sessions) >= self.partial_max_sessions_per_day:
-                logger.info(f"Partial charging limit reached: {len(today_sessions)}/{self.partial_max_sessions_per_day} sessions today")
-                return False
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error checking partial session limits: {e}")
-            # On error, allow charging (fail open)
-            return True
-    
-    def _record_partial_charging_session(self):
-        """Record a partial charging session in the tracking file"""
-        try:
-            import json
-            from pathlib import Path
-            
-            session_file_path = Path(self.partial_session_tracking_file)
-            session_file_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            # Load existing data
-            if session_file_path.exists():
-                with open(session_file_path, 'r') as f:
-                    session_data = json.load(f)
-            else:
-                session_data = {'sessions': []}
-            
-            # Add new session
-            current_time = datetime.now(self.warsaw_tz)
-            session_data['sessions'].append({
-                'timestamp': current_time.isoformat(),
-                'date': current_time.date().isoformat()
-            })
-            
-            # Save updated data
-            with open(session_file_path, 'w') as f:
-                json.dump(session_data, f, indent=2)
-            
-            logger.info(f"Recorded partial charging session at {current_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
-            
-        except Exception as e:
-            logger.error(f"Error recording partial charging session: {e}")
         
     async def initialize(self) -> bool:
         """Initialize the system and connect to inverter"""
@@ -2251,30 +1225,160 @@ class AutomatedPriceCharger:
             logger.error(f"Error checking PV improvement for critical battery: {e}")
             return False
 
+    def _find_cheapest_price_next_hours(self, hours: int, price_data: Dict) -> Optional[float]:
+        """
+        Find cheapest price in the next N hours with 5-minute caching.
+        
+        Args:
+            hours: Number of hours to scan ahead
+            price_data: Dictionary with 'value' list containing price points
+        
+        Returns:
+            Cheapest price in PLN/kWh, or None if no data available
+        """
+        try:
+            # Check cache validity (5-minute expiration)
+            cache_key = hours
+            now = datetime.now()
+            
+            if (self._price_scan_cache_timestamp and 
+                cache_key in self._price_scan_cache and
+                (now - self._price_scan_cache_timestamp) < timedelta(minutes=5)):
+                logger.debug(f"Cache hit for cheapest_price_next_{hours}h: {self._price_scan_cache[cache_key]:.3f} PLN/kWh")
+                return self._price_scan_cache[cache_key]
+            
+            # Cache miss or expired - scan prices
+            if not price_data or 'value' not in price_data:
+                return None
+            
+            scan_end = now + timedelta(hours=hours)
+            prices = []
+            
+            for item in price_data.get('value', []):
+                try:
+                    dtime = datetime.fromisoformat(item['dtime'].replace('Z', '+00:00'))
+                    if now <= dtime <= scan_end:
+                        price_kwh = self.calculate_final_price(float(item['csdac_pln']), dtime) / 1000
+                        prices.append(price_kwh)
+                except (KeyError, ValueError, TypeError):
+                    continue
+            
+            if not prices:
+                return None
+            
+            cheapest = min(prices)
+            
+            # Update cache
+            self._price_scan_cache[cache_key] = cheapest
+            self._price_scan_cache_timestamp = now
+            
+            logger.debug(f"Cheapest price next {hours}h: {cheapest:.3f} PLN/kWh")
+            return cheapest
+            
+        except Exception as e:
+            logger.error(f"Error finding cheapest price: {e}")
+            return None
+    
+    def _is_price_cheap_for_normal_tier(self, current_price: float, current_soc: int, price_data: Dict) -> bool:
+        """
+        Determine if price is cheap enough for Normal tier (50%+ SOC) using percentile logic.
+        
+        Uses 40th/60th percentiles from last 24 hours. Charges if:
+        - Price ≤ 40th percentile, OR
+        - Price ≤ 60th percentile AND SOC < 85%
+        
+        Falls back to "cheapest_next_24h × 1.10" if adaptive thresholds disabled or no data.
+        
+        Args:
+            current_price: Current price in PLN/kWh
+            current_soc: Current battery SOC percentage
+            price_data: Price data dictionary
+        
+        Returns:
+            True if price is cheap enough to charge
+        """
+        try:
+            # Null checks for price history manager
+            if not self.adaptive_enabled or not self.price_history:
+                logger.debug("Adaptive thresholds disabled, using fallback for Normal tier")
+                cheapest_24h = self._find_cheapest_price_next_hours(24, price_data)
+                if cheapest_24h is None:
+                    return False
+                return current_price <= cheapest_24h * 1.10
+            
+            # Get recent prices from last 24 hours
+            recent_prices = self.price_history.get_recent_prices(hours=24)
+            
+            if not recent_prices or len(recent_prices) < 10:  # Need minimum data points
+                logger.debug(f"Insufficient price history ({len(recent_prices) if recent_prices else 0} points), using fallback")
+                cheapest_24h = self._find_cheapest_price_next_hours(24, price_data)
+                if cheapest_24h is None:
+                    return False
+                return current_price <= cheapest_24h * 1.10
+            
+            # Calculate percentiles using numpy
+            import numpy as np
+            p40 = np.percentile(recent_prices, 40)
+            p60 = np.percentile(recent_prices, 60)
+            
+            # Decision logic
+            if current_price <= p40:
+                logger.debug(f"Normal tier: price {current_price:.3f} ≤ p40 {p40:.3f} → CHARGE")
+                return True
+            elif current_price <= p60 and current_soc < 85:
+                logger.debug(f"Normal tier: price {current_price:.3f} ≤ p60 {p60:.3f} AND SOC {current_soc}% < 85% → CHARGE")
+                return True
+            else:
+                logger.debug(f"Normal tier: price {current_price:.3f} > thresholds (p40={p40:.3f}, p60={p60:.3f}) → WAIT")
+                return False
+            
+        except Exception as e:
+            logger.error(f"Error in Normal tier price check: {e}")
+            # Fallback on error
+            try:
+                cheapest_24h = self._find_cheapest_price_next_hours(24, price_data)
+                if cheapest_24h is None:
+                    return False
+                return current_price <= cheapest_24h * 1.10
+            except:
+                return False
+
     def _make_charging_decision(self, battery_soc: int, overproduction: int, grid_power: int,
                               grid_direction: str, current_price: Optional[float],
                               cheapest_price: Optional[float], cheapest_hour: Optional[int],
                               price_data: Optional[Dict] = None) -> Dict[str, any]:
-        """Make the final charging decision based on all factors"""
+        """
+        Make the final charging decision using 4-tier SOC-based logic.
+        
+        Tiers:
+        1. Emergency (<5%): Always charge immediately
+        2. Critical (5-12%): Use _smart_critical_charging_decision() with adaptive thresholds
+        3. Opportunistic (12-50%): Charge if current_price ≤ cheapest_next_12h × 1.15
+        4. Normal (50%+): Charge if price ≤ 40th percentile OR (≤60th percentile AND SOC < 85%)
+        
+        Includes bidirectional flip-flop protection (15 minutes).
+        """
         
         # ACTIVE CHARGING: If already charging, check if we should continue or stop
         if self.is_charging:
-            # Check if we should stop charging (target SOC reached, price too high, etc.)
+            # Bidirectional flip-flop: prevent stop within 15 minutes of start
+            if self.charging_start_time:
+                minutes_since_start = (datetime.now() - self.charging_start_time).total_seconds() / 60
+                if minutes_since_start < self.flip_flop_protection_minutes:
+                    return {
+                        'should_charge': True,
+                        'reason': f'Flip-flop protection: charging started {minutes_since_start:.1f} min ago (continue)',
+                        'priority': 'high',
+                        'confidence': 0.95
+                    }
+            
+            # Check if we should stop charging (target SOC reached, etc.)
             if battery_soc >= 90:  # Near full
                 return {
                     'should_charge': False,
                     'reason': f'Battery nearly full ({battery_soc}%) - stop charging',
                     'priority': 'high',
                     'confidence': 0.95
-                }
-            
-            # Check if protected charging session is active
-            if self.is_charging_session_protected():
-                return {
-                    'should_charge': True,
-                    'reason': f'Protected charging session active - continue charging (SOC: {battery_soc}%)',
-                    'priority': 'high',
-                    'confidence': 0.9
                 }
             
             # Continue charging if still within reasonable conditions
@@ -2285,154 +1389,18 @@ class AutomatedPriceCharger:
                 'confidence': 0.8
             }
         
-        # EMERGENCY: Battery below emergency threshold - always charge regardless of price
-        if battery_soc < self.emergency_battery_threshold:
-            return {
-                'should_charge': True,
-                'reason': f'Emergency battery level ({battery_soc}% < {self.emergency_battery_threshold}%) - charging immediately',
-                'priority': 'emergency',
-                'confidence': 1.0
-            }
-        
-        # CRITICAL: Battery below critical threshold - smart price-aware charging
-        if battery_soc < self.critical_battery_threshold:
-            return self._smart_critical_charging_decision(
-                battery_soc, current_price, cheapest_price, cheapest_hour
-            )
-        
-        # MULTI-WINDOW INTERIM COST ANALYSIS: Evaluate future charging windows accounting for interim grid costs
-        interim_decision = None
-        if self.interim_cost_enabled and price_data and current_price:
-            interim_decision = self._evaluate_multi_window_with_interim_cost(
-                battery_soc, current_price, price_data
-            )
-            if interim_decision:
-                return interim_decision
-        
-        # PREVENTIVE PARTIAL CHARGING: Charge now during cheap window to avoid expensive charging later
-        if (not self.interim_cost_enabled or not interim_decision) and self.preventive_partial_enabled and 30 <= battery_soc <= 60 and price_data and current_price:
-            preventive_decision = self._evaluate_preventive_partial_charging(
-                battery_soc, current_price, price_data, datetime.now()
-            )
-            if preventive_decision:
-                logger.info(f"⚡ Preventive partial charging triggered: {preventive_decision['reason']}")
-                return preventive_decision
-        
-        # HIGH: PV overproduction - no need to charge from grid (check BEFORE aggressive charging)
-        if overproduction > self.overproduction_threshold:
-            return {
-                'should_charge': False,
-                'reason': f'PV overproduction ({overproduction}W > {self.overproduction_threshold}W) - no grid charging needed',
-                'priority': 'high',
-                'confidence': 0.9
-            }
-
-        # ENHANCED AGGRESSIVE CHEAPEST PRICE CHARGING: Use new smart logic
-        if self.enhanced_aggressive:
-            try:
-                # Get price forecast if available
-                forecast_data = None
-                try:
-                    import asyncio
-                    from pse_price_forecast_collector import PSEPriceForecastCollector
-                    
-                    forecast_collector = PSEPriceForecastCollector(self.config)
-                    
-                    # Run async method from sync context
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        forecast_points = loop.run_until_complete(forecast_collector.fetch_price_forecast())
-                        if forecast_points:
-                            forecast_data = [{'price': p.forecasted_price_pln, 'time': p.time, 'confidence': p.confidence}
-                                           for p in forecast_points]
-                    finally:
-                        loop.close()
-                except Exception as e:
-                    logger.debug(f"Could not fetch forecast data: {e}")
-
-                # Make enhanced aggressive charging decision
-                decision = self.enhanced_aggressive.should_charge_aggressively(
-                    battery_soc=battery_soc,
-                    price_data=price_data if price_data else {'value': []},  # Pass actual price data
-                    forecast_data=forecast_data,
-                    current_data={'battery': {'soc_percent': battery_soc}}
-                )
-
-                if decision.should_charge:
-                    return {
-                        'should_charge': True,
-                        'reason': decision.reason,
-                        'priority': decision.priority,
-                        'confidence': decision.confidence,
-                        'target_soc': decision.target_soc,
-                        'price_category': decision.price_category.value
-                    }
-                else:
-                    # Enhanced aggressive returned "don't charge" - respect that decision
-                    # This prevents legacy fallback from overriding smart decisions about waiting for better windows
-                    # The enhanced logic already considered interim costs, future windows, and percentile analysis
-                    logger.debug(f"Enhanced aggressive charging decided not to charge: {decision.reason}")
-                    # Continue to evaluate other conditions (critical, super_low_price, etc.) but skip legacy fallback
-                    pass
-
-            except Exception as e:
-                logger.error(f"Error in enhanced aggressive charging: {e}")
-
-        # FALLBACK: Legacy aggressive charging logic (only if enhanced aggressive is not enabled)
-        elif self._check_aggressive_cheapest_price_conditions(battery_soc, current_price, cheapest_price, cheapest_hour):
-            return {
-                'should_charge': True,
-                'reason': f'Aggressive charging during cheapest price period (current: {current_price:.3f}, cheapest: {cheapest_price:.3f} PLN/kWh)',
-                'priority': 'high',
-                'confidence': 0.9
-            }
-
-        # HIGH: PV overproduction - no need to charge from grid (duplicated for fallback)
-        if overproduction > self.overproduction_threshold:
-            return {
-                'should_charge': False,
-                'reason': f'PV overproduction ({overproduction}W > {self.overproduction_threshold}W) - no grid charging needed',
-                'priority': 'high',
-                'confidence': 0.9
-            }
-        
-        # HIGH: Significant grid consumption with low battery - but only if price is reasonable
-        if (battery_soc < self.low_battery_threshold and 
-            grid_direction == 'Import' and grid_power > self.high_consumption_threshold):
-            
-            # Check if current price is reasonable for charging
-            critical_threshold = self.get_critical_price_threshold()
-            if current_price and current_price <= critical_threshold:
-                return {
-                    'should_charge': True,
-                    'reason': f'Low battery ({battery_soc}%) + high grid consumption ({grid_power}W) + reasonable price ({current_price:.3f} PLN/kWh)',
-                    'priority': 'high',
-                    'confidence': 0.8
-                }
-            else:
-                # Price is too high or unavailable - wait for better conditions
-                if current_price:
-                    reason = f'Low battery ({battery_soc}%) + high consumption ({grid_power}W) but price too high ({current_price:.3f} PLN/kWh > {critical_threshold:.3f} PLN/kWh) - waiting for better price'
-                else:
-                    reason = f'Low battery ({battery_soc}%) + high consumption ({grid_power}W) but no price data available - waiting for better conditions'
-                
+        # BIDIRECTIONAL FLIP-FLOP: Prevent start within 15 minutes of stop
+        if self.charging_stop_time:
+            minutes_since_stop = (datetime.now() - self.charging_stop_time).total_seconds() / 60
+            if minutes_since_stop < self.flip_flop_protection_minutes:
                 return {
                     'should_charge': False,
-                    'reason': reason,
-                    'priority': 'medium',
-                    'confidence': 0.7
+                    'reason': f'Flip-flop protection: charging stopped {minutes_since_stop:.1f} min ago (wait)',
+                    'priority': 'low',
+                    'confidence': 0.95
                 }
         
-        # OPTIMIZATION RULE 3: Super low price grid charging - always charge fully from grid during super low prices
-        if self.super_low_price_enabled:
-            super_low_decision = self._check_super_low_price_conditions(
-                battery_soc, overproduction, current_price, cheapest_price, cheapest_hour
-            )
-            if super_low_decision:
-                return super_low_decision
-        
-        # OPTIMIZATION RULE 2: Proactive charging when PV is poor, weather won't improve, battery <80%, and price is not high
+        # CHECK PROACTIVE CHARGING: Before tier logic, check if proactive conditions override normal rules
         if self.proactive_charging_enabled:
             proactive_decision = self._check_proactive_charging_conditions(
                 battery_soc, overproduction, current_price, cheapest_price, cheapest_hour
@@ -2440,36 +1408,84 @@ class AutomatedPriceCharger:
             if proactive_decision:
                 return proactive_decision
         
-        # MEDIUM: Price analysis
-        if current_price and cheapest_price and cheapest_hour:
-            savings_percent = self._calculate_savings(current_price, cheapest_price)
-            
-            # Wait for much better price
-            if savings_percent > (self.price_savings_threshold * 100):
+        # TIER 1 - EMERGENCY (<5%): Always charge immediately
+        if battery_soc < self.emergency_battery_threshold:
+            return {
+                'should_charge': True,
+                'reason': f'EMERGENCY tier: battery {battery_soc}% < {self.emergency_battery_threshold}% - charge immediately regardless of price',
+                'priority': 'emergency',
+                'confidence': 1.0
+            }
+        
+        # TIER 2 - CRITICAL (5-12%): Smart price-aware charging with adaptive thresholds
+        if battery_soc < self.critical_battery_threshold:
+            decision = self._smart_critical_charging_decision(
+                battery_soc, current_price, cheapest_price, cheapest_hour
+            )
+            # Add tier label to reason
+            decision['reason'] = f"CRITICAL tier: {decision['reason']}"
+            return decision
+        
+        # TIER 3 - OPPORTUNISTIC (12-50%): Charge if price within 15% of cheapest in next 12h
+        if battery_soc < 50:
+            if not current_price or not price_data:
                 return {
                     'should_charge': False,
-                    'reason': f'Much cheaper price available in {cheapest_hour}:00 ({cheapest_price:.3f} vs {current_price:.3f} PLN/kWh, {savings_percent:.1f}% savings)',
-                    'priority': 'medium',
-                    'confidence': 0.7
+                    'reason': 'OPPORTUNISTIC tier: no price data available',
+                    'priority': 'low',
+                    'confidence': 0.3
                 }
             
-            # Charge now if price is good enough
-            if savings_percent < (self.price_savings_threshold * 50):  # Less than 15% savings
-                if battery_soc < self.medium_battery_threshold:
-                    return {
-                        'should_charge': True,
-                        'reason': f'Good price ({current_price:.3f} PLN/kWh) + medium battery ({battery_soc}%)',
-                        'priority': 'medium',
-                        'confidence': 0.6
-                    }
+            cheapest_next_12h = self._find_cheapest_price_next_hours(12, price_data)
+            if cheapest_next_12h is None:
+                return {
+                    'should_charge': False,
+                    'reason': 'OPPORTUNISTIC tier: cannot determine future prices',
+                    'priority': 'low',
+                    'confidence': 0.3
+                }
+            
+            threshold = cheapest_next_12h * (1 + self.opportunistic_tolerance_percent)
+            
+            if current_price <= threshold:
+                return {
+                    'should_charge': True,
+                    'reason': f'OPPORTUNISTIC tier: price {current_price:.3f} ≤ cheapest_12h {cheapest_next_12h:.3f} × 1.15 = {threshold:.3f} PLN/kWh',
+                    'priority': 'medium',
+                    'confidence': 0.75
+                }
+            else:
+                return {
+                    'should_charge': False,
+                    'reason': f'OPPORTUNISTIC tier: price {current_price:.3f} > threshold {threshold:.3f} PLN/kWh (wait for cheaper)',
+                    'priority': 'low',
+                    'confidence': 0.7
+                }
         
-        # DEFAULT: Wait for better conditions
-        return {
-            'should_charge': False,
-            'reason': 'Wait for better conditions (PV overproduction, lower prices, or higher consumption)',
-            'priority': 'low',
-            'confidence': 0.4
-        }
+        # TIER 4 - NORMAL (50%+): Charge if price very cheap (percentile-based)
+        if not current_price or not price_data:
+            return {
+                'should_charge': False,
+                'reason': 'NORMAL tier: no price data available',
+                'priority': 'low',
+                'confidence': 0.3
+            }
+        
+        if self._is_price_cheap_for_normal_tier(current_price, battery_soc, price_data):
+            return {
+                'should_charge': True,
+                'reason': f'NORMAL tier: price {current_price:.3f} PLN/kWh is historically cheap (≤40th percentile or ≤60th percentile with SOC {battery_soc}% < 85%)',
+                'priority': 'low',
+                'confidence': 0.65
+            }
+        else:
+            return {
+                'should_charge': False,
+                'reason': f'NORMAL tier: battery {battery_soc}% well charged, price {current_price:.3f} PLN/kWh not cheap enough',
+                'priority': 'low',
+                'confidence': 0.6
+            }
+    
     
     def _safe_float(self, value) -> float:
         """Safely convert value to float, handling strings and None"""
@@ -2536,12 +1552,10 @@ class AutomatedPriceCharger:
         
         if await self.goodwe_charger.stop_fast_charging():
             self.is_charging = False
+            self.charging_stop_time = datetime.now()  # Track stop time for flip-flop protection
             charging_duration = None
             if self.charging_start_time:
-                charging_duration = datetime.now() - self.charging_start_time
-            
-            # End the protected charging session
-            self.end_charging_session()
+                charging_duration = self.charging_stop_time - self.charging_start_time
             
             logger.info("Price-based charging stopped")
             if charging_duration:
