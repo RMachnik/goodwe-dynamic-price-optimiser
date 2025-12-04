@@ -458,6 +458,7 @@ class DailySnapshotManager:
         }
         
         # Cache result before returning
+        cache_key = f"{year}_{month}"
         with self._monthly_cache_lock:
             self._monthly_cache[cache_key] = (summary, time.time())
         
