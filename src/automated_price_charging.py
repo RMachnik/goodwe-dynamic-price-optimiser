@@ -1188,10 +1188,15 @@ class AutomatedPriceCharger:
             savings_multiplier = 0.7
         
         # Adjust based on battery level (lower battery = shorter wait)
+        # For high savings (>=60%), be more willing to wait even at 9-10% SOC
         if battery_soc <= 8:
             battery_multiplier = 0.5
         elif battery_soc <= 10:
-            battery_multiplier = 0.7
+            # At 9-10% with high savings (>=60%), use full base time
+            if savings_percent >= 60:
+                battery_multiplier = 1.0
+            else:
+                battery_multiplier = 0.7
         else:
             battery_multiplier = 1.0
         
