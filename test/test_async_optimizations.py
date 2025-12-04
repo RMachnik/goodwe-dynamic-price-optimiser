@@ -183,7 +183,12 @@ class TestDequeOptimization:
         
         config = {
             'inverter': {'ip': '192.168.1.100'},
-            'data_storage': {'database_storage': {'enabled': False}}
+            'data_storage': {
+                'database_storage': {
+                    'enabled': True,
+                    'sqlite': {'path': ':memory:'}  # Use in-memory DB for tests
+                }
+            }
         }
         
         collector = EnhancedDataCollector(config)

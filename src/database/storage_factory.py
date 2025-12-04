@@ -1,12 +1,11 @@
 from typing import Dict, Any, Optional
 from .storage_interface import DataStorageInterface, StorageConfig
 from .sqlite_storage import SQLiteStorage
-from .file_storage import FileStorage
-from .composite_storage import CompositeStorage
 
 class StorageFactory:
     """
     Factory for creating storage instances based on configuration.
+    Database-only storage (file storage deprecated December 2024).
     """
     
     @staticmethod
@@ -16,8 +15,6 @@ class StorageFactory:
         
         Expected config structure:
         data_storage:
-          file_storage:
-            enabled: bool
           database_storage:
             enabled: bool
             sqlite:
@@ -25,28 +22,21 @@ class StorageFactory:
         """
         
         # Parse config
-        file_enabled = config_dict.get('file_storage', {}).get('enabled', True)
         db_config = config_dict.get('database_storage', {})
         db_enabled = db_config.get('enabled', False)
         
         # Create config object
         storage_config = StorageConfig(
             db_path=db_config.get('sqlite', {}).get('path', 'data/goodwe_energy.db'),
-            enable_fallback=True,
-            fallback_to_file=file_enabled
+            enable_fallback=False,
+            fallback_to_file=False
         )
         
-        # Determine storage type
-        if db_enabled and file_enabled:
-            # Composite mode (DB + File)
-            primary = SQLiteStorage(storage_config)
-            secondary = FileStorage(storage_config)
-            return CompositeStorage(primary, [secondary], storage_config)
-            
-        elif db_enabled:
-            # DB only
+        # Use database storage only
+        if db_enabled:
             return SQLiteStorage(storage_config)
-            
         else:
-            # File only (default/legacy)
-            return FileStorage(storage_config)
+            raise ValueError(
+                "Database storage must be enabled. File-only mode is deprecated as of December 2024. "
+                "Please set data_storage.database_storage.enabled: true in your config."
+            )

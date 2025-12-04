@@ -136,80 +136,12 @@ class AutomatedPriceCharger:
         self.house_usage_low_threshold = pv_preference_config.get('house_usage_low_threshold_w', 1000)  # Watts
         self.pv_charging_time_limit = pv_preference_config.get('pv_charging_time_limit_hours', 2.0)  # hours
         
-        # Interim cost analysis configuration
-        interim_cost_config = smart_critical_config.get('interim_cost_analysis', {})
-        self.interim_cost_enabled = interim_cost_config.get('enabled', False)
-        self.interim_net_savings_threshold = interim_cost_config.get('net_savings_threshold_pln', 0.10)  # PLN
-        self.interim_evaluation_window_hours = interim_cost_config.get('evaluation_window_hours', 12)  # hours
-        self.interim_time_of_day_adjustment = interim_cost_config.get('time_of_day_adjustment', True)
-        self.interim_evening_peak_multiplier = interim_cost_config.get('evening_peak_multiplier', 1.5)
-        self.interim_night_discount_multiplier = interim_cost_config.get('night_discount_multiplier', 0.8)
-        self.interim_fallback_consumption = interim_cost_config.get('fallback_consumption_kw', 1.25)  # kW
-        self.interim_min_historical_hours = interim_cost_config.get('min_historical_hours', 48)  # hours
-        self.interim_lookback_days = interim_cost_config.get('lookback_days', 7)  # days
-        
         # Simple charging configuration (December 2024)
-        simple_charging_config = smart_critical_config.get('simple_charging', {})
-        self.flip_flop_protection_minutes = simple_charging_config.get('flip_flop_protection_minutes', 15)
-        self.opportunistic_tolerance_percent = simple_charging_config.get('opportunistic_tolerance_percent', 15) / 100.0
+        self.flip_flop_protection_minutes = smart_critical_config.get('flip_flop_protection_minutes', 15)
+        self.opportunistic_tolerance_percent = smart_critical_config.get('opportunistic_tolerance_percent', 15) / 100.0
         
-        # Get interim_cost_config for window commitment config
-        interim_cost_config = smart_critical_config.get('interim_cost_analysis', {})
-        
-        # Window commitment configuration (prevents infinite postponement)
-        self.window_commitment_enabled = interim_cost_config.get('window_commitment_enabled', True)
-        self.max_window_postponements = interim_cost_config.get('max_window_postponements', 3)
-        self.commitment_margin_minutes = interim_cost_config.get('commitment_margin_minutes', 30)
-        self.min_charging_session_duration = interim_cost_config.get('min_charging_session_duration_minutes', 90)
-        self.dynamic_protection_duration = interim_cost_config.get('dynamic_protection_duration', True)
-        self.protection_duration_buffer_percent = interim_cost_config.get('protection_duration_buffer_percent', 10)
-        self.soc_urgency_thresholds = interim_cost_config.get('soc_urgency_thresholds', {
-            'critical': 15,  # Below 15%: commit immediately, no more postponements
-            'urgent': 20,    # Below 20%: max 1 postponement allowed
-            'low': 30        # Below 30%: max 2 postponements allowed
-        })
-        
-        # Partial charging configuration
-        partial_charging_config = smart_critical_config.get('partial_charging', {})
-        self.partial_charging_enabled = partial_charging_config.get('enabled', False)
-        self.partial_safety_margin = partial_charging_config.get('safety_margin_percent', 10) / 100.0  # Convert to fraction
-        self.partial_max_sessions_per_day = partial_charging_config.get('max_partial_sessions_per_day', 4)
-        self.partial_min_charge_kwh = partial_charging_config.get('min_partial_charge_kwh', 2.0)  # kWh
-        self.partial_session_tracking_file = partial_charging_config.get('session_tracking_file', 'out/partial_charging_sessions.json')
-        self.partial_daily_reset_hour = partial_charging_config.get('daily_reset_hour', 6)  # 24h format
-        # Get timezone from partial_charging config, fall back to global system timezone, then default
-        system_timezone = self.config.get('system', {}).get('timezone', 'Europe/Warsaw')
-        self.partial_timezone = partial_charging_config.get('timezone', system_timezone)
-        
-        # Preventive partial charging configuration (nested in partial_charging)
-        self.preventive_partial_enabled = partial_charging_config.get('preventive_enabled', True)
-        self.preventive_scan_ahead_hours = partial_charging_config.get('preventive_scan_ahead_hours', 12)
-        self.preventive_min_savings_percent = partial_charging_config.get('preventive_min_savings_percent', 30)
-        self.preventive_critical_soc_forecast = partial_charging_config.get('preventive_critical_soc_forecast', 15)
-        self.preventive_min_high_price_duration_hours = partial_charging_config.get('preventive_min_high_price_duration_hours', 3)
-        
-        # Import pytz for timezone handling
-        try:
-            import pytz
-            self.warsaw_tz = pytz.timezone(self.partial_timezone)
-            logger.info(f"Partial charging timezone set to {self.partial_timezone}")
-        except Exception as e:
-            logger.warning(f"Failed to load timezone {self.partial_timezone}, using UTC: {e}")
-            import pytz
-            self.warsaw_tz = pytz.UTC
-        
-        # Battery capacity for partial charging calculations
+        # Battery capacity for calculations
         self.battery_capacity_kwh = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)  # kWh
-        
-        # Log status of features from config
-        self.interim_cost_enabled = interim_cost_config.get('enabled', False)
-        logger.info(f"Interim cost analysis: {'enabled' if self.interim_cost_enabled else 'disabled'}")
-        logger.info(f"Partial charging: {'enabled' if self.partial_charging_enabled else 'disabled'} (max {self.partial_max_sessions_per_day} sessions/day)")
-        logger.info(f"Preventive partial charging: {'enabled' if self.preventive_partial_enabled else 'disabled'}")
-        
-        # Warn about deprecated features (December 2024)
-        if self.interim_cost_enabled or self.partial_charging_enabled or self.window_commitment_enabled or self.preventive_partial_enabled:
-            logger.warning("DEPRECATED config detected (Dec 2024): interim_cost_analysis, partial_charging, window_commitment no longer used. See docs/SMART_CRITICAL_CHARGING.md")
         
         # Load electricity pricing configuration
         self._load_pricing_config()
@@ -640,16 +572,6 @@ class AutomatedPriceCharger:
             # Keep only last 10 decisions
             if len(self.decision_history) > 10:
                 self.decision_history = self.decision_history[-10:]
-            
-            # Record partial charging session if decision indicates partial charge
-            if decision.get('should_charge') and decision.get('partial_charge'):
-                self._record_partial_charging_session()
-                logger.info(
-                    f"Partial charging session recorded: "
-                    f"target SOC {decision.get('target_soc', 'unknown')}%, "
-                    f"required {decision.get('required_kwh', 'unknown')} kWh, "
-                    f"until {decision.get('next_window', 'unknown')}"
-                )
             
             logger.info(f"Smart charging decision: {decision['should_charge']} - {decision['reason']}")
             logger.info(f"Priority: {decision['priority']}, Confidence: {decision['confidence']:.1%}")

@@ -284,16 +284,7 @@ logging:
 
 # Data Storage Configuration
 data_storage:
-  # Current file-based storage (enhanced with compression)
-  file_storage:
-    enabled: true
-    # Relative paths - resolved from working directory (project root)
-    energy_data_dir: "out/energy_data"
-    charging_schedules_dir: "out/charging_schedules"
-    system_state_dir: "out/system_state"
-    retention_days: 7          # Keep only 7 days in files (reduced from 24h in-memory)
-  
-  # Database storage configuration
+  # Database storage (file storage deprecated December 2024)
   database_storage:
     enabled: true              # Enable database storage
     sqlite:
@@ -301,6 +292,7 @@ data_storage:
       path: "data/goodwe_energy.db"
       connection_pool_size: 5
       timeout: 30.0
+      wal_mode: true           # Write-Ahead Logging for better performance
     
     # Future expansion
     timeseries_db:
@@ -397,7 +389,7 @@ timing_awareness:
   # Smart Critical Charging Configuration
   smart_critical_charging:
     enabled: true                    # Enable smart critical charging logic
-    max_critical_price_pln: 1.20    # DEPRECATED: use adaptive_thresholds (kept as fallback)
+    max_critical_price_pln: 1.20    # Fallback when adaptive_thresholds disabled
     max_wait_hours: 5               # Maximum hours to wait for better price
     min_price_savings_percent: 30  # Minimum savings % to wait for better price
     emergency_override_price: true  # Always charge at emergency level regardless of price
@@ -443,7 +435,7 @@ timing_awareness:
     optimization_rules:
       # Rule 1: At 10% SOC with high price, always wait for price drop
       wait_at_10_percent_if_high_price: true
-      high_price_threshold_pln: 1.35  # PLN/kWh - DEPRECATED: use adaptive_thresholds (kept as fallback)
+      high_price_threshold_pln: 1.35  # PLN/kWh - Fallback when adaptive_thresholds disabled
       
       # Rule 2: Proactive charging when PV is poor and weather won't improve
       proactive_charging_enabled: true
@@ -451,15 +443,14 @@ timing_awareness:
       battery_target_threshold: 80   # Charge proactively if battery below this %
       weather_improvement_hours: 6   # Hours to check for weather improvement
       max_proactive_price_pln: 0.7  # Maximum price for proactive charging (≤ 0.7 PLN/kWh)
-      
-      # Simple Charging Configuration (December 2024)
-      # Replaces complex window/interim/partial logic with 4-tier SOC-based system
-      simple_charging:
-        flip_flop_protection_minutes: 15  # Bidirectional: prevent start after stop & stop after start
-        opportunistic_tolerance_percent: 15  # Charge if within 15% of cheapest price in next 12h
-      
-      # Rule 3: Super low price charging - prefer PV when excellent, use grid when PV insufficient
-      super_low_price_charging_enabled: true
+    
+    # Simple Charging Configuration (December 2025)
+    # 4-tier SOC-based charging system
+    flip_flop_protection_minutes: 15  # Bidirectional flip-flop protection
+    opportunistic_tolerance_percent: 15  # Charge within 15% of cheapest in next 12h
+    
+    # Super Low Price Charging
+    super_low_price_charging_enabled: true
       super_low_price_threshold_pln: 0.3  # PLN/kWh - below this is super low price
       super_low_price_target_soc: 100     # Target 100% SOC during super low prices
       super_low_price_min_duration_hours: 1.0  # Minimum duration to trigger super low price charging
@@ -470,51 +461,6 @@ timing_awareness:
         weather_stable_threshold: 0.8    # Weather stability confidence threshold
         house_usage_low_threshold_w: 1000 # House usage below this is considered low
         pv_charging_time_limit_hours: 2.0 # Maximum time to wait for PV charging
-    
-    # Interim Cost Analysis (accounts for grid consumption costs during wait periods)
-    interim_cost_analysis:
-      enabled: true                        # Enable interim cost calculation
-      net_savings_threshold_pln: 0.10      # Minimum net savings to wait (PLN)
-      evaluation_window_hours: 12          # Hours ahead to evaluate windows
-      time_of_day_adjustment: true         # Apply time-of-day consumption multipliers
-      evening_peak_multiplier: 1.5         # Evening consumption multiplier (18-22h)
-      night_discount_multiplier: 0.8       # Night consumption multiplier (22-6h)
-      fallback_consumption_kw: 1.25        # Fallback consumption if insufficient data
-      min_historical_hours: 48             # Minimum hours of data required
-      lookback_days: 7                     # Days of historical data to analyze
-      
-      # Window Commitment (prevents infinite postponement by committing to chosen window)
-      window_commitment_enabled: true      # Enable window commitment mechanism
-      max_window_postponements: 3          # Max times to postpone before forcing charge
-      commitment_margin_minutes: 30        # Minutes before window to start charging
-      min_charging_session_duration_minutes: 90  # Fallback protection duration (used when dynamic disabled)
-      dynamic_protection_duration: true    # Calculate protection based on SOC & charging time
-      protection_duration_buffer_percent: 10  # Add 10% buffer to calculated charging time
-      soc_urgency_thresholds:              # SOC-based urgency limits
-        critical: 15                       # Below 15%: no postponements, charge immediately
-        urgent: 20                         # Below 20%: max 1 postponement
-        low: 30                            # Below 30%: max 2 postponements
-    
-    # ==================================================================================
-    # DEPRECATED (December 2024): Partial charging removed
-    # See docs/SMART_CRITICAL_CHARGING.md and docs/MIGRATION_SIMPLE_CHARGING.md
-    # ==================================================================================
-    # Partial Charging (bridge expensive periods until next cheap window)
-    partial_charging:
-      enabled: true                        # Enable partial charging logic
-      safety_margin_percent: 10            # Safety margin for partial charge calculation
-      max_partial_sessions_per_day: 4      # Maximum partial charging sessions per day
-      min_partial_charge_kwh: 2.0          # Minimum kWh for partial charge
-      session_tracking_file: '/opt/goodwe-dynamic-price-optimiser/out/partial_charging_sessions.json'  # Session tracking (runtime state)
-      daily_reset_hour: 6                  # Hour to reset daily session counter (24h format)
-      # Timezone inherited from system.timezone for session reset (handles DST)
-      
-      # Preventive partial charging: charge now to avoid expensive periods ahead
-      preventive_enabled: true                        # Enable preventive partial charging
-      preventive_scan_ahead_hours: 12                 # Scan next N hours for high-price periods
-      preventive_min_savings_percent: 30              # Minimum savings % to trigger (30%)
-      preventive_critical_soc_forecast: 15            # Critical SOC threshold in forecast (15%)
-      preventive_min_high_price_duration_hours: 3     # Minimum duration of high-price period (3h)
   
   pv_charging_efficiency: 0.95      # PV charging efficiency (95%)
   grid_charging_efficiency: 0.90    # Grid charging efficiency (90%)
