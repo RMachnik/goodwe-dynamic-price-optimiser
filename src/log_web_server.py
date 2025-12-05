@@ -2480,18 +2480,22 @@ class LogWebServer:
                             html += `<h4 style="margin: 20px 0 10px 0; padding-bottom: 5px; border-bottom: 1px solid var(--border-color);">${date}</h4>`;
                             grouped[date].forEach(d => {
                                 const time = new Date(d.timestamp).toLocaleTimeString();
-                                const isCharging = d.action === 'CHARGE';
-                                const isWait = d.action === 'WAIT';
-                                const className = isCharging ? 'charging' : (isWait ? 'wait' : '');
+                                const actionLower = (d.action || '').toLowerCase();
+                                const isCharging = actionLower === 'charge';
+                                const isWait = actionLower === 'wait';
+                                const isSelling = actionLower === 'battery_selling';
+                                const className = isCharging ? 'charging' : (isWait ? 'wait' : (isSelling ? 'selling' : ''));
+                                const actionIcon = isCharging ? '⚡' : (isWait ? '⏳' : (isSelling ? '💰' : '❓'));
+                                const confidencePercent = (d.confidence * 100).toFixed(0);
                                 
                                 html += `
                                     <div class="decision-item ${className}">
                                         <div class="decision-time">${time}</div>
-                                        <div class="decision-action">${d.action} <span style="font-weight: normal; font-size: 0.9em;">(${d.confidence}% conf)</span></div>
+                                        <div class="decision-action">${actionIcon} ${d.action.toUpperCase()} <span style="font-weight: normal; font-size: 0.9em;">(${confidencePercent}% conf)</span></div>
                                         <div class="decision-reason">${d.reason}</div>
-                                        <div class="confidence-bar"><div class="confidence-fill" style="width: ${d.confidence}%"></div></div>
+                                        <div class="confidence-bar"><div class="confidence-fill" style="width: ${confidencePercent}%"></div></div>
                                         <div style="font-size: 0.85em; color: var(--text-secondary); margin-top: 5px;">
-                                            SOC: ${d.factors?.soc}% | Price: ${d.factors?.price} | PVP: ${d.factors?.pv_prediction}
+                                            SOC: ${d.battery_soc || 'N/A'}% | Price: ${d.current_price ? d.current_price.toFixed(3) : 'N/A'} PLN/kWh | PV: ${d.pv_power || 0}W
                                         </div>
                                     </div>
                                 `;
