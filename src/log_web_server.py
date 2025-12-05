@@ -631,8 +631,8 @@ class LogWebServer:
             if not prices_tuples:
                 raise Exception("No valid prices found")
             
-            cheapest_price, cheapest_hour = min(prices, key=lambda x: x[0])
-            avg_price = sum(price for price, _ in prices) / len(prices)
+            cheapest_price, cheapest_hour = min(prices_tuples, key=lambda x: x[0])
+            avg_price = sum(price for price, _ in prices_tuples) / len(prices_tuples)
             
             result = {
                 'current_price_pln_kwh': round(current_price_kwh, 4),
