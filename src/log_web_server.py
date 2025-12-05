@@ -3751,7 +3751,7 @@ class LogWebServer:
         return sorted(decisions, key=lambda x: x['timestamp'], reverse=True)
     
     def _get_system_metrics(self) -> Dict[str, Any]:
-        """Get metrics from background cache."""
+        """Get metrics from background cache or calculate from decisions."""
         try:
             # Check background cache first
             with self._background_cache_lock:
@@ -3763,35 +3763,96 @@ class LogWebServer:
                 if cache_age < 120:  # Fresh: <2 min
                     return cached_data
             
-            # Cache miss/stale - calculate directly (will be slow)
-            logger.warning(f"⚠️ Metrics cache unavailable, calculating directly")
+            # Cache miss/stale - calculate from decision history
+            logger.info("📊 Calculating metrics from decision history")
             
-            # Fallback: Use monthly snapshot data
             now = datetime.now()
-            monthly_summary = self.snapshot_manager.get_monthly_summary(now.year, now.month)
             
-            # Calculate efficiency score from monthly data
-            efficiency_score = 70.0  # Default
-            avg_confidence = monthly_summary.get('avg_confidence', 0)
-            if avg_confidence > 0:
-                efficiency_score = avg_confidence * 100
+            # Get decisions from the same source as the Decisions tab (last 7 days)
+            decision_data = self._get_decision_history(time_range='7d')
+            decisions = decision_data.get('decisions', [])
             
-            return {
+            if not decisions:
+                # No decisions found
+                return {
+                    'timestamp': now.isoformat(),
+                    'total_count': 0,
+                    'charging_count': 0,
+                    'wait_count': 0,
+                    'battery_selling_count': 0,
+                    'total_energy_charged_kwh': 0,
+                    'total_cost_pln': 0,
+                    'total_savings_pln': 0,
+                    'savings_percentage': 0,
+                    'avg_confidence': 0,
+                    'avg_cost_per_kwh_pln': 0,
+                    'efficiency_score': 0,
+                    'time_range': '7d'
+                }
+            
+            # Calculate metrics from decisions
+            charging_count = 0
+            wait_count = 0
+            selling_count = 0
+            total_energy = 0.0
+            total_cost = 0.0
+            total_savings = 0.0
+            confidence_sum = 0.0
+            confidence_count = 0
+            
+            for d in decisions:
+                action = str(d.get('action', '')).lower()
+                
+                if action in ['charge', 'charging', 'grid_charging']:
+                    charging_count += 1
+                    total_energy += float(d.get('energy_kwh', 0) or 0)
+                    total_cost += float(d.get('estimated_cost_pln', 0) or d.get('cost_pln', 0) or 0)
+                    total_savings += float(d.get('estimated_savings_pln', 0) or d.get('savings_pln', 0) or 0)
+                elif action in ['wait', 'waiting', 'idle']:
+                    wait_count += 1
+                elif action in ['sell', 'selling', 'battery_selling']:
+                    selling_count += 1
+                    total_savings += float(d.get('expected_revenue_pln', 0) or d.get('estimated_savings_pln', 0) or 0)
+                
+                # Track confidence
+                conf = d.get('confidence', 0)
+                if conf:
+                    if conf <= 1:  # Decimal format
+                        conf = conf * 100
+                    confidence_sum += conf
+                    confidence_count += 1
+            
+            total_count = charging_count + wait_count + selling_count
+            avg_confidence = confidence_sum / confidence_count if confidence_count > 0 else 0
+            avg_cost_per_kwh = total_cost / total_energy if total_energy > 0 else 0
+            savings_percentage = (total_savings / (total_cost + total_savings) * 100) if (total_cost + total_savings) > 0 else 0
+            
+            # Efficiency score based on confidence and charging decisions ratio
+            charging_ratio = charging_count / total_count if total_count > 0 else 0
+            efficiency_score = (avg_confidence * 0.6 + charging_ratio * 40)  # Weighted score
+            
+            metrics = {
                 'timestamp': now.isoformat(),
-                'total_decisions': monthly_summary.get('total_decisions', 0),
-                'charging_count': monthly_summary.get('charging_count', 0),
-                'wait_count': monthly_summary.get('wait_count', 0),
-                'battery_selling_count': 0,
-                'total_energy_charged_kwh': monthly_summary.get('total_energy_kwh', 0),
-                'total_cost_pln': monthly_summary.get('total_cost_pln', 0),
-                'total_savings_pln': monthly_summary.get('total_savings_pln', 0),
-                'savings_percentage': monthly_summary.get('savings_percentage', 0),
-                'avg_confidence': round(avg_confidence * 100, 1),
-                'avg_cost_per_kwh_pln': monthly_summary.get('avg_cost_per_kwh', 0),
-                'efficiency_score': efficiency_score,
-                'source_breakdown': monthly_summary.get('source_breakdown', {}),
-                'time_range': 'current_month'
+                'total_count': total_count,
+                'charging_count': charging_count,
+                'wait_count': wait_count,
+                'battery_selling_count': selling_count,
+                'total_energy_charged_kwh': round(total_energy, 2),
+                'total_cost_pln': round(total_cost, 2),
+                'total_savings_pln': round(total_savings, 2),
+                'savings_percentage': round(savings_percentage, 1),
+                'avg_confidence': round(avg_confidence, 1),
+                'avg_cost_per_kwh_pln': round(avg_cost_per_kwh, 4),
+                'efficiency_score': round(efficiency_score, 1),
+                'time_range': '7d'
             }
+            
+            # Cache the result
+            with self._background_cache_lock:
+                self._background_cache['metrics_data'] = metrics
+                self._background_cache['last_metrics_refresh'] = time.time()
+            
+            return metrics
             
         except Exception as e:
             logger.error(f"Error getting metrics: {e}", exc_info=True)
