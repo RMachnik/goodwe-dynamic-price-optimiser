@@ -31,16 +31,16 @@ def test_configuration_loading():
     
     config = load_config()
     
-    # Check super low price rules config
-    optimization_rules = config.get('timing_awareness', {}).get('smart_critical_charging', {}).get('optimization_rules', {})
+    # Check super low price rules config - they are directly under smart_critical_charging
+    smart_critical = config.get('timing_awareness', {}).get('smart_critical_charging', {})
     
-    assert optimization_rules.get('super_low_price_charging_enabled') == True, "Super low price charging not enabled"
+    assert smart_critical.get('super_low_price_charging_enabled') == True, "Super low price charging not enabled"
     # Verify thresholds exist and are reasonable
-    super_low_threshold = optimization_rules.get('super_low_price_threshold_pln')
+    super_low_threshold = smart_critical.get('super_low_price_threshold_pln')
     assert super_low_threshold is not None and 0 < super_low_threshold < 1.0, f"Super low price threshold invalid: {super_low_threshold}"
-    super_low_target_soc = optimization_rules.get('super_low_price_target_soc')
+    super_low_target_soc = smart_critical.get('super_low_price_target_soc')
     assert super_low_target_soc is not None and 50 <= super_low_target_soc <= 100, f"Super low price target SOC invalid: {super_low_target_soc}"
-    min_duration = optimization_rules.get('super_low_price_min_duration_hours')
+    min_duration = smart_critical.get('super_low_price_min_duration_hours')
     assert min_duration is not None and min_duration > 0, f"Super low price min duration invalid: {min_duration}"
     
     logger.info("✓ Super low price configuration loading test passed!")

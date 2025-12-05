@@ -35,7 +35,10 @@ def config():
             }
         },
         'data_storage': {
-            'database_storage': {'enabled': False}
+            'database_storage': {
+                'enabled': True,
+                'db_path': ':memory:'
+            }
         },
         'goodwe': {'inverter_ip': '192.168.1.100'},
         'tariff_pricing': {'enabled': False}

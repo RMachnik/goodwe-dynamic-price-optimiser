@@ -49,6 +49,12 @@ class TestSmartChargingStrategy(unittest.TestCase):
             },
             'cheapest_price_aggressive_charging': {
                 'enabled': True
+            },
+            'data_storage': {
+                'database_storage': {
+                    'enabled': True,
+                    'db_path': ':memory:'
+                }
             }
         }
         

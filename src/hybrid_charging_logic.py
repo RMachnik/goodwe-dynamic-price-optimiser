@@ -79,11 +79,17 @@ class HybridChargingLogic:
         # Decision thresholds
         self.min_savings_threshold_pln = self.config.get('min_savings_threshold_pln', 50.0)
         
-        # Get thresholds from timing_analysis section if available, otherwise use defaults
-        timing_config = self.config.get('timing_analysis', {})
-        self.critical_battery_threshold = timing_config.get('critical_battery_soc', self.config.get('critical_battery_threshold', 10.0))  # SOC - price aware
-        self.emergency_battery_threshold = timing_config.get('urgent_charging_soc', self.config.get('emergency_battery_threshold', 5.0))  # SOC - always charge
-        self.low_battery_threshold = self.config.get('low_battery_threshold', 40.0)  # 40% SOC
+        # Get thresholds from timing_awareness section if available, otherwise use defaults
+        timing_config = self.config.get('timing_awareness', {})
+        self.critical_battery_threshold = timing_config.get('critical_battery_threshold', self.config.get('critical_battery_threshold', 30.0))  # SOC - price aware
+        self.emergency_battery_threshold = timing_config.get('emergency_battery_threshold', self.config.get('emergency_battery_threshold', 5.0))  # SOC - always charge
+        self.low_battery_threshold = timing_config.get('low_battery_threshold', self.config.get('low_battery_threshold', 40.0))  # 40% SOC
+        
+        # Smart critical charging configuration
+        smart_critical_config = timing_config.get('smart_critical_charging', {})
+        self.max_critical_price = smart_critical_config.get('max_critical_price_pln', 1.20)  # PLN/kWh - from config
+        self.max_wait_hours = smart_critical_config.get('max_wait_hours', 5)  # hours
+        self.min_price_savings_percent = smart_critical_config.get('min_price_savings_percent', 30)  # %
         
         # Hybrid charging parameters
         self.pv_charging_efficiency = self.config.get('pv_charging_efficiency', 0.95)  # 95% efficiency
@@ -107,8 +113,16 @@ class HybridChargingLogic:
             'min_charging_duration_hours': 0.25,
             'max_charging_duration_hours': 4.0,
             'min_savings_threshold_pln': 50.0,
-            'critical_battery_threshold': 12.0,
-            'low_battery_threshold': 40.0,
+            'timing_awareness': {
+                'critical_battery_threshold': 30.0,
+                'emergency_battery_threshold': 5.0,
+                'low_battery_threshold': 40.0,
+                'smart_critical_charging': {
+                    'max_critical_price_pln': 1.20,
+                    'max_wait_hours': 5,
+                    'min_price_savings_percent': 30,
+                }
+            },
             'pv_charging_efficiency': 0.95,
             'grid_charging_efficiency': 0.90,
             'house_consumption_buffer_kw': 0.5,
@@ -348,7 +362,7 @@ class HybridChargingLogic:
             )
         
         optimal_window = self._create_price_window_from_data(optimal_window_data)
-        max_critical_price = 0.35  # PLN/kWh - configurable threshold
+        max_critical_price = self.max_critical_price  # PLN/kWh - from config
         
         if current_price and current_price <= max_critical_price:
             # Price is acceptable for critical charging

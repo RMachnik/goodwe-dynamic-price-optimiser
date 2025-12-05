@@ -50,6 +50,12 @@ class TestPricingConsistency(unittest.TestCase):
                     'critical': 12,
                     'emergency': 5
                 }
+            },
+            'data_storage': {
+                'database_storage': {
+                    'enabled': True,
+                    'db_path': ':memory:'
+                }
             }
         }
         

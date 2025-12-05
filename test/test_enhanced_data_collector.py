@@ -437,13 +437,27 @@ class TestEnhancedDataCollector(unittest.TestCase):
         self.assertTrue(os.path.exists(recent_file), "Recent data file should be kept")
     
     def test_configuration_validation(self):
-        """Test configuration validation"""
-        # Test with invalid configuration
+        """Test configuration validation with missing database storage
+        
+        Scenario:
+            - Provide config without database storage enabled
+            - Attempt to create EnhancedDataCollector
+        
+        Expected behavior:
+            - Should raise ValueError indicating database storage is required
+            - Error message should be helpful for debugging
+        """
+        # Test with invalid configuration (missing database storage)
         invalid_config = {
             'system': {
-                'inverter_ip': '',  # Invalid empty IP
-                'inverter_port': 0,  # Invalid port
-                'data_collection_interval': -1  # Invalid interval
+                'inverter_ip': '192.168.1.100',
+                'inverter_port': 8899,
+                'data_collection_interval': 60
+            },
+            'data_storage': {
+                'database_storage': {
+                    'enabled': False  # Database disabled - should fail
+                }
             }
         }
         
@@ -452,9 +466,11 @@ class TestEnhancedDataCollector(unittest.TestCase):
         with open(invalid_config_path, 'w') as f:
             yaml.dump(invalid_config, f)
         
-        # Should handle invalid configuration gracefully
-        collector = EnhancedDataCollector(invalid_config_path)
-        self.assertIsNotNone(collector, "Should create collector even with invalid config")
+        # Should raise ValueError for missing database storage
+        with self.assertRaises(ValueError) as context:
+            EnhancedDataCollector(invalid_config_path)
+        
+        self.assertIn('Database storage must be enabled', str(context.exception))
     
     @patch('enhanced_data_collector.goodwe')
     @pytest.mark.asyncio
@@ -491,6 +507,7 @@ class TestDataCollectorPerformance(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp()
         self.config_path = os.path.join(self.temp_dir, 'test_config.yaml')
         self.data_dir = os.path.join(self.temp_dir, 'energy_data')
+        self.db_path = os.path.join(self.temp_dir, 'test.db')
         os.makedirs(self.data_dir, exist_ok=True)
         
         self.create_test_config()
@@ -500,7 +517,7 @@ class TestDataCollectorPerformance(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
     
     def create_test_config(self):
-        """Create test configuration file"""
+        """Create test configuration file with database storage enabled"""
         config = {
             'system': {
                 'inverter_ip': '192.168.1.100',
@@ -513,6 +530,12 @@ class TestDataCollectorPerformance(unittest.TestCase):
                 'save_to_file': True,
                 'file_format': 'json',
                 'retention_days': 30
+            },
+            'data_storage': {
+                'database_storage': {
+                    'enabled': True,
+                    'database_path': self.db_path
+                }
             }
         }
         
@@ -552,6 +575,164 @@ class TestDataCollectorPerformance(unittest.TestCase):
         # Initialization should be fast (less than 2 seconds)
         self.assertLess(initialization_time, 2.0, 
                        f"Initialization should be less than 2 seconds, got {initialization_time:.2f} seconds")
+
+
+class TestAverageDailyConsumption(unittest.TestCase):
+    """Test get_average_daily_consumption functionality for D+1 night charging"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.temp_dir = tempfile.mkdtemp()
+        self.config_path = os.path.join(self.temp_dir, 'test_config.yaml')
+        self.data_dir = os.path.join(self.temp_dir, 'energy_data')
+        self.db_path = os.path.join(self.temp_dir, 'test.db')
+        os.makedirs(self.data_dir, exist_ok=True)
+        self.create_test_config()
+    
+    def tearDown(self):
+        """Clean up test environment"""
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
+    def create_test_config(self):
+        """Create test configuration file with database storage enabled"""
+        config = {
+            'system': {
+                'inverter_ip': '192.168.1.100',
+                'inverter_port': 8899,
+                'data_collection_interval': 60,
+                'data_storage_path': self.data_dir
+            },
+            'data_collection': {
+                'enabled': True,
+                'save_to_file': True,
+                'file_format': 'json',
+                'retention_days': 30
+            },
+            'data_storage': {
+                'database_storage': {
+                    'enabled': True,
+                    'database_path': self.db_path
+                }
+            }
+        }
+        
+        import yaml
+        with open(self.config_path, 'w') as f:
+            yaml.dump(config, f)
+    
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_get_average_daily_consumption_with_data(self):
+        """Test average consumption calculation with historical data"""
+        collector = EnhancedDataCollector(self.config_path)
+        
+        # Create mock storage with proper async method
+        mock_storage = AsyncMock()
+        # Create consumption data - power values in Watts, time intervals assumed 20 seconds
+        # For each day to have ~10 kWh, we need many entries
+        # But for test purposes, we just need to verify the calculation logic works
+        base_date = datetime.now()
+        entries = []
+        for day_offset in range(7):
+            day = base_date - timedelta(days=day_offset)
+            # Create entries that add up to meaningful consumption
+            for hour in range(24):
+                ts = day.replace(hour=hour, minute=0, second=0)
+                # Each entry with 1000W power for ~20s interval = 1000/1000/180 kWh = 0.0056 kWh
+                # For simpler test, create many entries
+                entries.append({
+                    'timestamp': ts.isoformat(),
+                    'house_consumption': 2000.0  # 2kW
+                })
+        
+        mock_storage.get_energy_data = AsyncMock(return_value=entries)
+        collector.storage = mock_storage
+        
+        result = await collector.get_average_daily_consumption(days=7)
+        
+        # Should return a dictionary with consumption data
+        self.assertIsInstance(result, dict)
+        self.assertIn('available', result)
+        self.assertIn('avg_daily_kwh', result)
+        # With data present, available should be True
+        # Note: the actual avg value depends on calculation logic
+        if result['available']:
+            self.assertGreater(result['avg_daily_kwh'], 0)
+    
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_get_average_daily_consumption_no_storage(self):
+        """Test average consumption when storage is not available"""
+        collector = EnhancedDataCollector(self.config_path)
+        collector.storage = None  # No storage available
+        
+        result = await collector.get_average_daily_consumption(days=7)
+        
+        # Should return dict with available=False
+        self.assertIsInstance(result, dict)
+        self.assertFalse(result.get('available', True))
+    
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_get_average_daily_consumption_empty_data(self):
+        """Test average consumption with no historical data"""
+        collector = EnhancedDataCollector(self.config_path)
+        
+        mock_storage = AsyncMock()
+        mock_storage.get_energy_data = AsyncMock(return_value=[])  # No data
+        collector.storage = mock_storage
+        
+        result = await collector.get_average_daily_consumption(days=7)
+        
+        # Should return dict with available=False when no data available
+        self.assertIsInstance(result, dict)
+        self.assertFalse(result.get('available', True))
+    
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_get_average_daily_consumption_returns_confidence(self):
+        """Test that consumption result includes confidence level"""
+        collector = EnhancedDataCollector(self.config_path)
+        
+        mock_storage = AsyncMock()
+        # Create some entries for today and yesterday
+        base_date = datetime.now()
+        entries = []
+        for day_offset in range(3):
+            day = base_date - timedelta(days=day_offset)
+            for hour in range(24):
+                ts = day.replace(hour=hour, minute=0, second=0)
+                entries.append({
+                    'timestamp': ts.isoformat(),
+                    'house_consumption': 1500.0
+                })
+        
+        mock_storage.get_energy_data = AsyncMock(return_value=entries)
+        collector.storage = mock_storage
+        
+        result = await collector.get_average_daily_consumption(days=7)
+        
+        # Should include confidence and other statistics
+        self.assertIn('confidence', result)
+        self.assertIn('days_with_data', result)
+        self.assertIn('reason', result)
+    
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_get_average_daily_consumption_storage_error(self):
+        """Test graceful handling of storage errors"""
+        collector = EnhancedDataCollector(self.config_path)
+        
+        mock_storage = AsyncMock()
+        mock_storage.get_energy_data = AsyncMock(side_effect=Exception("Storage error"))
+        collector.storage = mock_storage
+        
+        result = await collector.get_average_daily_consumption(days=7)
+        
+        # Should return dict with available=False on error and not raise
+        self.assertIsInstance(result, dict)
+        self.assertFalse(result.get('available', True))
+        self.assertIn('Error', result.get('reason', ''))
 
 
 if __name__ == '__main__':

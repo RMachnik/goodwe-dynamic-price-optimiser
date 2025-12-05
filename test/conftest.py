@@ -102,6 +102,12 @@ def isolated_config():
 		},
 		'cheapest_price_aggressive_charging': {
 			'enabled': True
+		},
+		'data_storage': {
+			'database_storage': {
+				'enabled': True,
+				'db_path': ':memory:'
+			}
 		}
 	}
 	

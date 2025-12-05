@@ -57,7 +57,8 @@ class TestBackgroundRefreshThread(unittest.TestCase):
             },
             'data_storage': {
                 'database_storage': {
-                    'enabled': False  # Disable for unit tests
+                    'enabled': True,
+                    'db_path': ':memory:'
                 }
             }
         }
@@ -187,7 +188,8 @@ class TestPriceDiskCache(unittest.TestCase):
             },
             'data_storage': {
                 'database_storage': {
-                    'enabled': False
+                    'enabled': True,
+                    'db_path': ':memory:'
                 }
             }
         }
@@ -208,7 +210,7 @@ class TestPriceDiskCache(unittest.TestCase):
         server = LogWebServer(host='127.0.0.1', port=8081, log_dir=self.logs_dir, config=self.config)
         server._price_cache_file = Path(self.data_dir) / 'price_cache.json'
         
-        # Test price data
+        # Test price data (must include 'prices' list for new format validation)
         test_price_data = {
             'current_price_pln_kwh': 0.45,
             'cheapest_price_pln_kwh': 0.23,
@@ -216,7 +218,12 @@ class TestPriceDiskCache(unittest.TestCase):
             'average_price_pln_kwh': 0.68,
             'price_trend': 'stable',
             'data_source': 'PSE API',
-            'last_updated': datetime.now().isoformat()
+            'last_updated': datetime.now().isoformat(),
+            'prices': [  # Required for new format validation
+                {'hour': '00:00', 'price': 0.30},
+                {'hour': '01:00', 'price': 0.28},
+                {'hour': '02:00', 'price': 0.23}
+            ]
         }
         
         # Save to disk
@@ -275,7 +282,8 @@ class TestMonthlySummaryCaching(unittest.TestCase):
         self.config = {
             'data_storage': {
                 'database_storage': {
-                    'enabled': False
+                    'enabled': True,
+                    'db_path': ':memory:'
                 }
             }
         }
@@ -365,7 +373,8 @@ class TestOptimizedEndpoints(unittest.TestCase):
             },
             'data_storage': {
                 'database_storage': {
-                    'enabled': False
+                    'enabled': True,
+                    'db_path': ':memory:'
                 }
             }
         }
@@ -491,7 +500,8 @@ class TestCacheStalenessDetection(unittest.TestCase):
             },
             'data_storage': {
                 'database_storage': {
-                    'enabled': False
+                    'enabled': True,
+                    'db_path': ':memory:'
                 }
             }
         }

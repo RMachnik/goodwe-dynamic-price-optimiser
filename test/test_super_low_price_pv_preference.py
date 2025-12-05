@@ -31,15 +31,15 @@ def test_configuration_loading():
     
     config = load_config()
     
-    # Check PV preference config
-    optimization_rules = config.get('timing_awareness', {}).get('smart_critical_charging', {}).get('optimization_rules', {})
-    pv_preference = optimization_rules.get('super_low_price_pv_preference', {})
+    # Check PV preference config - they are directly under smart_critical_charging
+    smart_critical = config.get('timing_awareness', {}).get('smart_critical_charging', {})
+    pv_preference = smart_critical.get('super_low_price_pv_preference', {})
     
-    assert optimization_rules.get('super_low_price_charging_enabled') == True, "Super low price charging not enabled"
+    assert smart_critical.get('super_low_price_charging_enabled') == True, "Super low price charging not enabled"
     # Verify thresholds exist and are reasonable
-    super_low_threshold = optimization_rules.get('super_low_price_threshold_pln')
+    super_low_threshold = smart_critical.get('super_low_price_threshold_pln')
     assert super_low_threshold is not None and 0 < super_low_threshold < 1.0, f"Super low price threshold invalid: {super_low_threshold}"
-    super_low_target_soc = optimization_rules.get('super_low_price_target_soc')
+    super_low_target_soc = smart_critical.get('super_low_price_target_soc')
     assert super_low_target_soc is not None and 50 <= super_low_target_soc <= 100, f"Super low price target SOC invalid: {super_low_target_soc}"
     
     # Verify PV preference thresholds exist and are reasonable

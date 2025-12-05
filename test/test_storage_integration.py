@@ -44,16 +44,8 @@ SAMPLE_STATE = {
 def temp_storage_config(tmp_path):
     """Create a temporary storage configuration."""
     db_path = tmp_path / "test_db.sqlite"
-    energy_dir = tmp_path / "energy_data"
-    
-    # Create directories
-    energy_dir.mkdir(parents=True, exist_ok=True)
     
     config_dict = {
-        "file_storage": {
-            "enabled": True,
-            "energy_data_dir": str(energy_dir)
-        },
         "database_storage": {
             "enabled": True,
             "sqlite": {
@@ -62,24 +54,17 @@ def temp_storage_config(tmp_path):
         }
     }
     
-    return config_dict, db_path, energy_dir
+    return config_dict, db_path
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(10)
-async def test_composite_storage_flow(temp_storage_config):
-    """Test the full flow of CompositeStorage: Connect -> Write -> Read -> Disconnect."""
-    config_dict, db_path, energy_dir = temp_storage_config
+async def test_sqlite_storage_flow(temp_storage_config):
+    """Test the full flow of SQLiteStorage: Connect -> Write -> Read -> Disconnect."""
+    config_dict, db_path = temp_storage_config
     
     # 1. Create Storage
     storage = StorageFactory.create_storage(config_dict)
-    
-    # Hack to set the base_dir for file storage correctly for the test
-    # In the real app, FileStorage uses hardcoded paths relative to 'out', 
-    # but for testing we want to use tmp_path.
-    # We need to inspect the composite structure to patch the FileStorage instance.
-    file_storage = storage.secondaries[0]
-    file_storage.energy_data_dir = str(energy_dir)
-    file_storage.base_dir = str(energy_dir.parent)
+    assert storage.__class__.__name__ == "SQLiteStorage"
     
     # 2. Connect
     assert await storage.connect() is True
@@ -89,8 +74,7 @@ async def test_composite_storage_flow(temp_storage_config):
     assert await storage.save_energy_data(SAMPLE_ENERGY_DATA) is True
     assert await storage.save_system_state(SAMPLE_STATE) is True
     
-    # 4. Verify DB Write (Primary)
-    # We can read back using the storage interface
+    # 4. Verify DB Write
     start = datetime.now().replace(hour=0, minute=0, second=0)
     end = datetime.now().replace(hour=23, minute=59, second=59)
     
@@ -98,57 +82,27 @@ async def test_composite_storage_flow(temp_storage_config):
     assert len(read_data) == 1
     assert read_data[0]['battery_soc'] == 85.5
     
-    # 5. Verify File Write (Secondary)
-    # Check if file exists
-    files = list(energy_dir.glob("energy_data_*.json"))
-    assert len(files) > 0
-    
-    with open(files[0], 'r') as f:
-        file_content = json.load(f)
-        assert len(file_content) == 1
-        assert file_content[0]['battery_soc'] == 85.5
-        
-    # 6. Test Fallback (Simulate DB Failure)
-    # We'll manually close the DB connection to simulate failure
-    await storage.primary.disconnect()
-    
-    # Try to read - should fall back to file
-    # Note: The composite storage health check might fail, but read should try fallback
-    fallback_data = await storage.get_energy_data(start, end)
-    assert len(fallback_data) == 1
-    assert fallback_data[0]['battery_soc'] == 85.5
-    
-    # 7. Disconnect
+    # 5. Disconnect
     await storage.disconnect()
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(10)
 async def test_storage_factory_modes(tmp_path):
-    """Test that factory creates correct instances based on config."""
+    """Test that factory creates SQLiteStorage when database is enabled."""
     
-    # Case 1: DB Only
+    # Case 1: DB Enabled
     config_db_only = {
-        "file_storage": {"enabled": False},
         "database_storage": {"enabled": True, "sqlite": {"path": str(tmp_path / "db.sqlite")}}
     }
     storage = StorageFactory.create_storage(config_db_only)
     assert storage.__class__.__name__ == "SQLiteStorage"
     
-    # Case 2: File Only
-    config_file_only = {
-        "file_storage": {"enabled": True},
+    # Case 2: DB Disabled (should raise error)
+    config_db_disabled = {
         "database_storage": {"enabled": False}
     }
-    storage = StorageFactory.create_storage(config_file_only)
-    assert storage.__class__.__name__ == "FileStorage"
-    
-    # Case 3: Composite
-    config_composite = {
-        "file_storage": {"enabled": True},
-        "database_storage": {"enabled": True, "sqlite": {"path": str(tmp_path / "db.sqlite")}}
-    }
-    storage = StorageFactory.create_storage(config_composite)
-    assert storage.__class__.__name__ == "CompositeStorage"
+    with pytest.raises(ValueError, match="Database storage must be enabled"):
+        StorageFactory.create_storage(config_db_disabled)
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(10)

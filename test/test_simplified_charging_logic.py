@@ -44,7 +44,10 @@ def config():
             }
         },
         'data_storage': {
-            'database_storage': {'enabled': False}
+            'database_storage': {
+                'enabled': True,
+                'db_path': ':memory:'
+            }
         },
         'goodwe': {'inverter_ip': '192.168.1.100'},
         'tariff_pricing': {'enabled': False}
@@ -83,15 +86,17 @@ def make_decision(charger, battery_soc, current_price, cheapest_price, cheapest_
 
 @pytest.fixture
 def sample_price_data():
-    """Generate 24 hours of sample price data."""
+    """Generate 24 hours of sample price data in PSE API format."""
     now = datetime.now()
     prices = []
     for hour in range(24):
+        dt = (now + timedelta(hours=hour)).replace(minute=0, second=0, microsecond=0)
         prices.append({
-            'hour': (now + timedelta(hours=hour)).replace(minute=0, second=0, microsecond=0),
-            'price_pln_per_kwh': 0.50 + (hour % 6) * 0.10  # Oscillating pattern
+            'dtime': dt.isoformat(),
+            'csdac_pln': (500 + (hour % 6) * 100),  # PLN/MWh (oscillating pattern)
+            'business_date': dt.date().isoformat()
         })
-    return prices
+    return {'value': prices}
 
 
 # =============================================================================
@@ -328,7 +333,7 @@ def test_normal_tier_high_soc_expensive_price(price_charging, sample_price_data)
         
         assert decision['should_charge'] is False
         assert 'NORMAL' in decision['reason']
-        assert 'not cheap enough' in decision['reason']
+        assert 'waiting' in decision['reason'].lower()  # "waiting for better price"
 
 
 # =============================================================================

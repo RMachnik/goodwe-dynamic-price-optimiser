@@ -9,11 +9,27 @@ import sys
 import os
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, MagicMock
+import yaml
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from pv_consumption_analyzer import PVConsumptionAnalyzer, PowerBalance, ChargingRecommendation
+
+
+def load_production_config():
+    """Load production config for test defaults"""
+    config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'master_coordinator_config.yaml')
+    try:
+        with open(config_path, 'r') as f:
+            return yaml.safe_load(f)
+    except Exception:
+        return {}
+
+
+# Load production config once at module level
+PRODUCTION_CONFIG = load_production_config()
+
 
 class TestPVConsumptionAnalyzer(unittest.TestCase):
     """Test cases for PV vs Consumption Analyzer"""
@@ -438,7 +454,14 @@ class TestNightChargingStrategy(unittest.TestCase):
     """Test cases for Night Charging Strategy"""
     
     def setUp(self):
-        """Set up test fixtures"""
+        """Set up test fixtures using config values"""
+        # Get production config values for realistic testing
+        pv_config = PRODUCTION_CONFIG.get('pv_consumption_analysis', {})
+        
+        # Read thresholds from production config (with fallback defaults matching code)
+        self.poor_pv_threshold_kwh_per_hour = pv_config.get('poor_pv_threshold_kwh_per_hour', 0.3)
+        self.night_charging_target_soc = pv_config.get('night_charging_target_soc_poor_pv', 100)
+        
         self.config = {
             'timing_awareness': {
                 'battery_capacity_kwh': 10.0,
@@ -449,12 +472,17 @@ class TestNightChargingStrategy(unittest.TestCase):
                 'pv_overproduction_threshold_w': 500,
                 'consumption_forecast_hours': 4,
                 'historical_data_days': 7,
-                'night_charging_enabled': True,
-                'night_hours': [22, 23, 0, 1, 2, 3, 4, 5],
-                'high_price_threshold_percentile': 0.75,
-                'poor_pv_threshold_percentile': 25.0,
-                'min_night_charging_soc': 30.0,
-                'max_night_charging_soc': 80.0
+                'night_charging_enabled': pv_config.get('night_charging_enabled', True),
+                'night_hours': pv_config.get('night_hours', [22, 23, 0, 1, 2, 3, 4, 5]),
+                'high_price_threshold_percentile': pv_config.get('high_price_threshold_percentile', 0.75),
+                'poor_pv_threshold_percentile': pv_config.get('poor_pv_threshold_percentile', 25.0),
+                'min_night_charging_soc': pv_config.get('min_night_charging_soc', 30.0),
+                'max_night_charging_soc': pv_config.get('max_night_charging_soc', 80.0),
+                # New realistic poor PV thresholds from config
+                'poor_pv_threshold_kwh_per_hour': self.poor_pv_threshold_kwh_per_hour,
+                'poor_pv_use_consumption_comparison': False,  # Disable for simpler testing
+                'night_charging_target_soc_poor_pv': self.night_charging_target_soc,
+                'assume_poor_pv_on_api_failure': pv_config.get('assume_poor_pv_on_api_failure', True)
             },
             'electricity_pricing': {
                 'sc_component_pln_kwh': 0.0892
@@ -463,14 +491,15 @@ class TestNightChargingStrategy(unittest.TestCase):
         self.analyzer = PVConsumptionAnalyzer(self.config)
     
     def test_night_charging_strategy_night_hours(self):
-        """Test night charging strategy during night hours"""
-        # Mock PV forecast with poor production (24 hours of data for better confidence)
-        pv_forecast = []
-        for hour in range(24):
-            pv_forecast.append({
-                'forecasted_power_kw': 0.3,  # Poor PV production
-                'timestamp': f'2025-01-02 {hour:02d}:00'
-            })
+        """Test night charging strategy during night hours with poor PV"""
+        # Generate PV forecast that is BELOW the threshold (poor PV)
+        # Threshold is read from config (default 0.3 kWh/hour)
+        poor_pv_value = self.poor_pv_threshold_kwh_per_hour * 0.5  # Half the threshold = clearly poor
+        
+        pv_forecast = [
+            {'forecasted_power_kw': poor_pv_value, 'timestamp': f'2025-01-02 {hour:02d}:00'}
+            for hour in range(24)
+        ]
         
         # Mock price data with low current price and high tomorrow prices
         price_data = {
@@ -527,7 +556,9 @@ class TestNightChargingStrategy(unittest.TestCase):
             self.assertTrue(recommendation.should_charge)
             self.assertEqual(recommendation.charging_source, 'grid')
             self.assertEqual(recommendation.priority, 'critical')
-            self.assertIn('Night charging for high price day preparation', recommendation.reason)
+            # Poor PV detected (avg below threshold), target SOC from config
+            self.assertIn('Poor PV tomorrow', recommendation.reason)
+            self.assertIn(f'charging to {self.night_charging_target_soc}%', recommendation.reason)
     
     def test_night_charging_strategy_daytime(self):
         """Test night charging strategy during daytime hours"""
@@ -657,32 +688,38 @@ class TestNightChargingStrategy(unittest.TestCase):
         self.assertFalse(self.analyzer._is_night_time(8))   # 8 AM
     
     def test_analyze_tomorrow_pv_forecast(self):
-        """Test tomorrow PV forecast analysis"""
-        # Test with poor PV forecast
+        """Test tomorrow PV forecast analysis using config thresholds"""
+        # Get threshold from config
+        threshold_per_hour = self.poor_pv_threshold_kwh_per_hour
+        
+        # Test with poor PV forecast (avg below threshold)
+        # Use values clearly below threshold (e.g., half the threshold)
+        poor_value = threshold_per_hour * 0.5
         poor_pv_forecast = [
-            {'forecasted_power_kw': 0.5, 'timestamp': '2025-01-02 12:00'},
-            {'forecasted_power_kw': 0.3, 'timestamp': '2025-01-02 13:00'},
-            {'forecasted_power_kw': 0.2, 'timestamp': '2025-01-02 14:00'}
-        ]
+            {'forecasted_power_kw': poor_value, 'timestamp': '2025-01-02 12:00'},
+            {'forecasted_power_kw': poor_value, 'timestamp': '2025-01-02 13:00'},
+            {'forecasted_power_kw': poor_value, 'timestamp': '2025-01-02 14:00'}
+        ]  # Average is half the threshold = poor PV
         
         analysis = self.analyzer._analyze_tomorrow_pv_forecast(poor_pv_forecast)
         
-        # The threshold is 25% of 10kW = 2.5kW, so 0.33kW average should be poor
+        # With new logic: avg below threshold = poor PV
         self.assertTrue(analysis['is_poor_pv'])
-        self.assertLess(analysis['avg_pv_kw'], 2.5)  # Should be below threshold
+        self.assertLess(analysis['avg_pv_kw'], threshold_per_hour)
         self.assertGreater(analysis['confidence'], 0)
         
-        # Test with good PV forecast
+        # Test with good PV forecast (clearly above threshold)
+        good_value = threshold_per_hour * 10  # 10x threshold = good
         good_pv_forecast = [
-            {'forecasted_power_kw': 8.0, 'timestamp': '2025-01-02 12:00'},
-            {'forecasted_power_kw': 9.0, 'timestamp': '2025-01-02 13:00'},
-            {'forecasted_power_kw': 7.5, 'timestamp': '2025-01-02 14:00'}
+            {'forecasted_power_kw': good_value, 'timestamp': '2025-01-02 12:00'},
+            {'forecasted_power_kw': good_value * 1.1, 'timestamp': '2025-01-02 13:00'},
+            {'forecasted_power_kw': good_value * 0.9, 'timestamp': '2025-01-02 14:00'}
         ]
         
         analysis = self.analyzer._analyze_tomorrow_pv_forecast(good_pv_forecast)
         
         self.assertFalse(analysis['is_poor_pv'])
-        self.assertGreater(analysis['avg_pv_kw'], 5.0)  # Should be high
+        self.assertGreater(analysis['avg_pv_kw'], threshold_per_hour)
     
     def test_analyze_tomorrow_price_forecast(self):
         """Test tomorrow price forecast analysis"""

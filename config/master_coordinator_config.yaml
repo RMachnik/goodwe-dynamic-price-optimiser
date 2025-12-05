@@ -489,9 +489,19 @@ pv_consumption_analysis:
   night_charging_enabled: true
   night_hours: [22, 23, 0, 1, 2, 3, 4, 5]  # 10 PM to 6 AM
   high_price_threshold_percentile: 0.75     # 75th percentile for high prices
-  poor_pv_threshold_percentile: 25.0        # 25th percentile for poor PV (25% of capacity)
   min_night_charging_soc: 30.0              # Don't charge if SOC > 30%
-  max_night_charging_soc: 80.0              # Charge up to 80% at night
+  max_night_charging_soc: 80.0              # Charge up to 80% at night (normal conditions)
+  
+  # Poor PV detection (realistic thresholds)
+  # Poor PV is defined as average hourly production < 0.3 kWh/hour
+  # For a 12-hour daylight period, this means < 3.6 kWh total daily production
+  poor_pv_threshold_kwh_per_hour: 0.3      # Average PV < 0.3 kWh/hour is poor
+  poor_pv_use_consumption_comparison: true # Also compare PV to house consumption
+  night_charging_target_soc_poor_pv: 100   # Charge to 100% when poor PV expected
+  assume_poor_pv_on_api_failure: true      # Conservative fallback if weather API fails
+  
+  # Legacy percentile-based threshold (for backward compatibility)
+  poor_pv_threshold_percentile: 25.0       # 25th percentile for poor PV (25% of capacity)
 
 # Price Window Analysis Configuration
 price_window_analysis:
@@ -677,6 +687,11 @@ pse_price_forecast:
   update_interval_minutes: 60                # Update every 60 minutes
   forecast_hours_ahead: 24                   # Forecast 24 hours ahead
   confidence_threshold: 0.7                  # Minimum confidence to use forecasts
+  
+  # D+1 (tomorrow) price fetching for night charging decisions
+  d1_fetch_start_hour: 13                    # Start fetching D+1 prices at 13:00 (PSE publishes ~12:42)
+  d1_retry_interval_minutes: 30              # Retry every 30 minutes if D+1 not available
+  d1_max_retries: 3                          # Maximum retries (13:00, 13:30, 14:00)
   
   # Forecast-based decision rules
   decision_rules:

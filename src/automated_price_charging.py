@@ -80,6 +80,18 @@ class AutomatedPriceCharger:
         # Price scan cache for opportunistic tier
         self._price_scan_cache = {}  # Cache for _find_cheapest_price_next_hours
         self._price_scan_cache_timestamp = None  # Cache invalidation tracking
+        
+        # PV forecaster for weather-aware decisions (set by MasterCoordinator)
+        self.pv_forecaster = None
+
+    def set_pv_forecaster(self, pv_forecaster) -> None:
+        """Set PV forecaster for weather-aware charging decisions.
+        
+        Args:
+            pv_forecaster: PVForecaster instance with weather collector configured
+        """
+        self.pv_forecaster = pv_forecaster
+        logger.info("PV forecaster set for weather-aware charging decisions")
 
     def _load_config(self) -> None:
         """Load YAML configuration defensively into `self.config`."""
@@ -830,29 +842,100 @@ class AutomatedPriceCharger:
             return False
 
     def _check_weather_improvement(self) -> bool:
-        """Check if weather will improve in the next few hours"""
-        # This is a simplified implementation
-        # In a real system, you would:
-        # 1. Get weather forecast for next 6 hours
-        # 2. Check cloud cover, precipitation, solar irradiance
-        # 3. Determine if PV production will improve significantly
+        """Check if weather will improve in the next few hours using PV forecast.
         
-        # For now, return False (weather won't improve) to enable proactive charging
-        # This can be enhanced with actual weather data integration
-        return False
+        Returns:
+            True if weather/PV is expected to improve significantly, False otherwise.
+            On API failure or missing forecaster, returns False (conservative: assume no improvement).
+        """
+        try:
+            if not self.pv_forecaster:
+                logger.debug("No PV forecaster available - assuming weather won't improve")
+                return False
+            
+            # Get weather-based PV forecast for next 6 hours
+            forecasts = self.pv_forecaster.forecast_pv_production_with_weather(self.weather_improvement_hours)
+            
+            if not forecasts:
+                logger.debug("No PV forecast data available - assuming weather won't improve")
+                return False
+            
+            # Check if PV production is expected to improve significantly
+            # Compare first hour forecast to average of remaining hours
+            if len(forecasts) < 2:
+                return False
+            
+            current_pv = forecasts[0].get('forecasted_power_kw', 0)
+            future_pv_values = [f.get('forecasted_power_kw', 0) for f in forecasts[1:]]
+            
+            if not future_pv_values:
+                return False
+            
+            avg_future_pv = sum(future_pv_values) / len(future_pv_values)
+            
+            # Weather improves if future PV is at least 50% higher than current
+            # and future PV is above 1 kW (meaningful production)
+            improvement_threshold = 1.5
+            min_meaningful_pv_kw = 1.0
+            
+            if avg_future_pv > current_pv * improvement_threshold and avg_future_pv >= min_meaningful_pv_kw:
+                logger.info(f"Weather expected to improve: current PV={current_pv:.1f}kW, future avg={avg_future_pv:.1f}kW")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.warning(f"Failed to check weather improvement: {e} - assuming no improvement")
+            return False
 
     def _check_weather_stability(self) -> bool:
-        """Check if weather conditions are stable for PV charging"""
-        # This is a simplified implementation
-        # In a real system, you would:
-        # 1. Get weather forecast for next 2-4 hours
-        # 2. Check cloud cover trends (stable vs increasing)
-        # 3. Check precipitation probability
-        # 4. Check wind conditions (affects PV efficiency)
+        """Check if weather conditions are stable for PV charging using PV forecast.
         
-        # For now, return True (weather stable) to enable PV preference
-        # This can be enhanced with actual weather data integration
-        return True
+        Returns:
+            True if weather is stable (low variance in cloud cover), False otherwise.
+            On API failure or missing forecaster, returns True (optimistic for PV preference).
+        """
+        try:
+            if not self.pv_forecaster:
+                logger.debug("No PV forecaster available - assuming weather is stable")
+                return True
+            
+            # Get weather-based PV forecast for next 4 hours
+            forecasts = self.pv_forecaster.forecast_pv_production_with_weather(4)
+            
+            if not forecasts:
+                logger.debug("No PV forecast data available - assuming weather is stable")
+                return True
+            
+            # Check cloud cover stability
+            cloud_covers = [f.get('cloud_cover_percent', 50) for f in forecasts]
+            
+            if not cloud_covers:
+                return True
+            
+            # Weather is unstable if cloud cover varies by more than 30% between hours
+            max_cloud = max(cloud_covers)
+            min_cloud = min(cloud_covers)
+            cloud_variance = max_cloud - min_cloud
+            
+            # Also check confidence levels
+            confidences = [f.get('confidence', 0.5) for f in forecasts]
+            avg_confidence = sum(confidences) / len(confidences) if confidences else 0.5
+            
+            # Weather is stable if variance is low AND confidence is reasonable
+            stability_threshold = 30  # percent cloud cover variance
+            min_confidence = 0.6
+            
+            is_stable = cloud_variance <= stability_threshold and avg_confidence >= min_confidence
+            
+            if not is_stable:
+                logger.debug(f"Weather unstable: cloud variance={cloud_variance}%, confidence={avg_confidence:.2f}")
+            
+            return is_stable
+            
+        except Exception as e:
+            logger.warning(f"Failed to check weather stability: {e} - assuming stable")
+            return True
 
     def _check_house_usage_low(self) -> bool:
         """Check if house usage is low enough for PV charging"""
@@ -1536,14 +1619,14 @@ class AutomatedPriceCharger:
             if current_price <= threshold:
                 return {
                     'should_charge': True,
-                    'reason': f'Near best price today ({current_price:.2f} PLN) - charging now',
+                    'reason': f'OPPORTUNISTIC tier: Near best price today ({current_price:.2f} PLN) - charging now',
                     'priority': 'medium',
                     'confidence': 0.75
                 }
             else:
                 return {
                     'should_charge': False,
-                    'reason': f'Cheaper price coming ({cheapest_next_12h:.2f} PLN) - waiting',
+                    'reason': f'OPPORTUNISTIC tier: Cheaper price coming ({cheapest_next_12h:.2f} PLN) - waiting',
                     'priority': 'low',
                     'confidence': 0.7
                 }
@@ -1560,14 +1643,14 @@ class AutomatedPriceCharger:
         if self._is_price_cheap_for_normal_tier(current_price, battery_soc, price_data):
             return {
                 'should_charge': True,
-                'reason': f'Good price ({current_price:.2f} PLN) - topping up battery',
+                'reason': f'NORMAL tier: Good price ({current_price:.2f} PLN) - topping up battery',
                 'priority': 'low',
                 'confidence': 0.65
             }
         else:
             return {
                 'should_charge': False,
-                'reason': f'Battery OK ({battery_soc}%), waiting for better price',
+                'reason': f'NORMAL tier: Battery OK ({battery_soc}%), waiting for better price',
                 'priority': 'low',
                 'confidence': 0.6
             }

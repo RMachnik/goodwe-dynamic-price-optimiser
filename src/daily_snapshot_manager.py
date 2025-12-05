@@ -46,7 +46,7 @@ class DailySnapshotManager:
         # Initialize storage
         self.storage = None
         try:
-            self.storage = StorageFactory.create_storage(self.config)
+            self.storage = StorageFactory.create_storage(self.config.get('data_storage', {}))
         except Exception as e:
             logger.error(f"Failed to create storage: {e}")
         

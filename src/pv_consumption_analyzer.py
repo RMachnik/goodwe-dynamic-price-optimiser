@@ -70,9 +70,23 @@ class PVConsumptionAnalyzer:
         self.night_charging_enabled = config.get('pv_consumption_analysis', {}).get('night_charging_enabled', True)
         self.night_hours = config.get('pv_consumption_analysis', {}).get('night_hours', [22, 23, 0, 1, 2, 3, 4, 5])  # 10 PM to 6 AM
         self.high_price_threshold_percentile = config.get('pv_consumption_analysis', {}).get('high_price_threshold_percentile', 0.75)  # 75th percentile
-        self.poor_pv_threshold_percentile = config.get('pv_consumption_analysis', {}).get('poor_pv_threshold_percentile', 0.25)  # 25th percentile
         self.min_night_charging_soc = config.get('pv_consumption_analysis', {}).get('min_night_charging_soc', 30.0)  # Don't charge if SOC > 30%
-        self.max_night_charging_soc = config.get('pv_consumption_analysis', {}).get('max_night_charging_soc', 80.0)  # Charge up to 80% at night
+        self.max_night_charging_soc = config.get('pv_consumption_analysis', {}).get('max_night_charging_soc', 80.0)  # Charge up to 80% at night (normal conditions)
+        
+        # Poor PV detection configuration (new realistic thresholds)
+        # Poor PV is defined as average hourly production < threshold (default: 0.3 kWh/hour)
+        self.poor_pv_threshold_kwh_per_hour = config.get('pv_consumption_analysis', {}).get('poor_pv_threshold_kwh_per_hour', 0.3)  # < 0.3 kWh/hour is poor
+        self.poor_pv_use_consumption_comparison = config.get('pv_consumption_analysis', {}).get('poor_pv_use_consumption_comparison', True)
+        self.night_charging_target_soc_poor_pv = config.get('pv_consumption_analysis', {}).get('night_charging_target_soc_poor_pv', 100)  # Charge to 100% when poor PV expected
+        self.assume_poor_pv_on_api_failure = config.get('pv_consumption_analysis', {}).get('assume_poor_pv_on_api_failure', True)  # Conservative fallback
+        
+        # Legacy percentile-based threshold (kept for backward compatibility)
+        self.poor_pv_threshold_percentile = config.get('pv_consumption_analysis', {}).get('poor_pv_threshold_percentile', 0.25)  # 25th percentile
+        
+        # Reference to data collector for consumption data (set by MasterCoordinator)
+        self.data_collector = None
+        self._cached_avg_consumption_kwh = None
+        self._consumption_cache_time = None
         
         # Historical data for consumption forecasting
         self.consumption_history = []
@@ -87,6 +101,66 @@ class PVConsumptionAnalyzer:
             except Exception as e:
                 logger.warning(f"Failed to initialize tariff calculator: {e}")
     
+    def set_data_collector(self, data_collector) -> None:
+        """Set data collector for consumption data access.
+        
+        Args:
+            data_collector: EnhancedDataCollector instance
+        """
+        self.data_collector = data_collector
+        logger.info("Data collector set for PV consumption analyzer")
+    
+    def _get_average_daily_consumption(self) -> float:
+        """Get average daily consumption from data collector with caching.
+        
+        Returns:
+            Average daily consumption in kWh, or 0.0 if not available.
+        """
+        try:
+            # Check cache (valid for 1 hour)
+            cache_valid_minutes = 60
+            if (self._cached_avg_consumption_kwh is not None and 
+                self._consumption_cache_time is not None):
+                cache_age = (datetime.now() - self._consumption_cache_time).total_seconds() / 60
+                if cache_age < cache_valid_minutes:
+                    return self._cached_avg_consumption_kwh
+            
+            # Try to get from data collector
+            if self.data_collector is None:
+                logger.debug("No data collector available for consumption data")
+                return 0.0
+            
+            # Run async method synchronously (we're in sync context)
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Create a new task if we're in an async context
+                    # This shouldn't happen in normal flow, but handle it gracefully
+                    logger.debug("Cannot get consumption data in running loop - using cached or 0")
+                    return self._cached_avg_consumption_kwh or 0.0
+                else:
+                    result = loop.run_until_complete(
+                        self.data_collector.get_average_daily_consumption(days=7)
+                    )
+            except RuntimeError:
+                # No event loop - create one
+                result = asyncio.run(
+                    self.data_collector.get_average_daily_consumption(days=7)
+                )
+            
+            if result.get('available', False):
+                self._cached_avg_consumption_kwh = result.get('avg_daily_kwh', 0.0)
+                self._consumption_cache_time = datetime.now()
+                logger.debug(f"Cached average daily consumption: {self._cached_avg_consumption_kwh:.1f} kWh")
+                return self._cached_avg_consumption_kwh
+            
+            return 0.0
+            
+        except Exception as e:
+            logger.warning(f"Failed to get average daily consumption: {e}")
+            return self._cached_avg_consumption_kwh or 0.0
+
     def analyze_power_balance(self, current_data: Dict[str, Any]) -> PowerBalance:
         """Analyze current power balance between PV, consumption, and battery"""
         try:
@@ -592,8 +666,19 @@ class PVConsumptionAnalyzer:
                     grid_needed_kwh=0
                 )
             
-            # Calculate energy needed for night charging
-            target_soc = self.max_night_charging_soc
+            # Determine target SOC based on PV forecast
+            # If poor PV expected tomorrow, charge to 100%; otherwise use normal max (80%)
+            pv_analysis = tomorrow_analysis.get('pv_analysis', {})
+            is_poor_pv = pv_analysis.get('is_poor_pv', False)
+            
+            if is_poor_pv:
+                target_soc = self.night_charging_target_soc_poor_pv  # 100%
+                charging_reason = f"Poor PV tomorrow ({pv_analysis.get('reason', 'unknown')}) - charging to {target_soc}%"
+                logger.info(f"Night charging target: {target_soc}% (poor PV expected)")
+            else:
+                target_soc = self.max_night_charging_soc  # 80%
+                charging_reason = f"Normal night charging to {target_soc}%"
+            
             energy_needed_kwh = (target_soc - battery_soc) / 100 * self.battery_capacity_kwh
             
             # Calculate charging duration
@@ -606,7 +691,7 @@ class PVConsumptionAnalyzer:
                 should_charge=True,
                 charging_source='grid',
                 priority='critical',
-                reason=f"Night charging for high price day preparation: {tomorrow_analysis['reason']}",
+                reason=f"{charging_reason}: {tomorrow_analysis['reason']}",
                 estimated_duration_hours=charging_duration_hours,
                 energy_needed_kwh=energy_needed_kwh,
                 confidence=tomorrow_analysis['confidence'],
@@ -789,54 +874,107 @@ class PVConsumptionAnalyzer:
             }
     
     def _analyze_tomorrow_pv_forecast(self, pv_forecast: List[Dict]) -> Dict[str, Any]:
-        """Analyze tomorrow's PV forecast to determine if it's poor"""
+        """Analyze tomorrow's PV forecast to determine if it's poor.
+        
+        Poor PV is defined as:
+        - Average hourly PV < 0.3 kWh/hour (configurable via poor_pv_threshold_kwh_per_hour), OR
+        - Total PV forecast < average daily house consumption (if comparison enabled)
+        
+        On API failure or missing forecast: assumes poor PV (conservative fallback).
+        """
         try:
+            # Conservative fallback if no forecast available
             if not pv_forecast:
+                if self.assume_poor_pv_on_api_failure:
+                    logger.warning("No PV forecast available - assuming poor PV (conservative)")
+                    return {
+                        'is_poor_pv': True,
+                        'avg_pv_kw': 0.0,
+                        'total_pv_kwh': 0.0,
+                        'confidence': 0.6,
+                        'reason': 'No PV forecast available - assuming poor PV for safety'
+                    }
                 return {
                     'is_poor_pv': False,
                     'avg_pv_kw': 0.0,
+                    'total_pv_kwh': 0.0,
                     'confidence': 0.0,
                     'reason': 'No PV forecast available'
                 }
             
-            # Calculate average PV power for tomorrow (assuming forecast covers next 24h)
-            total_pv_power = 0.0
+            # Calculate total and average PV power for tomorrow
+            total_pv_energy_kwh = 0.0
             valid_forecasts = 0
             
             for forecast in pv_forecast:
                 pv_power_kw = forecast.get('forecasted_power_kw', 0)
                 if pv_power_kw > 0:
-                    total_pv_power += pv_power_kw
+                    # Assume each forecast represents 1 hour
+                    total_pv_energy_kwh += pv_power_kw
                     valid_forecasts += 1
             
             if valid_forecasts == 0:
                 return {
                     'is_poor_pv': True,
                     'avg_pv_kw': 0.0,
+                    'total_pv_kwh': 0.0,
                     'confidence': 0.8,
                     'reason': 'No PV production forecasted'
                 }
             
-            avg_pv_kw = total_pv_power / valid_forecasts
+            avg_pv_kw = total_pv_energy_kwh / valid_forecasts if valid_forecasts > 0 else 0.0
             
-            # Consider poor PV if average is below 25th percentile of system capacity
-            poor_pv_threshold = self.pv_capacity_kw * (self.poor_pv_threshold_percentile / 100)
-            is_poor_pv = avg_pv_kw < poor_pv_threshold
+            # Check 1: Is average PV < threshold (default: 0.3 kWh/hour)?
+            is_below_threshold = avg_pv_kw < self.poor_pv_threshold_kwh_per_hour
+            
+            # Check 2: Is PV < average daily consumption? (if enabled)
+            is_below_consumption = False
+            consumption_comparison_reason = ""
+            
+            if self.poor_pv_use_consumption_comparison:
+                avg_consumption_kwh = self._get_average_daily_consumption()
+                if avg_consumption_kwh > 0:
+                    is_below_consumption = total_pv_energy_kwh < avg_consumption_kwh
+                    consumption_comparison_reason = f", consumption: {avg_consumption_kwh:.1f}kWh"
+            
+            # Poor PV if either condition is true
+            is_poor_pv = is_below_threshold or is_below_consumption
+            
+            # Build reason string
+            reasons = []
+            if is_below_threshold:
+                reasons.append(f"avg PV ({avg_pv_kw:.2f}kW/h) < threshold ({self.poor_pv_threshold_kwh_per_hour}kW/h)")
+            if is_below_consumption:
+                reasons.append(f"PV ({total_pv_energy_kwh:.1f}kWh) < consumption ({avg_consumption_kwh:.1f}kWh)")
+            
+            if not reasons and not is_poor_pv:
+                reasons.append(f"Good PV expected: {total_pv_energy_kwh:.1f}kWh{consumption_comparison_reason}")
             
             confidence = min(0.9, valid_forecasts / 24)  # More forecasts = higher confidence
             
             return {
                 'is_poor_pv': is_poor_pv,
                 'avg_pv_kw': avg_pv_kw,
+                'total_pv_kwh': total_pv_energy_kwh,
                 'confidence': confidence,
-                'reason': f'Average PV: {avg_pv_kw:.1f}kW (threshold: {poor_pv_threshold:.1f}kW)'
+                'reason': '; '.join(reasons)
             }
             
         except Exception as e:
             logger.error(f"Failed to analyze tomorrow PV forecast: {e}")
+            # Conservative fallback on error
+            if self.assume_poor_pv_on_api_failure:
+                return {
+                    'is_poor_pv': True,
+                    'avg_pv_kw': 0.0,
+                    'total_pv_kwh': 0.0,
+                    'confidence': 0.5,
+                    'reason': f'PV forecast analysis error: {e} - assuming poor PV'
+                }
             return {
                 'is_poor_pv': False,
                 'avg_pv_kw': 0.0,
+                'total_pv_kwh': 0.0,
                 'confidence': 0.0,
                 'reason': f'PV forecast analysis error: {e}'
             }

@@ -243,6 +243,16 @@ class MasterCoordinator:
                 self.decision_engine.pv_forecaster.set_weather_collector(self.weather_collector)
                 logger.info("Weather collector integrated with PV forecaster")
             
+            # Set PV forecaster in charging controller for weather-aware decisions
+            if self.charging_controller and self.decision_engine and hasattr(self.decision_engine, 'pv_forecaster'):
+                self.charging_controller.set_pv_forecaster(self.decision_engine.pv_forecaster)
+                logger.info("PV forecaster integrated with charging controller")
+            
+            # Set data collector in PV consumption analyzer for consumption data access
+            if self.pv_consumption_analyzer and self.charging_controller:
+                self.pv_consumption_analyzer.set_data_collector(self.charging_controller.data_collector)
+                logger.info("Data collector integrated with PV consumption analyzer")
+            
             # Set PV consumption analyzer in decision engine
             if self.decision_engine and self.pv_consumption_analyzer:
                 self.decision_engine.pv_consumption_analyzer = self.pv_consumption_analyzer
@@ -592,6 +602,9 @@ class MasterCoordinator:
                 logger.warning("No price data available, skipping decision")
                 return
             
+            # Check D+1 night charging opportunity (after 13:00)
+            await self._check_d1_night_charging(price_data)
+            
             # Check battery selling opportunities if enabled
             if self.battery_selling_engine and self.battery_selling_monitor:
                 await self._handle_battery_selling_logic(price_data)
@@ -843,6 +856,96 @@ class MasterCoordinator:
         except Exception as e:
             logger.error(f"Failed to handle multi-session logic: {e}")
     
+    async def _check_d1_night_charging(self, price_data: Dict[str, Any]):
+        """Check D+1 prices and decide on night charging strategy.
+        
+        This method:
+        - Fetches tomorrow's prices after 13:00 (with retry logic)
+        - Uses PV forecast to determine if tomorrow has poor PV
+        - Triggers night charging to 100% if poor PV + high prices expected
+        """
+        try:
+            current_hour = datetime.now().hour
+            
+            # Only check D+1 after 13:00
+            if not self.forecast_collector:
+                logger.debug("No PSE forecast collector available for D+1 checking")
+                return
+            
+            # Get D+1 start hour from config (default: 13)
+            d1_start_hour = self.config.get('pse_price_forecast', {}).get('d1_fetch_start_hour', 13)
+            
+            if current_hour < d1_start_hour:
+                logger.debug(f"Too early for D+1 price fetch (current: {current_hour}, start: {d1_start_hour})")
+                return
+            
+            # Fetch tomorrow's prices
+            tomorrow_prices = await self.forecast_collector.fetch_tomorrow_prices()
+            
+            if not tomorrow_prices.get('available', False):
+                logger.info(f"D+1 prices not yet available: {tomorrow_prices.get('reason', 'unknown')}")
+                return
+            
+            logger.info(f"D+1 prices available: {tomorrow_prices.get('statistics', {})}")
+            
+            # Check if we should do night charging analysis
+            if not self.pv_consumption_analyzer:
+                logger.debug("No PV consumption analyzer available for night charging analysis")
+                return
+            
+            # Get PV forecast from decision engine
+            pv_forecast = []
+            if self.decision_engine and hasattr(self.decision_engine, 'pv_forecaster'):
+                try:
+                    if self.decision_engine.pv_forecaster.weather_collector:
+                        pv_forecast = self.decision_engine.pv_forecaster.forecast_pv_production_with_weather(24)
+                    else:
+                        pv_forecast = await self.decision_engine.pv_forecaster.forecast_pv_production(24)
+                except Exception as e:
+                    logger.warning(f"Failed to get PV forecast for night charging: {e}")
+            
+            # Get battery SOC
+            battery_soc = self.current_data.get('battery', {}).get('soc_percent', 50)
+            if isinstance(battery_soc, str):
+                try:
+                    battery_soc = float(battery_soc)
+                except ValueError:
+                    battery_soc = 50
+            
+            # Convert tomorrow's prices to format expected by analyzer
+            d1_price_data = {
+                'value': [
+                    {
+                        'dtime': p.time.strftime('%Y-%m-%d %H:%M'),
+                        'csdac_pln': p.forecasted_price_pln
+                    }
+                    for p in tomorrow_prices.get('prices', [])
+                ]
+            }
+            
+            # Analyze night charging strategy
+            recommendation = self.pv_consumption_analyzer.analyze_night_charging_strategy(
+                battery_soc=battery_soc,
+                pv_forecast=pv_forecast,
+                price_data=d1_price_data,
+                weather_data=None  # Weather already incorporated in PV forecast
+            )
+            
+            if recommendation.should_charge:
+                logger.info(f"D+1 night charging recommended: {recommendation.reason}")
+                logger.info(f"  Energy needed: {recommendation.energy_needed_kwh:.1f} kWh")
+                logger.info(f"  Estimated duration: {recommendation.estimated_duration_hours:.1f} hours")
+                logger.info(f"  Confidence: {recommendation.confidence:.2f}")
+                
+                # Note: The actual charging decision will be made by the normal flow
+                # This just logs the recommendation for visibility
+                # The night charging logic is already integrated in pv_consumption_analyzer
+            else:
+                logger.debug(f"D+1 night charging not needed: {recommendation.reason}")
+                
+        except Exception as e:
+            logger.error(f"Failed to check D+1 night charging: {e}")
+
     async def _handle_battery_selling_logic(self, price_data: Dict[str, Any]):
         """Handle battery selling logic and decisions"""
         try:

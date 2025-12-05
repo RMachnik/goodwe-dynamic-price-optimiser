@@ -63,6 +63,17 @@ class PSEPriceForecastCollector:
         self.retry_attempts = fallback_config.get('retry_attempts', 3)
         self.retry_delay_seconds = fallback_config.get('retry_delay_seconds', 60)
         
+        # D+1 (tomorrow) price fetching configuration
+        self.d1_fetch_start_hour = forecast_config.get('d1_fetch_start_hour', 13)
+        self.d1_retry_interval_minutes = forecast_config.get('d1_retry_interval_minutes', 30)
+        self.d1_max_retries = forecast_config.get('d1_max_retries', 3)
+        
+        # D+1 cache (separate from regular forecast cache)
+        self.tomorrow_prices_cache: List[PriceForecastPoint] = []
+        self.tomorrow_prices_date: Optional[datetime] = None
+        self.tomorrow_prices_last_fetch: Optional[datetime] = None
+        self.tomorrow_prices_retry_count: int = 0
+        
         # Cache
         self.forecast_cache: List[PriceForecastPoint] = []
         self.last_update_time: Optional[datetime] = None
@@ -451,4 +462,225 @@ class PSEPriceForecastCollector:
         self.forecast_cache = []
         self.last_update_time = None
         logger.info("Forecast cache cleared")
+
+    async def fetch_tomorrow_prices(self) -> Dict[str, Any]:
+        """
+        Fetch D+1 (tomorrow's) prices from PSE API with retry logic.
+        
+        PSE publishes next-day prices around 12:42 (CSDAC). This method:
+        - Only attempts fetching after d1_fetch_start_hour (default: 13:00)
+        - Retries up to d1_max_retries times at d1_retry_interval_minutes intervals
+        - Caches results and returns from cache on subsequent calls
+        
+        Returns:
+            Dictionary with:
+            - available: bool - whether tomorrow's prices are available
+            - prices: List[PriceForecastPoint] - price data for tomorrow
+            - statistics: Dict - min/max/avg prices
+            - reason: str - explanation of result
+        """
+        current_time = datetime.now()
+        current_hour = current_time.hour
+        tomorrow = (current_time + timedelta(days=1)).date()
+        
+        # Check if we already have valid cached data for tomorrow
+        if (self.tomorrow_prices_cache and 
+            self.tomorrow_prices_date and 
+            self.tomorrow_prices_date == tomorrow):
+            logger.debug(f"Returning cached D+1 prices for {tomorrow}")
+            return self._format_tomorrow_prices_response(
+                available=True,
+                prices=self.tomorrow_prices_cache,
+                reason=f"Cached D+1 prices for {tomorrow}"
+            )
+        
+        # Check if it's too early to fetch
+        if current_hour < self.d1_fetch_start_hour:
+            return self._format_tomorrow_prices_response(
+                available=False,
+                prices=[],
+                reason=f"Too early to fetch D+1 prices (before {self.d1_fetch_start_hour}:00)"
+            )
+        
+        # Check if we've exceeded max retries for today
+        if self.tomorrow_prices_retry_count >= self.d1_max_retries:
+            # Check if enough time has passed since last retry for a new attempt
+            if self.tomorrow_prices_last_fetch:
+                minutes_since_last = (current_time - self.tomorrow_prices_last_fetch).total_seconds() / 60
+                if minutes_since_last < self.d1_retry_interval_minutes:
+                    return self._format_tomorrow_prices_response(
+                        available=False,
+                        prices=[],
+                        reason=f"Max retries ({self.d1_max_retries}) reached, waiting for next interval"
+                    )
+            # Reset retry count for new interval
+            self.tomorrow_prices_retry_count = 0
+        
+        # Attempt to fetch tomorrow's prices
+        try:
+            logger.info(f"Fetching D+1 prices for {tomorrow} (attempt {self.tomorrow_prices_retry_count + 1}/{self.d1_max_retries})")
+            
+            # Build API URL with tomorrow's date filter
+            tomorrow_str = tomorrow.strftime('%Y-%m-%d')
+            api_url_with_filter = f"{self.api_url}?$filter=business_date eq '{tomorrow_str}'"
+            
+            logger.debug(f"D+1 API URL: {api_url_with_filter}")
+            
+            # Fetch data from API
+            if AIOHTTP_AVAILABLE:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(api_url_with_filter, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                        response.raise_for_status()
+                        data = await response.json()
+            else:
+                import requests
+                response = requests.get(api_url_with_filter, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+            
+            # Parse the response
+            raw_count = len(data.get('value', []))
+            logger.debug(f"Received {raw_count} records for D+1 prices")
+            
+            if raw_count == 0:
+                self.tomorrow_prices_retry_count += 1
+                self.tomorrow_prices_last_fetch = current_time
+                return self._format_tomorrow_prices_response(
+                    available=False,
+                    prices=[],
+                    reason=f"No D+1 prices available yet for {tomorrow} (attempt {self.tomorrow_prices_retry_count}/{self.d1_max_retries})"
+                )
+            
+            # Parse tomorrow's price data
+            tomorrow_prices = self._parse_tomorrow_prices(data, tomorrow)
+            
+            if not tomorrow_prices:
+                self.tomorrow_prices_retry_count += 1
+                self.tomorrow_prices_last_fetch = current_time
+                return self._format_tomorrow_prices_response(
+                    available=False,
+                    prices=[],
+                    reason=f"Failed to parse D+1 prices for {tomorrow}"
+                )
+            
+            # Successfully fetched - cache the results
+            self.tomorrow_prices_cache = tomorrow_prices
+            self.tomorrow_prices_date = tomorrow
+            self.tomorrow_prices_last_fetch = current_time
+            self.tomorrow_prices_retry_count = 0  # Reset on success
+            
+            logger.info(f"Successfully fetched {len(tomorrow_prices)} D+1 price points for {tomorrow}")
+            
+            return self._format_tomorrow_prices_response(
+                available=True,
+                prices=tomorrow_prices,
+                reason=f"Successfully fetched D+1 prices for {tomorrow}"
+            )
+            
+        except Exception as e:
+            self.tomorrow_prices_retry_count += 1
+            self.tomorrow_prices_last_fetch = current_time
+            logger.error(f"Failed to fetch D+1 prices: {e}")
+            
+            return self._format_tomorrow_prices_response(
+                available=False,
+                prices=[],
+                reason=f"API error: {str(e)}"
+            )
+    
+    def _parse_tomorrow_prices(self, data: Dict, target_date: datetime) -> List[PriceForecastPoint]:
+        """Parse price data for a specific date (tomorrow)."""
+        forecast_points = []
+        
+        try:
+            for item in data.get('value', []):
+                time_str = item.get('dtime')
+                if not time_str:
+                    continue
+                
+                # Parse timestamp
+                try:
+                    if ':' in time_str and time_str.count(':') == 2:
+                        dt = datetime.strptime(time_str, '%Y-%m-%d %H:%M:%S')
+                    else:
+                        dt = datetime.strptime(time_str, '%Y-%m-%d %H:%M')
+                except ValueError:
+                    continue
+                
+                # Only include prices for target date
+                if dt.date() != target_date:
+                    continue
+                
+                # Extract price (prefer CSDAC day-ahead price)
+                forecasted_price = item.get('csdac_pln') or item.get('cen_cost')
+                if forecasted_price is None:
+                    continue
+                
+                forecast_point = PriceForecastPoint(
+                    time=dt,
+                    forecasted_price_pln=float(forecasted_price),
+                    confidence=1.0,
+                    forecast_type='day_ahead',
+                    period=item.get('period', '')
+                )
+                forecast_points.append(forecast_point)
+            
+            # Sort by time
+            forecast_points.sort(key=lambda x: x.time)
+            
+        except Exception as e:
+            logger.error(f"Error parsing tomorrow's prices: {e}")
+            return []
+        
+        return forecast_points
+    
+    def _format_tomorrow_prices_response(self, available: bool, prices: List[PriceForecastPoint], 
+                                         reason: str) -> Dict[str, Any]:
+        """Format the response for fetch_tomorrow_prices."""
+        response = {
+            'available': available,
+            'prices': prices,
+            'reason': reason,
+            'retry_count': self.tomorrow_prices_retry_count,
+            'next_retry_minutes': self.d1_retry_interval_minutes if not available else None
+        }
+        
+        if available and prices:
+            price_values = [p.forecasted_price_pln for p in prices]
+            response['statistics'] = {
+                'min_price_pln_mwh': min(price_values),
+                'max_price_pln_mwh': max(price_values),
+                'avg_price_pln_mwh': statistics.mean(price_values),
+                'median_price_pln_mwh': statistics.median(price_values),
+                'price_count': len(prices),
+                'date': self.tomorrow_prices_date.isoformat() if self.tomorrow_prices_date else None
+            }
+        else:
+            response['statistics'] = None
+        
+        return response
+    
+    def is_tomorrow_prices_available(self) -> bool:
+        """Check if tomorrow's prices are cached and available."""
+        tomorrow = (datetime.now() + timedelta(days=1)).date()
+        return (bool(self.tomorrow_prices_cache) and 
+                self.tomorrow_prices_date == tomorrow)
+    
+    def get_tomorrow_price_at_hour(self, hour: int) -> Optional[float]:
+        """Get tomorrow's price for a specific hour.
+        
+        Args:
+            hour: Hour of the day (0-23)
+            
+        Returns:
+            Price in PLN/MWh or None if not available
+        """
+        if not self.is_tomorrow_prices_available():
+            return None
+        
+        for price_point in self.tomorrow_prices_cache:
+            if price_point.time.hour == hour:
+                return price_point.forecasted_price_pln
+        
+        return None
 

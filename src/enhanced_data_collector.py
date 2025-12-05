@@ -490,6 +490,146 @@ class EnhancedDataCollector:
         """Get current system data"""
         return self.current_data.copy() if self.current_data else {}
     
+    async def get_average_daily_consumption(self, days: int = 7) -> Dict[str, Any]:
+        """
+        Get average daily house consumption over the specified number of days.
+        
+        Uses storage layer to query historical data and calculate realistic 
+        average consumption for comparison with PV forecast.
+        
+        Args:
+            days: Number of days to look back (default: 7)
+            
+        Returns:
+            Dictionary with:
+            - available: bool - whether data was successfully retrieved
+            - avg_daily_kwh: float - average daily consumption in kWh
+            - min_daily_kwh: float - minimum daily consumption
+            - max_daily_kwh: float - maximum daily consumption
+            - days_with_data: int - number of days with valid data
+            - confidence: float - confidence level (0.0-1.0) based on data availability
+            - reason: str - explanation of result
+        """
+        result = {
+            'available': False,
+            'avg_daily_kwh': 0.0,
+            'min_daily_kwh': 0.0,
+            'max_daily_kwh': 0.0,
+            'days_with_data': 0,
+            'confidence': 0.0,
+            'reason': ''
+        }
+        
+        try:
+            end_time = datetime.now()
+            start_time = end_time - timedelta(days=days)
+            
+            # Query energy data from storage
+            energy_data = await self.storage.get_energy_data(start_time, end_time)
+            
+            if not energy_data:
+                # Fallback to in-memory historical data
+                energy_data = list(self.historical_data)
+                if not energy_data:
+                    result['reason'] = f"No historical consumption data available for the last {days} days"
+                    return result
+            
+            # Group data by day and calculate daily consumption
+            daily_consumption: Dict[str, float] = {}
+            
+            for entry in energy_data:
+                try:
+                    # Get timestamp
+                    ts = entry.get('timestamp')
+                    if isinstance(ts, str):
+                        ts = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                    elif not isinstance(ts, datetime):
+                        continue
+                    
+                    date_str = ts.strftime('%Y-%m-%d')
+                    
+                    # Get consumption value (check multiple possible field names)
+                    consumption_w = (
+                        entry.get('house_consumption') or  # From flattened storage
+                        entry.get('house_consumption', {}).get('current_power_w') or  # From nested structure
+                        entry.get('consumption', {}).get('power_w') or  # Alternative field
+                        0
+                    )
+                    
+                    if isinstance(consumption_w, dict):
+                        consumption_w = consumption_w.get('current_power_w', 0)
+                    
+                    if consumption_w is None or consumption_w == 'Unknown':
+                        consumption_w = 0
+                    
+                    consumption_w = float(consumption_w)
+                    
+                    # Accumulate energy (convert power to energy based on interval)
+                    # Assume 20-second intervals (3 measurements per minute)
+                    energy_kwh = consumption_w / 1000.0 / 180.0  # kWh per 20-second interval
+                    
+                    if date_str not in daily_consumption:
+                        daily_consumption[date_str] = 0.0
+                    daily_consumption[date_str] += energy_kwh
+                    
+                except Exception as e:
+                    logger.debug(f"Error processing energy entry: {e}")
+                    continue
+            
+            if not daily_consumption:
+                result['reason'] = "Failed to extract consumption data from historical records"
+                return result
+            
+            # Calculate statistics
+            consumption_values = list(daily_consumption.values())
+            
+            # Filter out days with very low data (likely incomplete)
+            # A typical day should have at least some minimum consumption
+            min_valid_consumption = 0.5  # kWh - minimum to consider a day valid
+            valid_days = [c for c in consumption_values if c >= min_valid_consumption]
+            
+            if not valid_days:
+                # If no valid days, use all data but with lower confidence
+                valid_days = consumption_values
+                confidence_penalty = 0.5
+            else:
+                confidence_penalty = 1.0
+            
+            avg_consumption = sum(valid_days) / len(valid_days) if valid_days else 0.0
+            
+            result['available'] = True
+            result['avg_daily_kwh'] = round(avg_consumption, 2)
+            result['min_daily_kwh'] = round(min(valid_days) if valid_days else 0.0, 2)
+            result['max_daily_kwh'] = round(max(valid_days) if valid_days else 0.0, 2)
+            result['days_with_data'] = len(valid_days)
+            
+            # Calculate confidence based on data availability
+            expected_days = days
+            actual_days = len(valid_days)
+            data_coverage = actual_days / expected_days if expected_days > 0 else 0.0
+            
+            # Higher confidence with more data
+            if data_coverage >= 0.8:
+                result['confidence'] = 0.9 * confidence_penalty
+            elif data_coverage >= 0.5:
+                result['confidence'] = 0.7 * confidence_penalty
+            elif data_coverage >= 0.2:
+                result['confidence'] = 0.5 * confidence_penalty
+            else:
+                result['confidence'] = 0.3 * confidence_penalty
+            
+            result['reason'] = f"Calculated from {len(valid_days)} days of data (coverage: {data_coverage:.0%})"
+            
+            logger.info(f"Average daily consumption: {result['avg_daily_kwh']:.2f} kWh "
+                       f"(from {result['days_with_data']} days, confidence: {result['confidence']:.1f})")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get average daily consumption: {e}")
+            result['reason'] = f"Error: {str(e)}"
+            return result
+
     def print_current_status(self):
         """Print current system status"""
         if not self.current_data:
