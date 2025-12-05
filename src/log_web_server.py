@@ -347,6 +347,9 @@ class LogWebServer:
                 return None
             
             # Validate business_date (today or tomorrow for next-day prices)
+            cached_date = cached.get('business_date', '')
+            today = datetime.now().strftime('%Y-%m-%d')
+            tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
             if cached_date not in [today, tomorrow]:
                 logger.debug(f"Price disk cache date mismatch: {cached_date} not in [{today}, {tomorrow}]")
                 return None
