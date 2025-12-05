@@ -4323,7 +4323,7 @@ class LogWebServer:
                 },
                 'grid': {
                     'current_power_w': grid_data.get('power_w', 0),
-                    'flow_direction': 'export' if grid_data.get('power_w', 0) < 0 else 'import',
+                    'flow_direction': grid_data.get('flow_direction', 'unknown'),  # Use from database
                     'daily_import_kwh': grid_data.get('today_imported_kwh', 0),
                     'daily_export_kwh': grid_data.get('today_exported_kwh', 0),
                     'l1_current_a': grid_data.get('l1_current_a', None),
@@ -4401,7 +4401,7 @@ class LogWebServer:
                 },
                 'grid': {
                     'current_power_w': grid_data.get('power_w', 0),
-                    'flow_direction': 'export' if grid_data.get('power_w', 0) < 0 else 'import',
+                    'flow_direction': grid_data.get('flow_direction', 'unknown'),  # Use from database
                     'daily_import_kwh': grid_data.get('today_imported_kwh', 0),
                     'daily_export_kwh': grid_data.get('today_exported_kwh', 0),
                     'l1_current_a': grid_data.get('l1_current_a', None),

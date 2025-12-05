@@ -285,16 +285,21 @@ class EnhancedDataCollector:
         return 0.0
     
     def _determine_grid_flow(self, grid_power: Any) -> str:
-        """Determine grid flow direction"""
+        """Determine grid flow direction
+        
+        GoodWe convention:
+        - Negative power = Import (consuming from grid)
+        - Positive power = Export (feeding to grid)
+        """
         try:
             if grid_power == 'Unknown' or grid_power is None:
                 return 'Unknown'
             
             power = float(grid_power)
             if power > 0:
-                return 'Import'  # Grid to house
+                return 'Export'  # House to grid (positive = feeding)
             elif power < 0:
-                return 'Export'  # House to grid
+                return 'Import'  # Grid to house (negative = consuming)
             else:
                 return 'Neutral'  # No flow
         except (ValueError, TypeError):
