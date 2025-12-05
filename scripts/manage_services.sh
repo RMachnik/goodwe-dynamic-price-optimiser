@@ -60,10 +60,29 @@ stop_services() {
     log "Stopping GoodWe Master Coordinator..."
     if check_service_exists; then
         if sudo systemctl stop "$SERVICE"; then
-            success "$SERVICE stopped successfully"
+            success "$SERVICE stopped via systemctl"
         else
-            error "Failed to stop $SERVICE"
+            warning "Failed to stop $SERVICE via systemctl, attempting manual cleanup..."
         fi
+        
+        # Additional cleanup for stuck processes
+        log "Checking for stuck processes..."
+        
+        # Kill master coordinator if still running
+        if pgrep -f "src/master_coordinator.py" > /dev/null; then
+            log "Found stuck master_coordinator process, killing..."
+            sudo pkill -f "src/master_coordinator.py" || true
+            sleep 1
+        fi
+        
+        # Kill web server if running standalone or stuck
+        if pgrep -f "src/log_web_server.py" > /dev/null; then
+             log "Found stuck log_web_server process, killing..."
+             sudo pkill -f "src/log_web_server.py" || true
+             sleep 1
+        fi
+        
+        success "Cleanup complete"
     fi
 }
 
