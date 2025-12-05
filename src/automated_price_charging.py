@@ -645,7 +645,7 @@ class AutomatedPriceCharger:
             # Price is acceptable for critical charging
             return {
                 'should_charge': True,
-                'reason': f'Critical battery ({battery_soc}%) + acceptable price ({current_price:.3f} PLN/kWh ≤ {critical_threshold:.3f} PLN/kWh)',
+                'reason': f'Low battery ({battery_soc}%) - charging at {current_price:.2f} PLN',
                 'priority': 'critical',
                 'confidence': 0.9
             }
@@ -668,14 +668,14 @@ class AutomatedPriceCharger:
                 if hours_to_wait <= 2:  # Price improvement is sooner
                     return {
                         'should_charge': False,
-                        'reason': f'Critical battery ({battery_soc}%) but much cheaper price in {hours_to_wait}h ({cheapest_price:.3f} vs {current_price:.3f} PLN/kWh, {savings_percent:.1f}% savings) + PV improving soon',
+                        'reason': f'Low battery ({battery_soc}%) - waiting {hours_to_wait:.0f}h for cheaper price + solar',
                         'priority': 'critical',
                         'confidence': 0.8
                     }
                 else:  # PV improvement is sooner
                     return {
                         'should_charge': False,
-                        'reason': f'Critical battery ({battery_soc}%) but PV production improving soon + good price savings in {hours_to_wait}h ({savings_percent:.1f}% savings)',
+                        'reason': f'Low battery ({battery_soc}%) - solar improving soon',
                         'priority': 'critical',
                         'confidence': 0.7
                     }
@@ -684,7 +684,7 @@ class AutomatedPriceCharger:
                 # Only PV will improve - wait for PV
                 return {
                     'should_charge': False,
-                    'reason': f'Critical battery ({battery_soc}%) but PV production improving soon - waiting for free solar charging',
+                    'reason': f'Low battery ({battery_soc}%) - waiting for free solar',
                     'priority': 'critical',
                     'confidence': 0.7
                 }
@@ -693,7 +693,7 @@ class AutomatedPriceCharger:
                 # Only price will improve - wait for better price
                 return {
                     'should_charge': False,
-                    'reason': f'Critical battery ({battery_soc}%) but much cheaper price in {hours_to_wait}h ({cheapest_price:.3f} vs {current_price:.3f} PLN/kWh, {savings_percent:.1f}% savings)',
+                    'reason': f'Low battery ({battery_soc}%) - waiting {hours_to_wait:.0f}h for {savings_percent:.0f}% cheaper price',
                     'priority': 'critical',
                     'confidence': 0.7
                 }
@@ -702,7 +702,7 @@ class AutomatedPriceCharger:
                 # Neither PV nor price will improve significantly - charge now
                 return {
                     'should_charge': True,
-                    'reason': f'Critical battery ({battery_soc}%) + high price ({current_price:.3f} PLN/kWh) but waiting {hours_to_wait}h for {savings_percent:.1f}% savings not optimal + no PV improvement expected',
+                    'reason': f'Low battery ({battery_soc}%) - charging now (no better option soon)',
                     'priority': 'critical',
                     'confidence': 0.8
                 }
@@ -737,7 +737,7 @@ class AutomatedPriceCharger:
         # All conditions met - proactive charging recommended
         return {
             'should_charge': True,
-            'reason': f'Proactive charging: PV poor ({current_pv_power}W < {self.pv_poor_threshold}W), battery low ({battery_soc}% < {self.battery_target_threshold}%), price good ({current_price:.3f} PLN/kWh ≤ {self.max_proactive_price} PLN/kWh), weather poor',
+            'reason': f'No solar, battery low ({battery_soc}%), good price - charging',
             'priority': 'proactive',
             'confidence': 0.8
         }
@@ -917,7 +917,7 @@ class AutomatedPriceCharger:
                 # PV can charge fully within time limit - use PV charging
                 return {
                     'should_charge': True,
-                    'reason': f'Super low price ({current_price:.3f} PLN/kWh) + PV excellent ({current_pv_power}W) + weather stable + house usage low - charging from PV to {self.super_low_price_target_soc}%',
+                    'reason': f'Very cheap ({current_price:.2f} PLN) + great solar - charging from PV',
                     'priority': 'super_low_price_pv',
                     'confidence': 0.9,
                     'charging_source': 'pv',
@@ -930,7 +930,7 @@ class AutomatedPriceCharger:
                 # PV excellent but takes too long - use grid charging for speed
                 return {
                     'should_charge': True,
-                    'reason': f'Super low price ({current_price:.3f} PLN/kWh) + PV excellent ({current_pv_power}W) but slow ({pv_charging_time:.1f}h > {self.pv_charging_time_limit}h) - charging from grid to {self.super_low_price_target_soc}%',
+                    'reason': f'Very cheap ({current_price:.2f} PLN) - fast grid charge (PV too slow)',
                     'priority': 'super_low_price_grid',
                     'confidence': 0.95,
                     'charging_source': 'grid',
@@ -943,15 +943,15 @@ class AutomatedPriceCharger:
             # PV not excellent or conditions not ideal - use grid charging
             pv_conditions = []
             if not pv_excellent:
-                pv_conditions.append(f"PV insufficient ({current_pv_power}W < {self.pv_excellent_threshold}W)")
+                pv_conditions.append("low solar")
             if not weather_stable:
-                pv_conditions.append("weather unstable")
+                pv_conditions.append("cloudy")
             if not house_usage_low:
-                pv_conditions.append("house usage high")
+                pv_conditions.append("high usage")
             
             return {
                 'should_charge': True,
-                'reason': f'Super low price ({current_price:.3f} PLN/kWh) + {", ".join(pv_conditions)} - charging from grid to {self.super_low_price_target_soc}%',
+                'reason': f'Very cheap ({current_price:.2f} PLN) - grid charging ({{", ".join(pv_conditions)}})',
                 'priority': 'super_low_price_grid',
                 'confidence': 0.95,
                 'charging_source': 'grid',
@@ -1001,7 +1001,7 @@ class AutomatedPriceCharger:
             # Fallback to old behavior if smart critical charging is disabled
             return {
                 'should_charge': True,
-                'reason': f'Critical battery level ({battery_soc}% < {self.critical_battery_threshold}%) - smart charging disabled',
+                'reason': f'Low battery ({battery_soc}%) - charging immediately',
                 'priority': 'critical',
                 'confidence': 1.0
             }
@@ -1010,7 +1010,7 @@ class AutomatedPriceCharger:
         if not current_price or not cheapest_price or not cheapest_hour:
             return {
                 'should_charge': True,
-                'reason': f'Critical battery level ({battery_soc}%) - no price data available',
+                'reason': f'Low battery ({battery_soc}%) - no price data, charging now',
                 'priority': 'critical',
                 'confidence': 0.8
             }
@@ -1028,7 +1028,7 @@ class AutomatedPriceCharger:
             high_threshold = self.get_high_price_threshold()
             return {
                 'should_charge': False,
-                'reason': f'Critical battery (10%) but high price ({current_price:.3f} PLN/kWh > {high_threshold:.3f} PLN/kWh) - waiting for price drop',
+                'reason': f'Low battery (10%) but price too high - waiting for drop',
                 'priority': 'critical',
                 'confidence': 0.9
             }
@@ -1062,14 +1062,14 @@ class AutomatedPriceCharger:
                 if hours_to_wait <= 2:  # Price improvement is sooner
                     return {
                         'should_charge': False,
-                        'reason': f'Critical battery ({battery_soc}%) but much cheaper price in {hours_to_wait}h ({cheapest_price:.3f} vs {current_price:.3f} PLN/kWh, {savings_percent:.1f}% savings) + PV improving soon',
+                        'reason': f'Low battery ({battery_soc}%) - cheaper price in {hours_to_wait:.0f}h + solar coming',
                         'priority': 'critical',
                         'confidence': 0.8
                     }
                 else:  # PV improvement is sooner
                     return {
                         'should_charge': False,
-                        'reason': f'Critical battery ({battery_soc}%) but PV production improving soon + good price savings in {hours_to_wait}h ({savings_percent:.1f}% savings)',
+                        'reason': f'Low battery ({battery_soc}%) - solar production improving soon',
                         'priority': 'critical',
                         'confidence': 0.7
                     }
@@ -1078,7 +1078,7 @@ class AutomatedPriceCharger:
                 # Only PV will improve - wait for PV
                 return {
                     'should_charge': False,
-                    'reason': f'Critical battery ({battery_soc}%) but PV production improving soon - waiting for free solar charging',
+                    'reason': f'Low battery ({battery_soc}%) - waiting for solar',
                     'priority': 'critical',
                     'confidence': 0.7
                 }
@@ -1087,7 +1087,7 @@ class AutomatedPriceCharger:
                 # Only price will improve - wait for better price
                 return {
                     'should_charge': False,
-                    'reason': f'Critical battery ({battery_soc}%) but much cheaper price in {hours_to_wait}h ({cheapest_price:.3f} vs {current_price:.3f} PLN/kWh, {savings_percent:.1f}% savings)',
+                    'reason': f'Low battery ({battery_soc}%) - {savings_percent:.0f}% cheaper price in {hours_to_wait:.0f}h',
                     'priority': 'critical',
                     'confidence': 0.7
                 }
@@ -1096,7 +1096,7 @@ class AutomatedPriceCharger:
                 # Neither PV nor price will improve significantly - charge now
                 return {
                     'should_charge': True,
-                    'reason': f'Critical battery ({battery_soc}%) + high price ({current_price:.3f} PLN/kWh) but waiting {hours_to_wait}h for {savings_percent:.1f}% savings not optimal + no PV improvement expected',
+                    'reason': f'Low battery ({battery_soc}%) - charging (no better option)',
                     'priority': 'critical',
                     'confidence': 0.8
                 }
@@ -1499,7 +1499,7 @@ class AutomatedPriceCharger:
             if cheapest_next_12h is None:
                 return {
                     'should_charge': False,
-                    'reason': 'OPPORTUNISTIC tier: cannot determine future prices',
+                    'reason': 'No price forecast available - waiting',
                     'priority': 'low',
                     'confidence': 0.3
                 }
@@ -1523,7 +1523,7 @@ class AutomatedPriceCharger:
                         if evening_avg > current_price * self.evening_price_multiplier:
                             return {
                                 'should_charge': True,
-                                'reason': f'OPPORTUNISTIC tier: charging before evening peak (current {current_price:.3f} PLN/kWh, evening forecast avg {evening_avg:.3f} PLN/kWh, {hours_until:.1f}h until peak)',
+                                'reason': f'Charging before evening peak ({hours_until:.0f}h away) - price will rise to ~{evening_avg:.2f} PLN',
                                 'priority': 'medium',
                                 'confidence': 0.75
                             }
@@ -1536,14 +1536,14 @@ class AutomatedPriceCharger:
             if current_price <= threshold:
                 return {
                     'should_charge': True,
-                    'reason': f'OPPORTUNISTIC tier: price {current_price:.3f} ≤ cheapest_12h {cheapest_next_12h:.3f} × 1.15 = {threshold:.3f} PLN/kWh',
+                    'reason': f'Near best price today ({current_price:.2f} PLN) - charging now',
                     'priority': 'medium',
                     'confidence': 0.75
                 }
             else:
                 return {
                     'should_charge': False,
-                    'reason': f'OPPORTUNISTIC tier: price {current_price:.3f} > threshold {threshold:.3f} PLN/kWh (wait for cheaper)',
+                    'reason': f'Cheaper price coming ({cheapest_next_12h:.2f} PLN) - waiting',
                     'priority': 'low',
                     'confidence': 0.7
                 }
@@ -1560,14 +1560,14 @@ class AutomatedPriceCharger:
         if self._is_price_cheap_for_normal_tier(current_price, battery_soc, price_data):
             return {
                 'should_charge': True,
-                'reason': f'NORMAL tier: price {current_price:.3f} PLN/kWh is historically cheap (≤40th percentile or ≤60th percentile with SOC {battery_soc}% < 85%)',
+                'reason': f'Good price ({current_price:.2f} PLN) - topping up battery',
                 'priority': 'low',
                 'confidence': 0.65
             }
         else:
             return {
                 'should_charge': False,
-                'reason': f'NORMAL tier: battery {battery_soc}% well charged, price {current_price:.3f} PLN/kWh not cheap enough',
+                'reason': f'Battery OK ({battery_soc}%), waiting for better price',
                 'priority': 'low',
                 'confidence': 0.6
             }

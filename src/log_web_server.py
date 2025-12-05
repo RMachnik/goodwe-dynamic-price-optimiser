@@ -2055,19 +2055,14 @@ class LogWebServer:
             <div class="card">
                 <h3>Today's Electricity Prices</h3>
                 <div id="prices-summary" style="margin-bottom: 20px;">Loading summary...</div>
-                <div class="table-container" style="overflow-x: auto;">
-                    <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
-                        <thead>
-                            <tr style="background: var(--bg-tertiary); text-align: left;">
-                                <th style="padding: 12px; border-bottom: 2px solid var(--border-color);">Hour</th>
-                                <th style="padding: 12px; border-bottom: 2px solid var(--border-color);">Price (PLN/kWh)</th>
-                                <th style="padding: 12px; border-bottom: 2px solid var(--border-color);">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="prices-table-body">
-                            <!-- Populated by JS -->
-                        </tbody>
-                    </table>
+                <div id="prices-legend" style="display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; font-size: 0.85em;">
+                    <span><span style="display: inline-block; width: 14px; height: 14px; background: #28a745; border-radius: 3px; vertical-align: middle; margin-right: 4px;"></span> Cheap (below avg)</span>
+                    <span><span style="display: inline-block; width: 14px; height: 14px; background: #dc3545; border-radius: 3px; vertical-align: middle; margin-right: 4px;"></span> Expensive (above avg)</span>
+                    <span><span style="display: inline-block; width: 14px; height: 14px; background: linear-gradient(135deg, #ffd700, #ff8c00); border-radius: 3px; vertical-align: middle; margin-right: 4px;"></span> Peak (highest)</span>
+                    <span><span style="display: inline-block; width: 14px; height: 14px; border: 2px solid var(--accent-primary); border-radius: 3px; vertical-align: middle; margin-right: 4px;"></span> Current hour</span>
+                </div>
+                <div id="prices-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px;">
+                    <!-- Populated by JS -->
                 </div>
             </div>
         </div>
@@ -2562,53 +2557,108 @@ class LogWebServer:
                         return;
                     }
                     
-                    // Summary
+                    const avg = data.average_price_pln_kwh;
+                    const cheapest = data.cheapest_price_pln_kwh;
+                    const currentHour = new Date().getHours();
+                    
+                    // Find peak (most expensive) price
+                    let peakPrice = 0;
+                    let peakHour = '';
+                    if (data.prices && Array.isArray(data.prices)) {
+                        data.prices.forEach(p => {
+                            if (p.price > peakPrice) {
+                                peakPrice = p.price;
+                                peakHour = p.hour_str;
+                            }
+                        });
+                    }
+                    
+                    // Summary with peak info
                     const summaryHtml = `
-                        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
-                            <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                                <div style="font-size: 0.9em; color: var(--text-secondary);">Current Price</div>
-                                <div style="font-size: 1.2em; font-weight: bold; color: var(--text-primary);">${data.current_price_pln_kwh} PLN/kWh</div>
+                        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
+                            <div style="background: var(--bg-secondary); padding: 12px 16px; border-radius: 10px; border-left: 4px solid var(--accent-primary);">
+                                <div style="font-size: 0.8em; color: var(--text-secondary); margin-bottom: 4px;">Current</div>
+                                <div style="font-size: 1.3em; font-weight: bold; color: var(--text-primary);">${data.current_price_pln_kwh} PLN</div>
                             </div>
-                            <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                                <div style="font-size: 0.9em; color: var(--text-secondary);">Cheapest Price</div>
-                                <div style="font-size: 1.2em; font-weight: bold; color: var(--success);">${data.cheapest_price_pln_kwh} PLN/kWh</div>
-                                <div style="font-size: 0.8em; color: var(--text-muted);">at ${data.cheapest_hour}</div>
+                            <div style="background: var(--bg-secondary); padding: 12px 16px; border-radius: 10px; border-left: 4px solid #28a745;">
+                                <div style="font-size: 0.8em; color: var(--text-secondary); margin-bottom: 4px;">Cheapest</div>
+                                <div style="font-size: 1.3em; font-weight: bold; color: #28a745;">${cheapest} PLN</div>
+                                <div style="font-size: 0.75em; color: var(--text-muted);">at ${data.cheapest_hour}</div>
                             </div>
-                            <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
-                                <div style="font-size: 0.9em; color: var(--text-secondary);">Average Price</div>
-                                <div style="font-size: 1.2em; font-weight: bold; color: var(--text-primary);">${data.average_price_pln_kwh} PLN/kWh</div>
+                            <div style="background: var(--bg-secondary); padding: 12px 16px; border-radius: 10px; border-left: 4px solid #dc3545;">
+                                <div style="font-size: 0.8em; color: var(--text-secondary); margin-bottom: 4px;">Peak</div>
+                                <div style="font-size: 1.3em; font-weight: bold; color: #dc3545;">${peakPrice.toFixed(4)} PLN</div>
+                                <div style="font-size: 0.75em; color: var(--text-muted);">at ${peakHour}</div>
+                            </div>
+                            <div style="background: var(--bg-secondary); padding: 12px 16px; border-radius: 10px; border-left: 4px solid var(--text-secondary);">
+                                <div style="font-size: 0.8em; color: var(--text-secondary); margin-bottom: 4px;">Average</div>
+                                <div style="font-size: 1.3em; font-weight: bold; color: var(--text-primary);">${avg} PLN</div>
                             </div>
                         </div>
                     `;
                     document.getElementById('prices-summary').innerHTML = summaryHtml;
                     
-                    // Table
-                    const currentHour = new Date().getHours();
-                    let tableHtml = '';
+                    // Grid of price cards
+                    let gridHtml = '';
                     
                     if (data.prices && Array.isArray(data.prices)) {
+                        // Group by hour (take first price per hour for display)
+                        const hourlyPrices = {};
                         data.prices.forEach(p => {
+                            if (!hourlyPrices[p.hour]) {
+                                hourlyPrices[p.hour] = p;
+                            }
+                        });
+                        
+                        // Sort by hour and render
+                        Object.keys(hourlyPrices).sort((a, b) => parseInt(a) - parseInt(b)).forEach(hour => {
+                            const p = hourlyPrices[hour];
                             const isCurrent = p.hour === currentHour;
-                            const isCheapest = p.price === data.cheapest_price_pln_kwh;
-                            const rowStyle = isCurrent ? 'background: rgba(52, 152, 219, 0.1); font-weight: bold;' : '';
+                            const isCheapest = p.price === cheapest;
+                            const isPeak = p.price === peakPrice;
+                            const isAboveAvg = p.price > avg;
+                            const isBelowAvg = p.price < avg;
                             
-                            let status = '';
-                            if (isCurrent) status += '<span style="font-size: 0.8em; background: var(--accent-primary); color: white; padding: 2px 6px; border-radius: 4px; margin-right: 5px;">NOW</span>';
-                            if (isCheapest) status += '<span style="font-size: 0.8em; background: var(--success); color: white; padding: 2px 6px; border-radius: 4px;">BEST</span>';
+                            // Determine background color
+                            let bgColor = 'var(--bg-tertiary)';
+                            let borderColor = 'transparent';
+                            let priceColor = 'var(--text-primary)';
+                            let badge = '';
                             
-                            tableHtml += `
-                                <tr style="border-bottom: 1px solid var(--border-light); ${rowStyle}">
-                                    <td style="padding: 10px 12px;">${p.hour_str}</td>
-                                    <td style="padding: 10px 12px;">${p.price.toFixed(4)}</td>
-                                    <td style="padding: 10px 12px;">${status}</td>
-                                </tr>
+                            if (isPeak) {
+                                bgColor = 'rgba(220, 53, 69, 0.15)';
+                                priceColor = '#dc3545';
+                                badge = '<span style="position: absolute; top: 4px; right: 4px; font-size: 0.65em; background: linear-gradient(135deg, #ffd700, #ff8c00); color: #000; padding: 1px 4px; border-radius: 3px; font-weight: bold;">PEAK</span>';
+                            } else if (isCheapest) {
+                                bgColor = 'rgba(40, 167, 69, 0.2)';
+                                priceColor = '#28a745';
+                                badge = '<span style="position: absolute; top: 4px; right: 4px; font-size: 0.65em; background: #28a745; color: white; padding: 1px 4px; border-radius: 3px; font-weight: bold;">BEST</span>';
+                            } else if (isAboveAvg) {
+                                bgColor = 'rgba(220, 53, 69, 0.08)';
+                                priceColor = '#e57373';
+                            } else if (isBelowAvg) {
+                                bgColor = 'rgba(40, 167, 69, 0.08)';
+                                priceColor = '#81c784';
+                            }
+                            
+                            if (isCurrent) {
+                                borderColor = 'var(--accent-primary)';
+                            }
+                            
+                            gridHtml += `
+                                <div style="position: relative; background: ${bgColor}; border: 2px solid ${borderColor}; border-radius: 10px; padding: 12px 8px; text-align: center; transition: transform 0.15s;" onmouseover="this.style.transform='scale(1.03)'" onmouseout="this.style.transform='scale(1)'">
+                                    ${badge}
+                                    <div style="font-size: 0.85em; color: var(--text-secondary); font-weight: 500;">${p.hour_str}</div>
+                                    <div style="font-size: 1.1em; font-weight: bold; color: ${priceColor}; margin-top: 4px;">${p.price.toFixed(3)}</div>
+                                    ${isCurrent ? '<div style="font-size: 0.7em; color: var(--accent-primary); margin-top: 2px; font-weight: 600;">NOW</div>' : ''}
+                                </div>
                             `;
                         });
                     } else {
-                        tableHtml = '<tr><td colspan="3" style="padding: 20px; text-align: center;">No hourly price data available</td></tr>';
+                        gridHtml = '<div style="grid-column: 1 / -1; padding: 20px; text-align: center; color: var(--text-secondary);">No hourly price data available</div>';
                     }
                     
-                    document.getElementById('prices-table-body').innerHTML = tableHtml;
+                    document.getElementById('prices-grid').innerHTML = gridHtml;
                 })
                 .catch(error => {
                     document.getElementById('prices-summary').innerHTML = `<p class="log-error">Error loading prices: ${error.message}</p>`;
