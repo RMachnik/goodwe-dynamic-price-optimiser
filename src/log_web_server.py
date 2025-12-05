@@ -1607,30 +1607,53 @@ class LogWebServer:
         .activity-action { font-weight: bold; color: var(--text-primary); }
         .activity-revenue { color: var(--success); font-weight: bold; }
         .decision-item { 
-            padding: 15px; 
-            margin: 10px 0; 
-            border-radius: 8px; 
-            border-left: 4px solid var(--accent-primary); 
+            padding: 12px 16px; 
+            margin: 8px 0; 
+            border-radius: 12px; 
+            border-left: 5px solid var(--accent-primary); 
             background: var(--bg-tertiary); 
-            transition: background-color 0.3s ease;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 3px var(--shadow);
         }
+        .decision-item:hover { transform: translateX(2px); box-shadow: 0 2px 6px var(--shadow); }
         .decision-item.wait { border-left-color: var(--warning); }
         .decision-item.charging { border-left-color: var(--success); }
-        .decision-item.selling { border-left-color: var(--accent-primary); background: linear-gradient(135deg, var(--bg-tertiary), #e8f4fd); }
-        .decision-time { color: var(--text-secondary); font-size: 0.9em; }
-        .decision-action { font-weight: bold; margin: 5px 0; color: var(--text-primary); }
-        .decision-reason { color: var(--text-primary); font-style: italic; }
+        .decision-item.selling { border-left-color: #17a2b8; }
+        .decision-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+        .decision-time { color: var(--text-secondary); font-size: 0.85em; font-family: monospace; }
+        .decision-action { font-weight: 700; font-size: 1.1em; color: var(--text-primary); display: flex; align-items: center; gap: 6px; }
+        .decision-action .action-icon { font-size: 1.2em; }
+        .decision-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.75em; font-weight: 600; }
+        .decision-badge.charging { background: rgba(40, 167, 69, 0.15); color: #28a745; }
+        .decision-badge.wait { background: rgba(255, 193, 7, 0.15); color: #d39e00; }
+        .decision-badge.selling { background: rgba(23, 162, 184, 0.15); color: #17a2b8; }
+        .decision-reason { color: var(--text-secondary); font-size: 0.9em; line-height: 1.4; margin: 8px 0; padding: 8px 12px; background: var(--bg-secondary); border-radius: 8px; border-left: 3px solid var(--border-light); }
+        .confidence-container { margin: 10px 0; }
+        .confidence-label { display: flex; justify-content: space-between; font-size: 0.8em; color: var(--text-secondary); margin-bottom: 4px; }
         .confidence-bar { 
             width: 100%; 
-            height: 8px; 
+            height: 6px; 
             background: var(--border-color); 
-            border-radius: 4px; 
-            margin: 5px 0; 
+            border-radius: 3px; 
+            overflow: hidden;
         }
         .confidence-fill { 
             height: 100%; 
-            background: var(--gradient-success); 
-            border-radius: 4px; 
+            border-radius: 3px; 
+            transition: width 0.3s ease;
+        }
+        .confidence-fill.high { background: #28a745; }
+        .confidence-fill.medium { background: #ffc107; }
+        .confidence-fill.low { background: #dc3545; }
+        .decision-stats { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+        .stat-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: var(--bg-secondary); border-radius: 16px; font-size: 0.8em; border: 1px solid var(--border-light); }
+        .stat-chip .stat-icon { opacity: 0.7; }
+        .stat-chip .stat-value { font-weight: 600; color: var(--text-primary); }
+        @media (max-width: 600px) {
+            .decision-item { padding: 10px 12px; margin: 6px 0; }
+            .decision-header { flex-direction: column; align-items: flex-start; }
+            .decision-stats { gap: 8px; }
+            .stat-chip { padding: 3px 8px; font-size: 0.75em; }
         }
         .chart-container { position: relative; height: 300px; margin: 20px 0; }
         .chart-info { 
@@ -2491,14 +2514,31 @@ class LogWebServer:
                                 const actionIcon = isCharging ? '⚡' : (isWait ? '⏳' : (isSelling ? '💰' : '❓'));
                                 const confidencePercent = (d.confidence * 100).toFixed(0);
                                 
+                                const confidenceClass = confidencePercent >= 70 ? 'high' : (confidencePercent >= 40 ? 'medium' : 'low');
+                                const badgeClass = isCharging ? 'charging' : (isWait ? 'wait' : (isSelling ? 'selling' : ''));
+                                
                                 html += `
                                     <div class="decision-item ${className}">
-                                        <div class="decision-time">${time}</div>
-                                        <div class="decision-action">${actionIcon} ${d.action.toUpperCase()} <span style="font-weight: normal; font-size: 0.9em;">(${confidencePercent}% conf)</span></div>
+                                        <div class="decision-header">
+                                            <div class="decision-action">
+                                                <span class="action-icon">${actionIcon}</span>
+                                                <span>${d.action.toUpperCase()}</span>
+                                                <span class="decision-badge ${badgeClass}">${confidencePercent}%</span>
+                                            </div>
+                                            <div class="decision-time">${time}</div>
+                                        </div>
                                         <div class="decision-reason">${d.reason}</div>
-                                        <div class="confidence-bar"><div class="confidence-fill" style="width: ${confidencePercent}%"></div></div>
-                                        <div style="font-size: 0.85em; color: var(--text-secondary); margin-top: 5px;">
-                                            SOC: ${d.battery_soc || 'N/A'}% | Price: ${d.current_price ? d.current_price.toFixed(3) : 'N/A'} PLN/kWh | PV: ${d.pv_power || 0}W
+                                        <div class="confidence-container">
+                                            <div class="confidence-label">
+                                                <span>Confidence</span>
+                                                <span>${confidencePercent}%</span>
+                                            </div>
+                                            <div class="confidence-bar"><div class="confidence-fill ${confidenceClass}" style="width: ${confidencePercent}%"></div></div>
+                                        </div>
+                                        <div class="decision-stats">
+                                            <div class="stat-chip"><span class="stat-icon">🔋</span><span class="stat-value">${d.battery_soc || 'N/A'}%</span></div>
+                                            <div class="stat-chip"><span class="stat-icon">💰</span><span class="stat-value">${d.current_price ? d.current_price.toFixed(3) : 'N/A'} PLN</span></div>
+                                            <div class="stat-chip"><span class="stat-icon">☀️</span><span class="stat-value">${d.pv_power || 0}W</span></div>
                                         </div>
                                     </div>
                                 `;
