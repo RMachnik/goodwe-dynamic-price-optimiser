@@ -600,7 +600,11 @@ class LogWebServer:
             current_price_kwh = current_price / 1000
             
             # Find cheapest and calculate stats
-            prices = []
+            current_price_kwh = current_price / 1000
+            
+            # Find cheapest and calculate stats
+            prices_list = []
+            prices_tuples = []
             for item in price_data['value']:
                 market_price = float(item['csdac_pln'])
                 try:
@@ -610,9 +614,16 @@ class LogWebServer:
                 
                 final_price = charger.calculate_final_price(market_price, item_time)
                 final_price_kwh = final_price / 1000
-                prices.append((final_price_kwh, item_time.hour))
+                
+                prices_tuples.append((final_price_kwh, item_time.hour))
+                prices_list.append({
+                    'hour': item_time.hour,
+                    'hour_str': f"{item_time.hour:02d}:00",
+                    'price': round(final_price_kwh, 4),
+                    'market_price': round(market_price/1000, 4)
+                })
             
-            if not prices:
+            if not prices_tuples:
                 raise Exception("No valid prices found")
             
             cheapest_price, cheapest_hour = min(prices, key=lambda x: x[0])
@@ -626,7 +637,8 @@ class LogWebServer:
                 'price_trend': 'stable',
                 'data_source': 'PSE API (CSDAC-PLN)',
                 'last_updated': datetime.now().isoformat(),
-                'calculation_method': 'tariff_aware'
+                'calculation_method': 'tariff_aware',
+                'prices': prices_list
             }
             
             # Save to disk
@@ -1017,6 +1029,28 @@ class LogWebServer:
                 return jsonify(comparison)
             except Exception as e:
                 logger.error(f"Error getting monthly comparison: {e}")
+                logger.error(f"Error getting monthly comparison: {e}")
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/prices')
+        def get_prices():
+            """Get today's price list"""
+            try:
+                # Check cache via background cache logic or disk
+                # Since _refresh_price_data updates both disk and background cache, we can use background cache
+                with self._background_cache_lock:
+                    price_data = self._background_cache.get('price_data')
+                
+                if not price_data:
+                    # Try loading from disk if cache is empty
+                    price_data = self._load_price_from_disk()
+                
+                if price_data:
+                    return jsonify(price_data)
+                else:
+                    return jsonify({'error': 'No price data available'}), 404
+                    
+            except Exception as e:
                 return jsonify({'error': str(e)}), 500
     
     def _get_log_file(self, log_name: str) -> Optional[Path]:
@@ -1847,6 +1881,7 @@ class LogWebServer:
             <div class="tab active" onclick="showTab('overview')">Overview</div>
             <div class="tab" onclick="showTab('decisions')">Decisions</div>
             <div class="tab" onclick="showTab('time-series')">Time Series</div>
+            <div class="tab" onclick="showTab('prices')">Prices</div>
             <div class="tab" onclick="showTab('logs')">Logs</div>
         </div>
         
@@ -1979,6 +2014,29 @@ class LogWebServer:
                     </div>
                 </div>
             </div>
+            </div>
+        </div>
+        
+        <!-- Prices Tab -->
+        <div id="prices" class="tab-content">
+            <div class="card">
+                <h3>Today's Electricity Prices</h3>
+                <div id="prices-summary" style="margin-bottom: 20px;">Loading summary...</div>
+                <div class="table-container" style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                        <thead>
+                            <tr style="background: var(--bg-tertiary); text-align: left;">
+                                <th style="padding: 12px; border-bottom: 2px solid var(--border-color);">Hour</th>
+                                <th style="padding: 12px; border-bottom: 2px solid var(--border-color);">Price (PLN/kWh)</th>
+                                <th style="padding: 12px; border-bottom: 2px solid var(--border-color);">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="prices-table-body">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
         
         <!-- Logs Tab -->
@@ -2038,6 +2096,8 @@ class LogWebServer:
                 loadDecisions();
             } else if (tabName === 'time-series') {
                 loadTimeSeries();
+            } else if (tabName === 'prices') {
+                loadPrices();
             }
         }
         
@@ -2398,6 +2458,108 @@ class LogWebServer:
                     document.getElementById('wait-count').textContent = data.wait_count || 0;
                     
                     // Group decisions by date
+                    const grouped = {};
+                    (data.decisions || []).forEach(d => {
+                        const date = new Date(d.timestamp).toLocaleDateString();
+                        if (!grouped[date]) grouped[date] = [];
+                        grouped[date].push(d);
+                    });
+                    
+                    let html = '';
+                    if (Object.keys(grouped).length === 0) {
+                        html = '<p style="text-align: center; color: var(--text-secondary); padding: 20px;">No decisions found for this period.</p>';
+                    } else {
+                        Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a)).forEach(date => {
+                            html += `<h4 style="margin: 20px 0 10px 0; padding-bottom: 5px; border-bottom: 1px solid var(--border-color);">${date}</h4>`;
+                            grouped[date].forEach(d => {
+                                const time = new Date(d.timestamp).toLocaleTimeString();
+                                const isCharging = d.action === 'CHARGE';
+                                const isWait = d.action === 'WAIT';
+                                const className = isCharging ? 'charging' : (isWait ? 'wait' : '');
+                                
+                                html += `
+                                    <div class="decision-item ${className}">
+                                        <div class="decision-time">${time}</div>
+                                        <div class="decision-action">${d.action} <span style="font-weight: normal; font-size: 0.9em;">(${d.confidence}% conf)</span></div>
+                                        <div class="decision-reason">${d.reason}</div>
+                                        <div class="confidence-bar"><div class="confidence-fill" style="width: ${d.confidence}%"></div></div>
+                                        <div style="font-size: 0.85em; color: var(--text-secondary); margin-top: 5px;">
+                                            SOC: ${d.factors?.soc}% | Price: ${d.factors?.price} | PVP: ${d.factors?.pv_prediction}
+                                        </div>
+                                    </div>
+                                `;
+                            });
+                        });
+                    }
+                    
+                    document.getElementById('decisions-list').innerHTML = html;
+                })
+                .catch(error => {
+                    document.getElementById('decisions-list').innerHTML = `<p>Error loading decisions: ${error.message}</p>`;
+                });
+        }
+
+        function loadPrices() {
+            fetch('/prices')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('prices-summary').innerHTML = `<p class="log-error">Error: ${data.error}</p>`;
+                        return;
+                    }
+                    
+                    // Summary
+                    const summaryHtml = `
+                        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                            <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                                <div style="font-size: 0.9em; color: var(--text-secondary);">Current Price</div>
+                                <div style="font-size: 1.2em; font-weight: bold; color: var(--text-primary);">${data.current_price_pln_kwh} PLN/kWh</div>
+                            </div>
+                            <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                                <div style="font-size: 0.9em; color: var(--text-secondary);">Cheapest Price</div>
+                                <div style="font-size: 1.2em; font-weight: bold; color: var(--success);">${data.cheapest_price_pln_kwh} PLN/kWh</div>
+                                <div style="font-size: 0.8em; color: var(--text-muted);">at ${data.cheapest_hour}</div>
+                            </div>
+                            <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; border: 1px solid var(--border-color);">
+                                <div style="font-size: 0.9em; color: var(--text-secondary);">Average Price</div>
+                                <div style="font-size: 1.2em; font-weight: bold; color: var(--text-primary);">${data.average_price_pln_kwh} PLN/kWh</div>
+                            </div>
+                        </div>
+                    `;
+                    document.getElementById('prices-summary').innerHTML = summaryHtml;
+                    
+                    // Table
+                    const currentHour = new Date().getHours();
+                    let tableHtml = '';
+                    
+                    if (data.prices && Array.isArray(data.prices)) {
+                        data.prices.forEach(p => {
+                            const isCurrent = p.hour === currentHour;
+                            const isCheapest = p.price === data.cheapest_price_pln_kwh;
+                            const rowStyle = isCurrent ? 'background: rgba(52, 152, 219, 0.1); font-weight: bold;' : '';
+                            
+                            let status = '';
+                            if (isCurrent) status += '<span style="font-size: 0.8em; background: var(--accent-primary); color: white; padding: 2px 6px; border-radius: 4px; margin-right: 5px;">NOW</span>';
+                            if (isCheapest) status += '<span style="font-size: 0.8em; background: var(--success); color: white; padding: 2px 6px; border-radius: 4px;">BEST</span>';
+                            
+                            tableHtml += `
+                                <tr style="border-bottom: 1px solid var(--border-light); ${rowStyle}">
+                                    <td style="padding: 10px 12px;">${p.hour_str}</td>
+                                    <td style="padding: 10px 12px;">${p.price.toFixed(4)}</td>
+                                    <td style="padding: 10px 12px;">${status}</td>
+                                </tr>
+                            `;
+                        });
+                    } else {
+                        tableHtml = '<tr><td colspan="3" style="padding: 20px; text-align: center;">No hourly price data available</td></tr>';
+                    }
+                    
+                    document.getElementById('prices-table-body').innerHTML = tableHtml;
+                })
+                .catch(error => {
+                    document.getElementById('prices-summary').innerHTML = `<p class="log-error">Error loading prices: ${error.message}</p>`;
+                });
+        }
                     const groupedDecisions = groupDecisionsByDate(data.decisions);
                     
                     // Generate HTML for grouped decisions
