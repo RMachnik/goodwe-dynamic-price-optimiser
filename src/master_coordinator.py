@@ -1154,6 +1154,9 @@ class MasterCoordinator:
             self.state = SystemState.CHARGING
         else:
             self.state = SystemState.MONITORING
+        
+        # Save system state to database every minute for dashboard
+        await self._save_system_state()
     
     def _update_performance_metrics(self):
         """Update system performance metrics"""

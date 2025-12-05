@@ -247,17 +247,53 @@ class LogWebServer:
             return None
         
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # Try to get existing event loop
             try:
-                # Wrap in timeout
-                result = loop.run_until_complete(asyncio.wait_for(coro, timeout=timeout))
-                return result
-            except asyncio.TimeoutError:
+                loop = asyncio.get_running_loop()
+                # If we're in an event loop, we can't use run_until_complete
+                # Use asyncio.create_task instead or queue it
+                logger.warning("Already in event loop, using thread pool for async operation")
+                import concurrent.futures
+                import threading
+                
+                result_container = []
+                error_container = []
+                
+                def run_in_new_loop():
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        result = new_loop.run_until_complete(asyncio.wait_for(coro, timeout=timeout))
+                        result_container.append(result)
+                    except Exception as e:
+                        error_container.append(e)
+                    finally:
+                        new_loop.close()
+                
+                thread = threading.Thread(target=run_in_new_loop, daemon=True)
+                thread.start()
+                thread.join(timeout=timeout + 1)
+                
+                if error_container:
+                    raise error_container[0]
+                if result_container:
+                    return result_container[0]
                 logger.error(f"⏱️ Storage query timeout after {timeout}s")
                 return None
-            finally:
-                loop.close()
+                
+            except RuntimeError:
+                # No event loop running, create new one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    # Wrap in timeout
+                    result = loop.run_until_complete(asyncio.wait_for(coro, timeout=timeout))
+                    return result
+                except asyncio.TimeoutError:
+                    logger.error(f"⏱️ Storage query timeout after {timeout}s")
+                    return None
+                finally:
+                    loop.close()
         except Exception as e:
             logger.error(f"Storage query failed: {e}", exc_info=True)
             return None
@@ -610,48 +646,69 @@ class LogWebServer:
                 self._background_cache['last_price_error'] = str(e)
     
     def _refresh_inverter_data(self):
-        """Refresh inverter data from coordinator state files (no direct inverter connection)."""
+        """Refresh inverter data from database (uses background storage instance)."""
         try:
-            # Read most recent coordinator state file
-            project_root = Path(__file__).parent.parent
-            state_files = list((project_root / "out").glob("coordinator_state_*.json"))
+            if not self._background_storage or not self._background_storage_connected:
+                raise Exception("Background storage not connected")
             
-            if not state_files:
-                raise Exception("No coordinator state files found")
+            # Query most recent system state from database
+            query_result = self._run_async_storage_with_timeout(
+                self._background_storage.get_system_state(limit=1),
+                timeout=5.0,
+                use_background=True
+            )
             
-            latest_file = max(state_files, key=lambda x: x.stat().st_mtime)
-            file_age = time.time() - latest_file.stat().st_mtime
+            if not query_result or len(query_result) == 0:
+                raise Exception("No system state found in database")
             
-            if file_age > 120:  # Older than 2 minutes
-                raise Exception(f"State file too old: {file_age:.0f}s")
+            latest_state = query_result[0]
             
-            # Read and parse
-            content = latest_file.read_text().strip()
-            lines = content.split('\n')
+            # Parse metrics JSON
+            metrics_json = latest_state.get('metrics')
+            if not metrics_json:
+                raise Exception("No metrics in system state")
             
-            for line in reversed(lines):
-                if not line.strip():
-                    continue
-                try:
-                    data = json.loads(line)
-                    current_data = data.get('current_data', {})
-                    
-                    # Convert to dashboard format
-                    dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
-                    
-                    if dashboard_data:
-                        with self._background_cache_lock:
-                            self._background_cache['inverter_data'] = dashboard_data
-                            self._background_cache['last_inverter_refresh'] = time.time()
-                            self._background_cache['last_inverter_error'] = None
-                            self._background_cache['data_source'] = dashboard_data.get('data_source', 'real')
-                        
-                        logger.debug(f"✅ Refreshed inverter data from {latest_file.name} (age: {file_age:.1f}s)")
-                        return
-                except json.JSONDecodeError:
-                    continue
+            if isinstance(metrics_json, str):
+                metrics = json.loads(metrics_json)
+            else:
+                metrics = metrics_json
             
-            raise Exception("No valid JSON in state file")
+            current_data = metrics.get('current_data', {})
+            
+            # Check data freshness
+            state_timestamp = latest_state.get('timestamp')
+            if isinstance(state_timestamp, str):
+                state_time = datetime.fromisoformat(state_timestamp)
+            else:
+                state_time = state_timestamp
+            
+            data_age = (datetime.now() - state_time).total_seconds()
+            if data_age > 600:  # Reject only if older than 10 minutes
+                raise Exception(f"State data too old: {data_age:.0f}s")
+            
+            # Convert to dashboard format
+            dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
+            
+            if dashboard_data:
+                # Annotate if data is stale
+                if data_age > 120:  # Older than 2 minutes
+                    dashboard_data['data_warning'] = f'Data is {int(data_age)}s old (from {state_time.strftime("%H:%M:%S")})'
+                    dashboard_data['data_source'] = 'database_stale'
+                    logger.debug(f"✅ Refreshed STALE inverter data from database (age: {data_age:.1f}s)")
+                else:
+                    dashboard_data['data_source'] = 'database_fresh'
+                    logger.debug(f"✅ Refreshed inverter data from database (age: {data_age:.1f}s)")
+                
+                dashboard_data['cache_age_seconds'] = data_age
+                dashboard_data['data_timestamp'] = state_time.isoformat()
+                
+                with self._background_cache_lock:
+                    self._background_cache['inverter_data'] = dashboard_data
+                    self._background_cache['last_inverter_refresh'] = time.time()
+                    self._background_cache['last_inverter_error'] = None
+                    self._background_cache['data_source'] = dashboard_data.get('data_source', 'real')
+            else:
+                raise Exception("Failed to convert data to dashboard format")
             
         except Exception as e:
             logger.warning(f"Inverter data refresh failed: {e}")
@@ -2040,8 +2097,14 @@ class LogWebServer:
                         }
                         // Normalize data source indicator
                         const src = (d.data_source || '').toLowerCase();
-                        if (src === 'real' || src === 'real_inverter') {
+                        if (src === 'real' || src === 'real_inverter' || src === 'background_cache' || 
+                            src === 'database_fresh' || src === 'database_stale' || src === 'database_direct' ||
+                            src === 'background_cache_stale') {
                             d.data_source = 'real_inverter';
+                            // Preserve staleness info
+                            if (src.includes('stale')) {
+                                d.data_source_detail = 'stale';
+                            }
                         } else if (!src) {
                             d.data_source = 'mock';
                         } else {
@@ -2052,7 +2115,13 @@ class LogWebServer:
 
                     // Update data source indicator
                     const dataSource = normalized.data_source || 'mock';
-                    const dataSourceText = dataSource === 'real_inverter' ? 'Real Inverter Data' : 'Mock Data';
+                    let dataSourceText = dataSource === 'real_inverter' ? 'Real Inverter Data' : 'Mock Data';
+                    
+                    // Add staleness warning if present
+                    if (normalized.data_warning) {
+                        dataSourceText += ` (⚠️ ${normalized.data_warning})`;
+                    }
+                    
                     const dataSourceElement = document.getElementById('data-source-text');
                     dataSourceElement.textContent = dataSourceText;
                     dataSourceElement.className = dataSource === 'real_inverter' ? 'data-source-real' : 'data-source-mock';
@@ -2657,7 +2726,11 @@ class LogWebServer:
             const pvPeak = pvData.length > 0 ? Math.max(...pvData).toFixed(2) : '--';
             
             document.getElementById('data-points').textContent = data.data_points || '--';
-            document.getElementById('data-source').textContent = data.data_source === 'real_inverter' ? 'Real Data' : 'Mock Data';
+            const historicalSource = (data.data_source || '').toLowerCase();
+            const isRealData = historicalSource === 'real_inverter' || historicalSource === 'real' || 
+                             historicalSource === 'background_cache' || historicalSource === 'database_fresh' ||
+                             historicalSource === 'database_stale' || historicalSource === 'database_direct';
+            document.getElementById('data-source').textContent = isRealData ? 'Real Data' : 'Mock Data';
             document.getElementById('soc-range').textContent = `${socMin}% - ${socMax}%`;
             document.getElementById('pv-peak').textContent = `${pvPeak} kW`;
         }
@@ -3374,24 +3447,29 @@ class LogWebServer:
         }
 
     def start(self):
-        """Start the web server with signal handlers."""
+        """Start the web server."""
         import signal
         import sys
+        import threading
         
-        def signal_handler(signum, frame):
-            logger.info(f"Received signal {signum}, shutting down...")
-            self.shutdown()
-            sys.exit(0)
-        
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
+        # Only register signal handlers if we're in the main thread
+        if threading.current_thread() is threading.main_thread():
+            def signal_handler(signum, frame):
+                logger.info(f"Received signal {signum}, shutting down...")
+                self.shutdown()
+                sys.exit(0)
+            
+            signal.signal(signal.SIGTERM, signal_handler)
+            signal.signal(signal.SIGINT, signal_handler)
+        else:
+            logger.debug("Skipping signal handlers (not in main thread)")
         
         self.start_time = time.time()
         self._running = True
         logger.info(f"Starting log web server on {self.host}:{self.port}")
         
         try:
-            self.app.run(host=self.host, port=self.port, debug=False, threaded=True)
+            self.app.run(host=self.host, port=self.port, debug=False, threaded=True, use_reloader=False)
         except OSError as e:
             if e.errno == 48:  # Address already in use
                 logger.error(f"Port {self.port} is already in use")
@@ -3399,9 +3477,15 @@ class LogWebServer:
                 self._running = False
                 raise RuntimeError(f"Port {self.port} is already in use") from e
             else:
+                logger.error(f"Web server failed to start: {e}")
                 self.shutdown()
                 self._running = False
                 raise
+        except Exception as e:
+            logger.error(f"Unexpected error starting web server: {e}", exc_info=True)
+            self.shutdown()
+            self._running = False
+            raise
     
     def shutdown(self):
         """Gracefully shutdown background thread and storage connections."""
@@ -3985,44 +4069,58 @@ class LogWebServer:
                     cached_data['cache_age_seconds'] = cache_age
                     return cached_data
             
-            # Cache too old or missing - fallback to direct file reading
-            logger.warning("❌ Inverter background cache unavailable, falling back to file reading")
+            # Cache too old or missing - fallback to direct database query
+            logger.warning("❌ Inverter background cache unavailable, querying database directly")
             
-            # Fallback: Try to read from coordinator state file directly
-            project_root = Path(__file__).parent.parent
-            try:
-                data_files = sorted(list((project_root / "out").glob("coordinator_state_*.json")), 
-                                  key=lambda x: x.name, reverse=True)
-                
-                if data_files:
-                    latest_file = data_files[0]
-                    file_age = time.time() - latest_file.stat().st_mtime
+            # Fallback: Query database directly (allow stale data with annotation)
+            if self.storage and self._storage_connected:
+                try:
+                    query_result = self._run_async_storage_with_timeout(
+                        self.storage.get_system_state(limit=1),
+                        timeout=5.0,
+                        use_background=False
+                    )
                     
-                    if file_age < 300:  # 5 minutes freshness for fallback
-                        file_content = latest_file.read_text().strip()
-                        if file_content:
-                            lines = file_content.split('\n')
-                            real_data = None
-                            for line in reversed(lines):
-                                line = line.strip()
-                                if line:
-                                    try:
-                                        real_data = json.loads(line)
-                                        break
-                                    except json.JSONDecodeError:
-                                        continue
+                    if query_result and len(query_result) > 0:
+                        latest_state = query_result[0]
+                        
+                        # Parse metrics JSON
+                        metrics_json = latest_state.get('metrics')
+                        if metrics_json:
+                            if isinstance(metrics_json, str):
+                                metrics = json.loads(metrics_json)
+                            else:
+                                metrics = metrics_json
                             
-                            if real_data:
-                                current_data = real_data.get('current_data', {})
+                            current_data = metrics.get('current_data', {})
+                            
+                            # Check data freshness
+                            state_timestamp = latest_state.get('timestamp')
+                            if isinstance(state_timestamp, str):
+                                state_time = datetime.fromisoformat(state_timestamp)
+                            else:
+                                state_time = state_timestamp
+                            
+                            data_age = (datetime.now() - state_time).total_seconds()
+                            
+                            # Accept data up to 10 minutes old, but annotate staleness
+                            if data_age < 600:  # 10 minutes max
                                 dashboard_data = self._convert_enhanced_data_to_dashboard_format(current_data)
                                 
                                 if dashboard_data:
-                                    dashboard_data['data_source'] = 'fallback_direct'
-                                    dashboard_data['cache_age_seconds'] = file_age
-                                    logger.info(f"Loaded data from {latest_file.name} (fallback, age: {file_age:.1f}s)")
+                                    if data_age > 120:  # Older than 2 minutes
+                                        dashboard_data['data_source'] = 'database_stale'
+                                        dashboard_data['data_warning'] = f'Data is {int(data_age)}s old (from {state_time.strftime("%H:%M:%S")})'
+                                        logger.warning(f"Using stale data (age: {data_age:.0f}s)")
+                                    else:
+                                        dashboard_data['data_source'] = 'database_direct'
+                                    
+                                    dashboard_data['cache_age_seconds'] = data_age
+                                    dashboard_data['data_timestamp'] = state_time.isoformat()
+                                    logger.info(f"Loaded data from database (fallback, age: {data_age:.1f}s)")
                                     return dashboard_data
-            except Exception as e:
-                logger.error(f"Fallback file reading failed: {e}")
+                except Exception as e:
+                    logger.error(f"Direct database query failed: {e}")
             
             return None
             
@@ -4214,9 +4312,9 @@ class LogWebServer:
                         logger.info(pricing_msg)
                 return real_data
             
-            # Fallback to mock data if no real data available, but use real price data
+            # Fallback to showing old real data with annotation instead of mock data
             if self._should_log_message("No real inverter data available"):
-                logger.warning("No real inverter data available, using mock data for demonstration")
+                logger.warning("No fresh real inverter data available, returning stale data with annotation")
             current_time = datetime.now()
             
             # Mock current system state with real price data (includes L1/L2/L3 currents for testing)
