@@ -27,6 +27,7 @@ import os
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
+# Import BEFORE patching for these specific tests that need background refresh
 from log_web_server import LogWebServer
 from daily_snapshot_manager import DailySnapshotManager
 

@@ -443,6 +443,14 @@ timing_awareness:
       battery_target_threshold: 80   # Charge proactively if battery below this %
       weather_improvement_hours: 6   # Hours to check for weather improvement
       max_proactive_price_pln: 0.7  # Maximum price for proactive charging (≤ 0.7 PLN/kWh)
+      
+      # Rule 3: OPPORTUNISTIC tier time-of-day awareness (pre-peak charging)
+      # Charge in afternoon when evening peak prices will be significantly higher
+      opportunistic_pre_peak_enabled: true
+      evening_peak_hours: [17, 18, 19, 20, 21, 22]  # Hours considered evening peak
+      opportunistic_pre_peak_threshold: 0.9         # Max current price for pre-peak charging (PLN/kWh)
+      evening_price_multiplier: 1.1                 # Evening must be > current × this to trigger
+      opportunistic_pre_peak_min_soc: 20            # Only apply pre-peak logic if SOC ≥ this %
     
     # Simple Charging Configuration (December 2025)
     # 4-tier SOC-based charging system

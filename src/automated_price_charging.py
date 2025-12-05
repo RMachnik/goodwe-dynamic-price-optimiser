@@ -123,6 +123,13 @@ class AutomatedPriceCharger:
         self.weather_improvement_hours = optimization_rules.get('weather_improvement_hours', 6)  # hours
         self.max_proactive_price = optimization_rules.get('max_proactive_price_pln', 0.7)  # PLN/kWh
         
+        # OPPORTUNISTIC tier pre-peak charging rules
+        self.opportunistic_pre_peak_enabled = optimization_rules.get('opportunistic_pre_peak_enabled', True)
+        self.evening_peak_hours = optimization_rules.get('evening_peak_hours', [17, 18, 19, 20, 21, 22])
+        self.opportunistic_pre_peak_threshold = optimization_rules.get('opportunistic_pre_peak_threshold', 0.9)  # PLN/kWh
+        self.evening_price_multiplier = optimization_rules.get('evening_price_multiplier', 1.1)
+        self.opportunistic_pre_peak_min_soc = optimization_rules.get('opportunistic_pre_peak_min_soc', 20)  # %
+        
         # Super low price charging rules
         self.super_low_price_enabled = optimization_rules.get('super_low_price_charging_enabled', True)
         self.super_low_price_threshold = optimization_rules.get('super_low_price_threshold_pln', 0.3)  # PLN/kWh
@@ -1152,6 +1159,130 @@ class AutomatedPriceCharger:
             logger.error(f"Error checking PV improvement for critical battery: {e}")
             return False
 
+    def _is_approaching_evening_peak(self) -> Tuple[bool, float]:
+        """
+        Check if current time is approaching evening peak (before 16:00).
+        
+        Returns:
+            Tuple of (is_approaching, hours_until_peak)
+            - is_approaching: True if before 16:00 and evening peak will occur
+            - hours_until_peak: Hours until evening peak starts (17:00)
+        """
+        now = datetime.now()
+        current_hour = now.hour
+        
+        # Check if before the cutoff (16:00)
+        if current_hour < 16:
+            # Calculate hours until evening peak starts
+            evening_peak_start = min(self.evening_peak_hours) if self.evening_peak_hours else 17
+            hours_until_peak = evening_peak_start - current_hour - (now.minute / 60.0)
+            return True, max(0, hours_until_peak)
+        
+        return False, 0.0
+    
+    def _get_evening_peak_forecast(self, price_data: Dict) -> Optional[Dict[str, float]]:
+        """
+        Get evening peak price forecast from price_data.
+        
+        Args:
+            price_data: Dictionary with 'value' list containing price points
+        
+        Returns:
+            Dict with {'avg': float, 'max': float, 'min': float} in PLN/kWh, or None if no data
+        """
+        if not price_data or 'value' not in price_data:
+            return None
+        
+        try:
+            evening_prices = []
+            
+            # Extract prices for evening peak hours
+            for hour in self.evening_peak_hours:
+                for period in price_data['value']:
+                    dt_str = period.get('dtime', '')
+                    # Match hour in datetime string (supports both formats)
+                    if f'T{hour:02d}:' in dt_str or f' {hour:02d}:' in dt_str:
+                        # Calculate final price with tariff
+                        market_price_mwh = float(period['csdac_pln'])
+                        dt = datetime.fromisoformat(dt_str.replace('Z', ''))
+                        final_price_mwh = self.calculate_final_price(market_price_mwh, dt)
+                        final_price_kwh = final_price_mwh / 1000
+                        evening_prices.append(final_price_kwh)
+            
+            if not evening_prices:
+                return None
+            
+            return {
+                'avg': sum(evening_prices) / len(evening_prices),
+                'max': max(evening_prices),
+                'min': min(evening_prices)
+            }
+        except Exception as e:
+            logger.error(f"Error getting evening peak forecast: {e}")
+            return None
+    
+    def _is_approaching_evening_peak(self) -> Tuple[bool, float]:
+        """
+        Check if current time is approaching evening peak (before 16:00).
+        
+        Returns:
+            Tuple of (is_approaching, hours_until_peak)
+            - is_approaching: True if before 16:00 and evening peak will occur
+            - hours_until_peak: Hours until evening peak starts (17:00)
+        """
+        now = datetime.now()
+        current_hour = now.hour
+        
+        # Check if before the cutoff (16:00)
+        if current_hour < 16:
+            # Calculate hours until evening peak starts
+            evening_peak_start = min(self.evening_peak_hours) if self.evening_peak_hours else 17
+            hours_until_peak = evening_peak_start - current_hour - (now.minute / 60.0)
+            return True, max(0, hours_until_peak)
+        
+        return False, 0.0
+    
+    def _get_evening_peak_forecast(self, price_data: Dict) -> Optional[Dict[str, float]]:
+        """
+        Get evening peak price forecast from price_data.
+        
+        Args:
+            price_data: Dictionary with 'value' list containing price points
+        
+        Returns:
+            Dict with {'avg': float, 'max': float, 'min': float} in PLN/kWh, or None if no data
+        """
+        if not price_data or 'value' not in price_data:
+            return None
+        
+        try:
+            evening_prices = []
+            
+            # Extract prices for evening peak hours
+            for hour in self.evening_peak_hours:
+                for period in price_data['value']:
+                    dt_str = period.get('dtime', '')
+                    # Match hour in datetime string (supports both formats)
+                    if f'T{hour:02d}:' in dt_str or f' {hour:02d}:' in dt_str:
+                        # Calculate final price with tariff
+                        market_price_mwh = float(period['csdac_pln'])
+                        dt = datetime.fromisoformat(dt_str.replace('Z', ''))
+                        final_price_mwh = self.calculate_final_price(market_price_mwh, dt)
+                        final_price_kwh = final_price_mwh / 1000
+                        evening_prices.append(final_price_kwh)
+            
+            if not evening_prices:
+                return None
+            
+            return {
+                'avg': sum(evening_prices) / len(evening_prices),
+                'max': max(evening_prices),
+                'min': min(evening_prices)
+            }
+        except Exception as e:
+            logger.error(f"Error getting evening peak forecast: {e}")
+            return None
+
     def _find_cheapest_price_next_hours(self, hours: int, price_data: Dict) -> Optional[float]:
         """
         Find cheapest price in the next N hours with 5-minute caching.
@@ -1354,6 +1485,7 @@ class AutomatedPriceCharger:
             return decision
         
         # TIER 3 - OPPORTUNISTIC (12-50%): Charge if price within 15% of cheapest in next 12h
+        # WITH time-of-day awareness: charge before evening peak if forecast shows higher prices
         if battery_soc < 50:
             if not current_price or not price_data:
                 return {
@@ -1374,6 +1506,33 @@ class AutomatedPriceCharger:
             
             threshold = cheapest_next_12h * (1 + self.opportunistic_tolerance_percent)
             
+            # PRE-PEAK CHARGING LOGIC: Check if we should charge before evening peak
+            if (self.opportunistic_pre_peak_enabled and 
+                battery_soc >= self.opportunistic_pre_peak_min_soc and
+                current_price <= self.opportunistic_pre_peak_threshold):
+                
+                is_approaching, hours_until = self._is_approaching_evening_peak()
+                
+                if is_approaching:
+                    evening_forecast = self._get_evening_peak_forecast(price_data)
+                    
+                    if evening_forecast:
+                        evening_avg = evening_forecast['avg']
+                        
+                        # Check if evening prices will be significantly higher (>10% of current)
+                        if evening_avg > current_price * self.evening_price_multiplier:
+                            return {
+                                'should_charge': True,
+                                'reason': f'OPPORTUNISTIC tier: charging before evening peak (current {current_price:.3f} PLN/kWh, evening forecast avg {evening_avg:.3f} PLN/kWh, {hours_until:.1f}h until peak)',
+                                'priority': 'medium',
+                                'confidence': 0.75
+                            }
+                        else:
+                            logger.debug(f"OPPORTUNISTIC pre-peak: evening avg {evening_avg:.3f} not significantly higher than current {current_price:.3f} (threshold {current_price * self.evening_price_multiplier:.3f})")
+                    else:
+                        logger.warning("OPPORTUNISTIC pre-peak: evening forecast unavailable, using normal logic")
+            
+            # NORMAL LOGIC: Use 15% tolerance threshold
             if current_price <= threshold:
                 return {
                     'should_charge': True,

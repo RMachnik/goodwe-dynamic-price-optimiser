@@ -518,6 +518,181 @@ def test_old_feature(self):
 
 ---
 
+## Test Infrastructure Best Practices
+
+### Preventing Background Thread Interference
+
+**Problem**: Background threads (e.g., LogWebServer's state file refresh) can cause warnings or test interference during test runs.
+
+**Solution**: Use module-level patches to disable background operations globally:
+
+```python
+# At module level (top of test file)
+from unittest.mock import patch
+
+# Disable background refresh for all tests in this module
+@patch('src.log_web_server.LogWebServer._start_background_refresh', return_value=None)
+def setup_module(module):
+    """Disable background threads for all tests"""
+    pass
+```
+
+**Example**: See `test/test_log_web_server.py` lines 29-31
+
+**When to Use**:
+- Tests that create LogWebServer instances but don't test background functionality
+- Any test module experiencing "State file too old" or similar warnings
+- Tests that mock file system operations that background threads might access
+
+**Exception**: Tests that specifically verify background thread behavior need the real implementation. Import the class BEFORE applying global patches:
+
+```python
+# test_dashboard_performance.py example
+# Import LogWebServer BEFORE sys.path modifications/patches
+# This preserves the real implementation for thread-specific tests
+from src.log_web_server import LogWebServer
+
+# Then apply global patches that affect other modules
+@patch('some.other.module.background_operation')
+def test_background_refresh_thread(self):
+    """Test background thread functionality"""
+    # Real LogWebServer thread behavior is tested here
+```
+
+### Time-Dependent Test Isolation
+
+**Problem**: Tests that use `datetime.now()` can produce different results based on when they run, especially with time-of-day logic (e.g., pre-peak charging checks).
+
+**Solution**: Mock datetime with fixed times to ensure deterministic behavior:
+
+```python
+from datetime import datetime
+from unittest.mock import patch
+
+def test_time_dependent_logic(self):
+    """Test with fixed time to avoid time-of-day interference"""
+    
+    # Set fixed test time (e.g., 18:00 to avoid pre-peak window)
+    real_datetime = datetime
+    mock_datetime_value = real_datetime(2025, 1, 15, 18, 0)  # 18:00
+    
+    with patch('src.automated_price_charging.datetime') as mock_dt:
+        # Preserve real datetime methods
+        mock_dt.now.return_value = mock_datetime_value
+        mock_dt.fromisoformat = real_datetime.fromisoformat
+        mock_dt.strptime = real_datetime.strptime
+        mock_dt.combine = real_datetime.combine
+        mock_dt.min = real_datetime.min
+        mock_dt.max = real_datetime.max
+        mock_dt.side_effect = lambda *args, **kwargs: real_datetime(*args, **kwargs)
+        
+        # Now test logic will consistently see 18:00
+        result = make_decision()
+        assert result['should_charge'] == expected
+```
+
+**When to Use**:
+- Tests for charging logic with time-of-day awareness
+- Tests that should validate specific logic paths without interference from other time-based rules
+- Regression tests that verify behavior at specific times
+- Any test using `datetime.now()` where reproducibility matters
+
+**Key Methods to Preserve**:
+- `fromisoformat()` - Used for parsing ISO timestamp strings
+- `strptime()` - Used for parsing formatted date strings
+- `combine()` - Used for combining date and time objects
+- `min`, `max` - Used as sentinel values
+- Constructor via `side_effect` - Allows creating datetime objects normally
+
+**Example**: See `test/test_e2e_charging_scenarios.py`:
+- `test_opportunistic_tier_pre_peak_charging_evening_forecast()` (lines ~410-425)
+- `test_opportunistic_pre_peak_edge_cases()` (lines ~480-495)
+- `test_opportunistic_absolute_cheapest_preserved()` (lines ~575-590)
+
+### Import Order Sensitivity
+
+**Problem**: Global patches applied at module load time can affect all imports, breaking tests that need the real implementation.
+
+**Solution**: Import components that need real behavior BEFORE any global patches:
+
+```python
+# CORRECT ORDER:
+# 1. Standard library
+import sys
+import os
+
+# 2. Components needing real implementation (import BEFORE patches)
+from src.log_web_server import LogWebServer
+
+# 3. Test framework
+import pytest
+from unittest.mock import patch
+
+# 4. Other project imports (can be patched)
+from src.other_module import SomeClass
+
+# 5. Apply global patches AFTER imports
+@patch('src.background_module.operation')
+def setup_module(module):
+    pass
+```
+
+**When This Matters**:
+- Tests verifying background thread initialization/shutdown
+- Tests checking real async behavior
+- Tests validating actual class attributes/methods
+
+**Example**: See `test/test_dashboard_performance.py` lines 28-29 comment
+
+### Debugging Test Warnings
+
+**Common Warning**: "State file too old: 6073442.45 seconds"
+
+**Root Cause**: Background refresh thread trying to read coordinator state files that don't exist or are outdated during tests.
+
+**Debug Steps**:
+1. Identify which test file shows the warning (run with `-v`)
+2. Check if LogWebServer is instantiated in that test
+3. Add module-level patch to disable `_start_background_refresh()`
+4. Verify warning disappears: `pytest test/test_file.py -v`
+
+**Verification**:
+```bash
+# Before fix - warnings appear
+pytest test/test_log_web_server.py -v
+
+# After fix - clean output
+pytest test/test_log_web_server.py -v
+# Should see: "67 passed in 9.76s" with no warnings
+```
+
+### Test Execution Performance
+
+**Quick Validation**: Run targeted test subsets during development:
+
+```bash
+# E2E tests only (comprehensive charging scenarios)
+pytest test/test_e2e_charging_scenarios.py -v
+
+# Dashboard tests only (web interface and caching)
+pytest test/test_dashboard_performance.py -v
+
+# Both (core functionality validation)
+pytest test/test_e2e_charging_scenarios.py test/test_dashboard_performance.py -v
+```
+
+**Expected Performance**:
+- E2E + Dashboard: ~10 seconds for 67 tests
+- Full suite: ~45 seconds (includes database tests)
+
+**If Tests Hang**:
+1. Check for unpatched background threads (LogWebServer, data collectors)
+2. Look for blocking I/O operations without timeouts
+3. Verify async tests use proper await/async patterns
+4. Check for infinite loops in mocked datetime logic
+
+---
+
 ## Related Documentation
 
 - `docs/TEST_CONFIGURATION_ISOLATION.md` - Configuration isolation patterns

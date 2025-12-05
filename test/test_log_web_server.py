@@ -29,6 +29,10 @@ import os
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
+# Patch background refresh globally to avoid "State file too old" warnings during tests
+background_refresh_patcher = patch('log_web_server.LogWebServer._start_background_refresh', lambda self: None)
+background_refresh_patcher.start()
+
 from log_web_server import LogWebServer
 
 

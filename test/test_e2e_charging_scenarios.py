@@ -92,7 +92,7 @@ def build_price_data(hours: int, base_price: float = 0.6, pattern: str = 'flat',
     Args:
         hours: Number of hours of price data to generate
         base_price: Base price in PLN/kWh (default 0.6)
-        pattern: Price pattern - 'flat', 'tariff_realistic', 'night_valley', 'evening_peak'
+        pattern: Price pattern - 'flat', 'tariff_realistic', 'night_valley', 'evening_peak', 'evening_peak_realistic'
         tariff: Tariff type for 'tariff_realistic' pattern - 'g12', 'g13' (default: 'g12')
     
     Returns:
@@ -144,6 +144,27 @@ def build_price_data(hours: int, base_price: float = 0.6, pattern: str = 'flat',
         elif pattern == 'evening_peak':
             # Consistently expensive evening prices
             price = base_price * 1.8  # 1.08 PLN/kWh
+        elif pattern == 'evening_peak_realistic':
+            # Realistic winter demand pattern:
+            # - Night (22-06h): cheapest 0.50-0.55 PLN/kWh
+            # - Morning (06-12h): moderate 0.70-0.85 PLN/kWh
+            # - Afternoon (12-16h): moderate 0.80-0.90 PLN/kWh
+            # - Evening peak (17-22h): highest 1.10-1.30 PLN/kWh
+            # This creates the scenario where OPPORTUNISTIC tier should charge
+            # in afternoon before evening peak rather than waiting for night.
+            import random
+            random.seed(hour * 100 + timestamp.minute)  # Consistent randomness
+            
+            if 0 <= hour < 6:  # Night: cheapest
+                price = 0.50 + random.uniform(0, 0.05)  # 0.50-0.55 PLN/kWh
+            elif 6 <= hour < 12:  # Morning: moderate
+                price = 0.70 + random.uniform(0, 0.15)  # 0.70-0.85 PLN/kWh
+            elif 12 <= hour < 17:  # Afternoon: moderate-high
+                price = 0.80 + random.uniform(0, 0.10)  # 0.80-0.90 PLN/kWh
+            elif 17 <= hour < 22:  # Evening peak: highest
+                price = 1.10 + random.uniform(0, 0.20)  # 1.10-1.30 PLN/kWh
+            else:  # Late night (22-24h): cheapest
+                price = 0.50 + random.uniform(0, 0.05)  # 0.50-0.55 PLN/kWh
         elif pattern == 'super_low':
             # Super low price event
             price = 0.25  # Below 0.3 PLN/kWh threshold
@@ -337,31 +358,287 @@ def test_opportunistic_tier_price_tolerance(price_charger, battery_soc, current_
 
 def test_opportunistic_tier_boundary_at_50_percent(price_charger):
     """Test SOC boundary between opportunistic (49%) and normal (50%) tiers."""
+    from datetime import datetime as real_datetime
+    from unittest.mock import patch
+    
+    #Mock time to 18:00 (evening) to avoid pre-peak logic triggering
+    mock_datetime_value = real_datetime(2025, 12, 5, 18, 0, 0)
+    
     price_data = build_price_data(24, base_price=0.6, pattern='tariff_realistic', tariff='g12')
     
-    # 49% should use opportunistic logic
-    decision_49 = make_decision_with_mocks(
-        price_charger,
-        battery_soc=49,
-        current_price=0.50,
-        cheapest_price=0.40,
-        cheapest_hour=6,
-        price_data=price_data
-    )
-    # 0.50 > 0.40 × 1.15 (0.46) → don't charge (opportunistic)
-    assert decision_49['should_charge'] == False
+    with patch('src.automated_price_charging.datetime') as mock_dt:
+        # Mock now() to return fixed time (after 16h cutoff)
+        mock_dt.now.return_value = mock_datetime_value
+        # Preserve all other datetime methods
+        mock_dt.fromisoformat = real_datetime.fromisoformat
+        mock_dt.strptime = real_datetime.strptime
+        mock_dt.combine = real_datetime.combine
+        mock_dt.min = real_datetime.min
+        mock_dt.max = real_datetime.max
+        
+        # 49% should use opportunistic logic
+        decision_49 = make_decision_with_mocks(
+            price_charger,
+            battery_soc=49,
+            current_price=0.50,
+            cheapest_price=0.40,
+            cheapest_hour=6,
+            price_data=price_data
+        )
+        # 0.50 > 0.40 × 1.15 (0.46) → don't charge (opportunistic)
+        assert decision_49['should_charge'] == False
+        
+        # 50% should use normal tier logic (percentile-based)
+        decision_50 = make_decision_with_mocks(
+            price_charger,
+            battery_soc=50,
+            current_price=0.50,
+            cheapest_price=0.40,
+            cheapest_hour=6,
+            price_data=price_data
+        )
+        # Normal tier uses different logic, outcome may differ
+        assert 'priority' in decision_50
+
+
+def test_opportunistic_tier_pre_peak_charging_evening_forecast(price_charger):
+    """
+    Opportunistic tier should charge in afternoon when evening peak is forecast.
     
-    # 50% should use normal tier logic (percentile-based)
-    decision_50 = make_decision_with_mocks(
-        price_charger,
-        battery_soc=50,
-        current_price=0.50,
-        cheapest_price=0.40,
-        cheapest_hour=6,
-        price_data=price_data
-    )
-    # Normal tier uses different logic, outcome may differ
-    assert 'priority' in decision_50
+    Scenario: 14:35, SOC 41%, current price 0.85 PLN/kWh
+    - Cheapest next 12h: 0.52 PLN/kWh (night prices 22-06h)
+    - Threshold (×1.15): 0.598 PLN/kWh
+    - Current 0.85 > 0.598 → WOULD WAIT with current logic
+    - BUT: Evening peak (17-22h) will be 1.10-1.30 PLN/kWh
+    - SHOULD CHARGE: Better to charge at 0.85 than wait and pay 1.20 evening average
+    
+    This test validates the time-of-day awareness enhancement for OPPORTUNISTIC tier.
+    """
+    from datetime import datetime as real_datetime
+    from unittest.mock import patch, Mock
+    
+    # Mock the current time to 14:35
+    mock_datetime_value = real_datetime(2025, 12, 5, 14, 35, 0)
+    
+    # Build realistic price data with evening peak
+    price_data = build_price_data(24, pattern='evening_peak_realistic')
+    
+    # Extract actual cheapest price from night period to validate test setup
+    night_prices = [
+        float(p['csdac_pln']) / 1000
+        for p in price_data['value']
+        if any(p['dtime'].startswith(f'2025-12-0{d}T0{h}:') or p['dtime'].startswith(f'2025-12-0{d} 0{h}:')
+               for d in [5, 6] for h in range(6))
+    ]
+    cheapest_night = min(night_prices) if night_prices else 0.52
+    
+    # Extract evening peak prices to validate scenario
+    evening_prices = [
+        float(p['csdac_pln']) / 1000
+        for p in price_data['value']
+        if any(f'T{h:02d}:' in p['dtime'] or f' {h:02d}:' in p['dtime']
+               for h in range(17, 23))
+    ]
+    evening_avg = sum(evening_prices) / len(evening_prices) if evening_prices else 1.20
+    
+    # Afternoon current price (14:35)
+    afternoon_prices = [
+        float(p['csdac_pln']) / 1000
+        for p in price_data['value']
+        if 'T14:' in p['dtime'] or ' 14:' in p['dtime']
+    ]
+    current_afternoon = sum(afternoon_prices) / len(afternoon_prices) if afternoon_prices else 0.85
+    
+    # Make decision with mocked time
+    with patch('src.automated_price_charging.datetime') as mock_dt:
+        # Mock now() to return our fixed time
+        mock_dt.now.return_value = mock_datetime_value
+        # Preserve all other datetime methods (fromisoformat, etc.)
+        mock_dt.fromisoformat = real_datetime.fromisoformat
+        mock_dt.strptime = real_datetime.strptime
+        mock_dt.combine = real_datetime.combine
+        mock_dt.min = real_datetime.min
+        mock_dt.max = real_datetime.max
+        
+        decision = make_decision_with_mocks(
+            price_charger,
+            battery_soc=41,  # OPPORTUNISTIC tier (12-50%)
+            current_price=current_afternoon,  # ~0.85 PLN/kWh
+            cheapest_price=cheapest_night,  # ~0.52 PLN/kWh
+            cheapest_hour=22,  # Night
+            price_data=price_data
+        )
+    
+    # Current logic: 0.85 > 0.52 × 1.15 (0.598) → would WAIT
+    # But evening will be ~1.20 PLN/kWh avg
+    # With pre-peak logic: SHOULD CHARGE before evening
+    
+    # After implementation, expect pre-peak charging
+    threshold = cheapest_night * 1.15
+    if current_afternoon > threshold:
+        # With pre-peak logic, should charge to avoid evening peak
+        assert decision['should_charge'] == True, \
+            f"Pre-peak logic should charge: current {current_afternoon:.3f} PLN/kWh, evening avg {evening_avg:.3f} PLN/kWh > current × 1.1"
+        assert 'evening' in decision['reason'].lower() or 'peak' in decision['reason'].lower(), \
+            f"Reason should mention evening/peak: {decision['reason']}"
+        assert decision['confidence'] >= 0.7
+    else:
+        # If within normal tolerance, charges anyway
+        assert decision['should_charge'] == True
+
+
+@pytest.mark.parametrize("soc,current_time_hour,current_price,pattern,expected_charge,scenario", [
+    # Time-of-day boundary tests (16h cutoff for pre-peak logic)
+    (41, 15, 0.85, 'evening_peak_realistic', True, "15:xx (before 16h cutoff) → should charge pre-peak"),
+    (41, 16, 0.85, 'evening_peak_realistic', False, "16:xx (at/after cutoff) → use normal logic, wait"),
+    (41, 17, 0.85, 'evening_peak_realistic', False, "17:xx (evening started) → too late for pre-peak"),
+    
+    # Price threshold tests (0.9 PLN/kWh threshold for pre-peak charging)
+    (41, 14, 0.88, 'evening_peak_realistic', True, "Current 0.88 < 0.9 threshold → can charge pre-peak"),
+    (41, 14, 0.92, 'evening_peak_realistic', False, "Current 0.92 > 0.9 threshold → don't charge (price too high)"),
+    (41, 14, 0.90, 'evening_peak_realistic', True, "Current 0.90 = threshold → at boundary, charge"),
+    
+    # Evening forecast tests (must be significantly higher: >10% of current)
+    (41, 14, 0.85, 'flat', False, "Evening flat pattern → no significant increase, normal logic"),
+    (41, 14, 0.85, 'evening_peak_realistic', True, "Evening peak > current × 1.1 → charge pre-peak"),
+    (41, 14, 0.85, 'night_valley', False, "Evening in valley → cheaper than current, wait"),
+    
+    # SOC threshold tests (≥20% per user's "40%+" → ≥20% approved)
+    (19, 14, 0.85, 'evening_peak_realistic', False, "SOC 19% < 20% threshold → no pre-peak logic"),
+    (20, 14, 0.85, 'evening_peak_realistic', True, "SOC 20% = threshold → pre-peak logic applies"),
+    (41, 14, 0.85, 'evening_peak_realistic', True, "SOC 41% (user's scenario) → pre-peak logic applies"),
+])
+def test_opportunistic_pre_peak_edge_cases(price_charger, soc, current_time_hour, 
+                                          current_price, pattern, expected_charge, scenario):
+    """
+    Test boundary conditions for pre-peak charging logic.
+    
+    Covers:
+    - Time cutoff (before 16h)
+    - Price threshold (current < 0.9 PLN/kWh)
+    - Evening forecast significance (evening > current × 1.1)
+    - SOC threshold (≥20%)
+    """
+    from datetime import datetime as real_datetime
+    from unittest.mock import patch
+    
+    # Mock the current time to the specified hour
+    mock_datetime_value = real_datetime(2025, 12, 5, current_time_hour, 30, 0)  # 30 minutes past the hour
+    
+    # Build price data with specified pattern
+    price_data = build_price_data(24, pattern=pattern)
+    
+    # Make decision with mocked time at specified hour
+    with patch('src.automated_price_charging.datetime') as mock_dt:
+        # Mock now() to return our fixed time
+        mock_dt.now.return_value = mock_datetime_value
+        # Preserve all other datetime methods (fromisoformat, etc.)
+        mock_dt.fromisoformat = real_datetime.fromisoformat
+        mock_dt.strptime = real_datetime.strptime
+        mock_dt.combine = real_datetime.combine
+        mock_dt.min = real_datetime.min
+        mock_dt.max = real_datetime.max
+        
+        decision = make_decision_with_mocks(
+            price_charger,
+            battery_soc=soc,
+            current_price=current_price,
+            cheapest_price=0.52,  # Night price
+            cheapest_hour=23,
+            price_data=price_data
+        )
+    
+    # Verify expected behavior
+    assert decision['should_charge'] == expected_charge, \
+        f"Test scenario failed: {scenario}. Got {decision['should_charge']}, expected {expected_charge}. Reason: {decision['reason']}"
+
+
+@pytest.mark.parametrize("soc,current_price,cheapest_price,cheapest_hour,expected_charge,scenario", [
+    # Original 15% tolerance logic should still work when cheapest price is nearby (not night)
+    (30, 0.60, 0.55, 1, True, "Current 0.60 ≤ 0.55 × 1.15 (0.6325) → charge"),
+    (35, 0.70, 0.68, 2, True, "Current 0.70 ≤ 0.68 × 1.15 (0.782) → charge"),
+    (25, 0.45, 0.40, 0, True, "Current 0.45 ≤ 0.40 × 1.15 (0.46) → charge (edge case)"),
+    
+    # Should NOT charge when outside tolerance
+    (40, 0.80, 0.60, 3, False, "Current 0.80 > 0.60 × 1.15 (0.69) → wait"),
+    (28, 0.75, 0.50, 5, False, "Current 0.75 > 0.50 × 1.15 (0.575) → wait"),
+    
+    # Boundary at exactly 15% tolerance
+    (32, 0.575, 0.50, 2, True, "Current 0.575 = 0.50 × 1.15 → charge (at threshold)"),
+])
+def test_opportunistic_absolute_cheapest_preserved(price_charger, soc, current_price, 
+                                                   cheapest_price, cheapest_hour, 
+                                                   expected_charge, scenario):
+    """
+    Regression test: Original 15% tolerance logic must still work correctly.
+    
+    When the cheapest price is nearby (within next few hours), the system should
+    charge if current price is within 15% of that cheapest price. This is the
+    core OPPORTUNISTIC tier logic that must not be broken by pre-peak enhancements.
+    """
+    from datetime import datetime as real_datetime
+    from unittest.mock import patch
+    
+    # Mock time to 18:00 (after 16h cutoff) to avoid pre-peak logic interfering
+    mock_datetime_value = real_datetime(2025, 12, 5, 18, 0, 0)
+    
+    # Build price data where cheapest is soon (not night)
+    start_time = real_datetime.now().replace(hour=18, minute=0, second=0, microsecond=0)
+    price_points = []
+    
+    # Current period
+    price_points.append({
+        'dtime': start_time.isoformat(),
+        'csdac_pln': current_price * 1000,
+        'business_date': start_time.strftime('%Y-%m-%d')
+    })
+    
+    # Next 12 hours - cheapest at specified hour
+    for i in range(1, 49):
+        timestamp = start_time + timedelta(minutes=i * 15)
+        hour_offset = i // 4
+        
+        if hour_offset == cheapest_hour:
+            price = cheapest_price
+        else:
+            price = current_price + 0.05  # Slightly higher
+        
+        price_points.append({
+            'dtime': timestamp.isoformat(),
+            'csdac_pln': price * 1000,
+            'business_date': timestamp.strftime('%Y-%m-%d')
+        })
+    
+    price_data = {'value': price_points}
+    
+    # Make decision with mocked time (after 16h cutoff)
+    with patch('src.automated_price_charging.datetime') as mock_dt:
+        # Mock now() to return fixed time
+        mock_dt.now.return_value = mock_datetime_value
+        # Preserve all other datetime methods
+        mock_dt.fromisoformat = real_datetime.fromisoformat
+        mock_dt.strptime = real_datetime.strptime
+        mock_dt.combine = real_datetime.combine
+        mock_dt.min = real_datetime.min
+        mock_dt.max = real_datetime.max
+        
+        decision = make_decision_with_mocks(
+            price_charger,
+            battery_soc=soc,
+            current_price=current_price,
+            cheapest_price=cheapest_price,
+            cheapest_hour=cheapest_hour,
+            price_data=price_data
+        )
+    
+    # Verify core OPPORTUNISTIC logic
+    assert decision['should_charge'] == expected_charge, \
+        f"Regression failure: {scenario}. Original 15% tolerance logic broken!"
+    
+    if expected_charge:
+        assert 'OPPORTUNISTIC' in decision['reason']
+    else:
+        assert 'wait' in decision['reason'].lower() or 'threshold' in decision['reason'].lower()
 
 
 # ============================================================================
