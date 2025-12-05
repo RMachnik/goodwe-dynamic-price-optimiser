@@ -347,16 +347,18 @@ class LogWebServer:
                 return None
             
             # Validate business_date (today or tomorrow for next-day prices)
-            cached_date = cached.get('business_date', '')
-            today = datetime.now().strftime('%Y-%m-%d')
-            tomorrow = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-            
             if cached_date not in [today, tomorrow]:
                 logger.debug(f"Price disk cache date mismatch: {cached_date} not in [{today}, {tomorrow}]")
                 return None
             
+            # Validate that cache contains the new 'prices' list structure
+            data = cached.get('price_data')
+            if not data or 'prices' not in data:
+                logger.info("Price disk cache missing 'prices' list (old format) - forcing refresh")
+                return None
+            
             logger.info(f"✅ Loaded price data from disk cache (age: {cache_age/60:.1f}min)")
-            return cached.get('price_data')
+            return data
             
         except Exception as e:
             logger.warning(f"Failed to load price cache from disk: {e}")
