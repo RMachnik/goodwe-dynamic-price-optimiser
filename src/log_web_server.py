@@ -1050,7 +1050,12 @@ class LogWebServer:
                 if price_data:
                     return jsonify(price_data)
                 else:
-                    return jsonify({'error': 'No price data available'}), 404
+                    # Check for background refresh error
+                    with self._background_cache_lock:
+                        last_error = self._background_cache.get('last_price_error')
+                    
+                    error_msg = f"No price data available. Last error: {last_error}" if last_error else "No price data available (initializing...)"
+                    return jsonify({'error': error_msg}), 404
                     
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
