@@ -262,6 +262,30 @@ battery_management:
   auto_reboot_undervoltage: true  # Auto-reboot after undervoltage (GoodWe Lynx-D feature)
   bms_integration: true           # Battery Management System integration
   vde_2510_50_compliance: true    # VDE 2510-50 safety standard compliance
+  
+  # Charging Hysteresis Configuration (Battery Longevity Protection)
+  # Reduces charging sessions from 8-10/night to 2-3/night
+  # Maintains GoodWe warranty compliance (< 365 full cycles/year)
+  charging_hysteresis:
+    enabled: true                # Enable hysteresis-based charging control
+    
+    # Normal tier (SOC 40-100%) - Night charging optimization
+    normal_start_threshold: 85   # Only start charging when SOC < 85%
+    normal_stop_threshold: 95    # Stop charging when SOC >= 95%
+    normal_target_soc: 95        # Target SOC for normal charging
+    
+    # Opportunistic tier (SOC 15-40%) - Daytime cheap price charging
+    opportunistic_start_threshold: 70
+    opportunistic_stop_threshold: 85
+    
+    # Session management - Battery longevity protection
+    min_session_duration_minutes: 30    # Prevent rapid start/stop (inverter protection)
+    min_discharge_depth_percent: 10     # Require 10% discharge before recharge
+    max_sessions_per_day: 4             # Limit to 4 sessions/day (GoodWe warranty: 1 full cycle/day)
+    
+    # Override for critical situations
+    override_on_emergency: true         # Ignore hysteresis if SOC < 5%
+    override_on_critical: true          # Ignore hysteresis if SOC < 12%
 
 # Enhanced Safety Settings (merged from fast_charge_config.yaml)
 safety:

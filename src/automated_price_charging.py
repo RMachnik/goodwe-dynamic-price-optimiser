@@ -83,6 +83,14 @@ class AutomatedPriceCharger:
         
         # PV forecaster for weather-aware decisions (set by MasterCoordinator)
         self.pv_forecaster = None
+        
+        # Session tracking for hysteresis
+        self.active_charging_session = None
+        self.session_start_time = None
+        self.session_start_soc = None
+        self.last_full_charge_soc = None  # Track last "full" charge level
+        self.daily_session_count = 0
+        self.last_session_reset = datetime.now().date()
 
     def set_pv_forecaster(self, pv_forecaster) -> None:
         """Set PV forecaster for weather-aware charging decisions.
@@ -175,6 +183,9 @@ class AutomatedPriceCharger:
         
         # Load aggressive cheapest price charging configuration (legacy)
         self._load_aggressive_cheapest_config()
+        
+        # Load charging hysteresis configuration (battery longevity)
+        self._load_hysteresis_config()
 
     def _load_pricing_config(self) -> None:
         """Load tariff/service charge pricing components safely."""
@@ -251,6 +262,41 @@ class AutomatedPriceCharger:
             logger.error(f"Failed to load aggressive cheapest price configuration: {e}")
             self.aggressive_cheapest_config = {}
             self.aggressive_cheapest_enabled = False
+    
+    def _load_hysteresis_config(self):
+        """Load charging hysteresis configuration for battery longevity"""
+        try:
+            battery_config = self.config.get('battery_management', {})
+            hysteresis_config = battery_config.get('charging_hysteresis', {})
+            
+            # Set defaults if not configured
+            self.hysteresis_enabled = hysteresis_config.get('enabled', False)
+            
+            # Normal tier thresholds (SOC 40-100%)
+            self.normal_start_threshold = hysteresis_config.get('normal_start_threshold', 85)
+            self.normal_stop_threshold = hysteresis_config.get('normal_stop_threshold', 95)
+            self.normal_target_soc = hysteresis_config.get('normal_target_soc', 95)
+            
+            # Opportunistic tier thresholds (SOC 15-40%)
+            self.opportunistic_start_threshold = hysteresis_config.get('opportunistic_start_threshold', 70)
+            self.opportunistic_stop_threshold = hysteresis_config.get('opportunistic_stop_threshold', 85)
+            
+            # Session management
+            self.min_session_duration_minutes = hysteresis_config.get('min_session_duration_minutes', 30)
+            self.min_discharge_depth_percent = hysteresis_config.get('min_discharge_depth_percent', 10)
+            self.max_sessions_per_day = hysteresis_config.get('max_sessions_per_day', 4)
+            
+            # Override settings
+            self.override_on_emergency = hysteresis_config.get('override_on_emergency', True)
+            self.override_on_critical = hysteresis_config.get('override_on_critical', True)
+            
+            logger.info(f"Charging hysteresis: {'enabled' if self.hysteresis_enabled else 'disabled'} "
+                       f"(start: {self.normal_start_threshold}%, stop: {self.normal_stop_threshold}%, "
+                       f"max sessions: {self.max_sessions_per_day}/day)")
+            
+        except Exception as e:
+            logger.error(f"Failed to load hysteresis configuration: {e}")
+            self.hysteresis_enabled = False
     
     def calculate_final_price(self, market_price: float, timestamp: Optional[datetime] = None, kompas_status: Optional[str] = None) -> float:
         """
@@ -1484,6 +1530,118 @@ class AutomatedPriceCharger:
             except:
                 return False
 
+    def _normal_tier_with_hysteresis(self, battery_soc: int, current_price: float,
+                                     cheapest_price: Optional[float], cheapest_hour: Optional[int],
+                                     price_data: Dict) -> Dict[str, any]:
+        """Normal tier charging with hysteresis to reduce cycles and protect battery longevity"""
+        
+        # Reset daily session count if new day
+        today = datetime.now().date()
+        if today != self.last_session_reset:
+            self.daily_session_count = 0
+            self.last_session_reset = today
+            logger.info(f"Reset daily session count for {today}")
+        
+        # Check if we're in an active charging session
+        if self.active_charging_session:
+            return self._handle_active_session(battery_soc)
+        
+        # Check if we've exceeded max sessions per day
+        if self.daily_session_count >= self.max_sessions_per_day:
+            return {
+                'should_charge': False,
+                'reason': f'NORMAL tier: Max sessions ({self.max_sessions_per_day}) reached today - protecting battery',
+                'priority': 'low',
+                'confidence': 0.9
+            }
+        
+        # Check if battery has discharged enough to warrant recharging
+        if self.last_full_charge_soc is not None:
+            discharge_depth = self.last_full_charge_soc - battery_soc
+            if discharge_depth < self.min_discharge_depth_percent:
+                return {
+                    'should_charge': False,
+                    'reason': f'NORMAL tier: Insufficient discharge ({discharge_depth}% < {self.min_discharge_depth_percent}%) - protecting battery',
+                    'priority': 'low',
+                    'confidence': 0.8
+                }
+        
+        # Check if SOC is below start threshold
+        if battery_soc >= self.normal_start_threshold:
+            return {
+                'should_charge': False,
+                'reason': f'NORMAL tier: Battery OK ({battery_soc}%) - above start threshold ({self.normal_start_threshold}%)',
+                'priority': 'low',
+                'confidence': 0.7
+            }
+        
+        # SOC is below start threshold - check if price is good
+        if not self._is_price_cheap_for_normal_tier(current_price, battery_soc, price_data):
+            return {
+                'should_charge': False,
+                'reason': f'NORMAL tier: Battery low ({battery_soc}%) but price not cheap enough ({current_price:.2f} PLN)',
+                'priority': 'low',
+                'confidence': 0.7
+            }
+        
+        # Start new charging session
+        self.active_charging_session = True
+        self.session_start_time = datetime.now()
+        self.session_start_soc = battery_soc
+        self.daily_session_count += 1
+        
+        logger.info(f"🔋 Starting charging session #{self.daily_session_count} (SOC: {battery_soc}% → target: {self.normal_target_soc}%)")
+        
+        return {
+            'should_charge': True,
+            'reason': f'NORMAL tier: Good price ({current_price:.2f} PLN) - starting session #{self.daily_session_count}',
+            'priority': 'low',
+            'confidence': 0.8,
+            'target_soc': self.normal_target_soc,
+            'session_number': self.daily_session_count
+        }
+
+    def _handle_active_session(self, battery_soc: int) -> Dict[str, any]:
+        """Handle decision during active charging session"""
+        
+        # Check if we've reached target SOC
+        if battery_soc >= self.normal_stop_threshold:
+            # End session
+            self.active_charging_session = None
+            self.last_full_charge_soc = battery_soc
+            
+            logger.info(f"✅ Charging session complete (SOC: {self.session_start_soc}% → {battery_soc}%)")
+            
+            return {
+                'should_charge': False,
+                'reason': f'NORMAL tier: Target SOC reached ({battery_soc}% >= {self.normal_stop_threshold}%)',
+                'priority': 'low',
+                'confidence': 0.95
+            }
+        
+        # Check minimum session duration
+        if self.session_start_time:
+            session_duration_minutes = (datetime.now() - self.session_start_time).seconds / 60
+            
+            if session_duration_minutes < self.min_session_duration_minutes:
+                # Continue charging (prevent flapping)
+                return {
+                    'should_charge': True,
+                    'reason': f'NORMAL tier: Continuing session (min duration: {self.min_session_duration_minutes}min)',
+                    'priority': 'low',
+                    'confidence': 0.9,
+                    'target_soc': self.normal_target_soc
+                }
+        
+        # Session long enough, but not at target - continue charging
+        return {
+            'should_charge': True,
+            'reason': f'NORMAL tier: Charging to target ({battery_soc}% → {self.normal_target_soc}%)',
+            'priority': 'low',
+            'confidence': 0.85,
+            'target_soc': self.normal_target_soc
+        }
+
     def _make_charging_decision(self, battery_soc: int, overproduction: int, grid_power: int,
                               grid_direction: str, current_price: Optional[float],
                               cheapest_price: Optional[float], cheapest_hour: Optional[int],
@@ -1632,6 +1790,7 @@ class AutomatedPriceCharger:
                 }
         
         # TIER 4 - NORMAL (50%+): Charge if price very cheap (percentile-based)
+        # WITH HYSTERESIS: Reduce charging sessions for battery longevity
         if not current_price or not price_data:
             return {
                 'should_charge': False,
@@ -1640,6 +1799,13 @@ class AutomatedPriceCharger:
                 'confidence': 0.3
             }
         
+        # Use hysteresis logic if enabled
+        if self.hysteresis_enabled:
+            return self._normal_tier_with_hysteresis(
+                battery_soc, current_price, cheapest_price, cheapest_hour, price_data
+            )
+        
+        # Legacy logic (no hysteresis)
         if self._is_price_cheap_for_normal_tier(current_price, battery_soc, price_data):
             return {
                 'should_charge': True,
