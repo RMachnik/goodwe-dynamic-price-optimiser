@@ -2500,41 +2500,36 @@ class LogWebServer:
                         Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a)).forEach(date => {
                             html += `<h4 style="margin: 20px 0 10px 0; padding-bottom: 5px; border-bottom: 1px solid var(--border-color);">${date}</h4>`;
                             grouped[date].forEach(d => {
-                                const time = new Date(d.timestamp).toLocaleTimeString();
+                                const timestamp = new Date(d.timestamp);
+                                const time = timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                                const hour = timestamp.getHours();
                                 const actionLower = (d.action || '').toLowerCase();
                                 const isCharging = actionLower === 'charge';
                                 const isWait = actionLower === 'wait';
                                 const isSelling = actionLower === 'battery_selling';
                                 const className = isCharging ? 'charging' : (isWait ? 'wait' : (isSelling ? 'selling' : ''));
-                                const actionIcon = isCharging ? '⚡' : (isWait ? '⏳' : (isSelling ? '💰' : '❓'));
-                                const confidencePercent = (d.confidence * 100).toFixed(0);
+                                const actionIcon = isCharging ? '⚡' : (isWait ? '⏸️' : (isSelling ? '💰' : '❓'));
                                 
-                                const confidenceClass = confidencePercent >= 70 ? 'high' : (confidencePercent >= 40 ? 'medium' : 'low');
                                 const badgeClass = isCharging ? 'charging' : (isWait ? 'wait' : (isSelling ? 'selling' : ''));
                                 
                                 html += `
                                     <div class="decision-item ${className}">
-                                        <div class="decision-header">
-                                            <div class="decision-action">
+                                        <div class="decision-header" style="display: grid; grid-template-columns: 80px 1fr; gap: 12px; align-items: center;">
+                                            <div style="text-align: left;">
+                                                <div style="font-size: 1.1em; font-weight: bold; color: var(--text-primary);">${time}</div>
+                                                <div style="font-size: 0.85em; color: var(--text-secondary);">Hour ${hour}</div>
+                                            </div>
+                                            <div style="display: flex; align-items: center; gap: 8px;">
                                                 <span class="action-icon">${actionIcon}</span>
-                                                <span>${d.action.toUpperCase()}</span>
-                                                <span class="decision-badge ${badgeClass}">${confidencePercent}%</span>
+                                                <span style="font-weight: 600;">${d.action.toUpperCase()}</span>
                                             </div>
-                                            <div class="decision-time">${time}</div>
                                         </div>
-                                        <div class="decision-reason">${d.reason}</div>
-                                        <div class="confidence-container">
-                                            <div class="confidence-label">
-                                                <span>Confidence</span>
-                                                <span>${confidencePercent}%</span>
-                                            </div>
-                                            <div class="confidence-bar"><div class="confidence-fill ${confidenceClass}" style="width: ${confidencePercent}%"></div></div>
-                                        </div>
-                                        <div class="decision-stats">
+                                        <div class="decision-stats" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 8px; margin: 12px 0 8px 0;">
                                             <div class="stat-chip"><span class="stat-icon">🔋</span><span class="stat-value">${d.battery_soc || 'N/A'}%</span></div>
-                                            <div class="stat-chip"><span class="stat-icon">💰</span><span class="stat-value">${d.current_price ? d.current_price.toFixed(3) : 'N/A'} PLN</span></div>
+                                            <div class="stat-chip"><span class="stat-icon">💰</span><span class="stat-value">${d.current_price ? d.current_price.toFixed(2) : 'N/A'} PLN</span></div>
                                             <div class="stat-chip"><span class="stat-icon">☀️</span><span class="stat-value">${d.pv_power || 0}W</span></div>
                                         </div>
+                                        <div class="decision-reason" style="font-size: 0.9em; color: var(--text-secondary); line-height: 1.4;">${d.reason}</div>
                                     </div>
                                 `;
                             });
