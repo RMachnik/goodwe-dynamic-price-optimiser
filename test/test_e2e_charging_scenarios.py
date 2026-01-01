@@ -85,7 +85,7 @@ def price_charger(base_config):
                 return charger
 
 
-def build_price_data(hours: int, base_price: float = 0.6, pattern: str = 'flat', tariff: str = 'g12') -> Dict:
+def build_price_data(hours: int, base_price: float = 0.6, pattern: str = 'flat', tariff: str = 'g12', start_time: Optional[datetime] = None) -> Dict:
     """
     Build realistic price data with 15-minute granularity.
     
@@ -94,11 +94,15 @@ def build_price_data(hours: int, base_price: float = 0.6, pattern: str = 'flat',
         base_price: Base price in PLN/kWh (default 0.6)
         pattern: Price pattern - 'flat', 'tariff_realistic', 'night_valley', 'evening_peak', 'evening_peak_realistic'
         tariff: Tariff type for 'tariff_realistic' pattern - 'g12', 'g13' (default: 'g12')
+        start_time: Optional base time (default: 2025-12-05 00:00:00)
     
     Returns:
         Dict with 'value' list containing price points
     """
-    start_time = datetime.now().replace(minute=0, second=0, microsecond=0)
+    if start_time is None:
+        start_time = datetime(2025, 12, 5, 0, 0, 0)
+    else:
+        start_time = start_time.replace(minute=0, second=0, microsecond=0)
     price_points = []
     
     for period in range(hours * 4):  # 4 periods per hour (15-min intervals)
@@ -364,7 +368,7 @@ def test_opportunistic_tier_boundary_at_50_percent(price_charger):
     #Mock time to 18:00 (evening) to avoid pre-peak logic triggering
     mock_datetime_value = real_datetime(2025, 12, 5, 18, 0, 0)
     
-    price_data = build_price_data(24, base_price=0.6, pattern='tariff_realistic', tariff='g12')
+    price_data = build_price_data(24, base_price=0.6, pattern='tariff_realistic', tariff='g12', start_time=mock_datetime_value)
     
     with patch('src.automated_price_charging.datetime') as mock_dt:
         # Mock now() to return fixed time (after 16h cutoff)
@@ -427,8 +431,9 @@ def test_opportunistic_tier_pre_peak_charging_evening_forecast(price_charger):
     night_prices = [
         float(p['csdac_pln']) / 1000
         for p in price_data['value']
-        if any(p['dtime'].startswith(f'2025-12-0{d}T0{h}:') or p['dtime'].startswith(f'2025-12-0{d} 0{h}:')
-               for d in [5, 6] for h in range(6))
+        if any((p['dtime'].startswith(f'2025-12-05T0{h}:') or p['dtime'].startswith(f'2025-12-05 0{h}:') or
+                p['dtime'].startswith(f'2025-12-06T0{h}:') or p['dtime'].startswith(f'2025-12-06 0{h}:'))
+               for h in range(6))
     ]
     cheapest_night = min(night_prices) if night_prices else 0.52
     
@@ -525,8 +530,8 @@ def test_opportunistic_pre_peak_edge_cases(price_charger, soc, current_time_hour
     # Mock the current time to the specified hour
     mock_datetime_value = real_datetime(2025, 12, 5, current_time_hour, 30, 0)  # 30 minutes past the hour
     
-    # Build price data with specified pattern
-    price_data = build_price_data(24, pattern=pattern)
+    # Build price data with specified pattern - using the SAME base date as mock
+    price_data = build_price_data(24, pattern=pattern, start_time=mock_datetime_value.replace(hour=0))
     
     # Make decision with mocked time at specified hour
     with patch('src.automated_price_charging.datetime') as mock_dt:
@@ -582,8 +587,8 @@ def test_opportunistic_absolute_cheapest_preserved(price_charger, soc, current_p
     # Mock time to 18:00 (after 16h cutoff) to avoid pre-peak logic interfering
     mock_datetime_value = real_datetime(2025, 12, 5, 18, 0, 0)
     
-    # Build price data where cheapest is soon (not night)
-    start_time = real_datetime.now().replace(hour=18, minute=0, second=0, microsecond=0)
+    # Build price data where cheapest is soon (not night) - use SAME date as mock
+    start_time = mock_datetime_value.replace(minute=0, second=0, microsecond=0)
     price_points = []
     
     # Current period
@@ -807,27 +812,38 @@ def test_multi_tier_progression_battery_drain(price_charger):
 
 def test_multi_tier_progression_night_valley_charging(price_charger):
     """Simulate overnight charging sequence with cheap night prices."""
+    from datetime import datetime as real_datetime
+    mock_datetime_value = real_datetime(2025, 12, 5, 0, 0, 0)
+    
     # Night valley prices - very cheap (0.30 PLN/kWh)
     # Build price data with cheapest in the middle for fallback calculation
-    price_data = build_price_data(24, base_price=0.6, pattern='night_valley')
+    price_data = build_price_data(24, base_price=0.6, pattern='night_valley', start_time=mock_datetime_value)
     
-    progression = [
-        (70, 0.30, True, 'low'),       # Normal tier, cheap price (0.30 ≤ 0.30 × 1.10) → charge (priority='low')
-        (75, 0.30, True, 'low'),       # Charging, SOC increasing
-        (80, 0.30, True, 'low'),       # Continue charging
-        (85, 0.30, True, 'low'),       # SOC ≥ 85%, but fallback still charges (doesn't check SOC)
-    ]
+    with patch('src.automated_price_charging.datetime') as mock_dt:
+        mock_dt.now.return_value = mock_datetime_value
+        mock_dt.fromisoformat = real_datetime.fromisoformat
+        mock_dt.strptime = real_datetime.strptime
+        mock_dt.combine = real_datetime.combine
+        mock_dt.min = real_datetime.min
+        mock_dt.max = real_datetime.max
+        
+        progression = [
+            (70, 0.30, True, 'low'),       # Normal tier, cheap price (0.30 ≤ 0.30 × 1.10) → charge (priority='low')
+            (75, 0.30, True, 'low'),       # Charging, SOC increasing
+            (80, 0.30, True, 'low'),       # Continue charging
+            (85, 0.30, True, 'low'),       # SOC ≥ 85%, but fallback still charges (doesn't check SOC)
+        ]
     
-    for soc, price, expected_charge, expected_priority in progression:
-        decision = make_decision_with_mocks(
-            price_charger,
-            battery_soc=soc,
-            current_price=price,
-            cheapest_price=0.30,  # Same as current (cheapest in period)
-            cheapest_hour=0,  # Current hour is cheapest
-            price_data=price_data
-        )
-        assert_decision_outcome(decision, expected_charge, expected_priority)
+        for soc, price, expected_charge, expected_priority in progression:
+            decision = make_decision_with_mocks(
+                price_charger,
+                battery_soc=soc,
+                current_price=price,
+                cheapest_price=0.30,  # Same as current (cheapest in period)
+                cheapest_hour=0,  # Current hour is cheapest
+                price_data=price_data
+            )
+            assert_decision_outcome(decision, expected_charge, expected_priority)
 
 
 def test_multi_tier_progression_opportunistic_to_normal(price_charger):
@@ -897,21 +913,32 @@ def test_multi_tier_progression_opportunistic_to_normal(price_charger):
 
 def test_super_low_price_event(price_charger):
     """Super low price event - verifies system handles extreme price scenarios."""
+    from datetime import datetime as real_datetime
+    mock_datetime_value = real_datetime(2025, 12, 5, 0, 0, 0)
+    
     # Note: With super_low_price logic disabled in config, uses normal tier fallback
     # 0.25 ≤ 0.25 × 1.10 (0.275) → should charge
-    price_data = build_price_data(24, base_price=0.6, pattern='super_low')
+    price_data = build_price_data(24, base_price=0.6, pattern='super_low', start_time=mock_datetime_value)
     
-    decision = make_decision_with_mocks(
-        price_charger,
-        battery_soc=60,  # Normal tier
-        current_price=0.25,  # Very cheap
-        cheapest_price=0.25,  # Current is cheapest
-        cheapest_hour=0,
-        price_data=price_data
-    )
+    with patch('src.automated_price_charging.datetime') as mock_dt:
+        mock_dt.now.return_value = mock_datetime_value
+        mock_dt.fromisoformat = real_datetime.fromisoformat
+        mock_dt.strptime = real_datetime.strptime
+        mock_dt.combine = real_datetime.combine
+        mock_dt.min = real_datetime.min
+        mock_dt.max = real_datetime.max
+        
+        decision = make_decision_with_mocks(
+            price_charger,
+            battery_soc=60,  # Normal tier
+            current_price=0.25,  # Very cheap
+            cheapest_price=0.25,  # Current is cheapest
+            cheapest_hour=0,
+            price_data=price_data
+        )
     
-    # Should charge due to cheap price meeting fallback threshold
-    assert decision['should_charge'] == True
+        # Should charge due to cheap price meeting fallback threshold
+        assert decision['should_charge'] == True
 
 
 def test_empty_price_data_handling(price_charger):

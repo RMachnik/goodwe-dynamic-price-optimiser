@@ -315,8 +315,8 @@ class AutomatedPriceCharger:
         
         # Use tariff calculator if available
         if self.tariff_calculator:
-            # Convert from PLN/MWh to PLN/kWh if needed
-            market_price_kwh = market_price / 1000 if market_price > 10 else market_price
+            # Convert from PLN/MWh to PLN/kWh if needed (abs check to handle negative prices)
+            market_price_kwh = market_price / 1000 if abs(market_price) > 10 else market_price
             
             components = self.tariff_calculator.calculate_final_price(
                 market_price_kwh,
@@ -331,7 +331,8 @@ class AutomatedPriceCharger:
         else:
             # Fallback to legacy pricing (SC component only)
             logger.warning("Tariff calculator not available, using legacy SC-only pricing")
-            final_price = market_price + self.sc_component_net
+            # Convert SC component from PLN/kWh to PLN/MWh
+            final_price = market_price + (self.sc_component_net * 1000)
             return final_price
     
     def apply_minimum_price_floor(self, price: float) -> float:
@@ -1350,67 +1351,7 @@ class AutomatedPriceCharger:
             logger.error(f"Error getting evening peak forecast: {e}")
             return None
     
-    def _is_approaching_evening_peak(self) -> Tuple[bool, float]:
-        """
-        Check if current time is approaching evening peak (before 16:00).
-        
-        Returns:
-            Tuple of (is_approaching, hours_until_peak)
-            - is_approaching: True if before 16:00 and evening peak will occur
-            - hours_until_peak: Hours until evening peak starts (17:00)
-        """
-        now = datetime.now()
-        current_hour = now.hour
-        
-        # Check if before the cutoff (16:00)
-        if current_hour < 16:
-            # Calculate hours until evening peak starts
-            evening_peak_start = min(self.evening_peak_hours) if self.evening_peak_hours else 17
-            hours_until_peak = evening_peak_start - current_hour - (now.minute / 60.0)
-            return True, max(0, hours_until_peak)
-        
-        return False, 0.0
     
-    def _get_evening_peak_forecast(self, price_data: Dict) -> Optional[Dict[str, float]]:
-        """
-        Get evening peak price forecast from price_data.
-        
-        Args:
-            price_data: Dictionary with 'value' list containing price points
-        
-        Returns:
-            Dict with {'avg': float, 'max': float, 'min': float} in PLN/kWh, or None if no data
-        """
-        if not price_data or 'value' not in price_data:
-            return None
-        
-        try:
-            evening_prices = []
-            
-            # Extract prices for evening peak hours
-            for hour in self.evening_peak_hours:
-                for period in price_data['value']:
-                    dt_str = period.get('dtime', '')
-                    # Match hour in datetime string (supports both formats)
-                    if f'T{hour:02d}:' in dt_str or f' {hour:02d}:' in dt_str:
-                        # Calculate final price with tariff
-                        market_price_mwh = float(period['csdac_pln'])
-                        dt = datetime.fromisoformat(dt_str.replace('Z', ''))
-                        final_price_mwh = self.calculate_final_price(market_price_mwh, dt)
-                        final_price_kwh = final_price_mwh / 1000
-                        evening_prices.append(final_price_kwh)
-            
-            if not evening_prices:
-                return None
-            
-            return {
-                'avg': sum(evening_prices) / len(evening_prices),
-                'max': max(evening_prices),
-                'min': min(evening_prices)
-            }
-        except Exception as e:
-            logger.error(f"Error getting evening peak forecast: {e}")
-            return None
 
     def _find_cheapest_price_next_hours(self, hours: int, price_data: Dict) -> Optional[float]:
         """

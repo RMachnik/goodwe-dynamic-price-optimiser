@@ -672,7 +672,8 @@ class MasterCoordinator:
                     # Use AutomatedPriceCharger for consistent price calculation
                     current_price = self.charging_controller.get_current_price(current_price_data)
                     if current_price:
-                        current_price = current_price / 1000  # Convert PLN/MWh to PLN/kWh
+                        # Use abs check to correctly handle negative prices
+                        current_price = current_price / 1000 if abs(current_price) > 10 else current_price
                     
                     # Find cheapest price using AutomatedPriceCharger
                     prices = []
@@ -680,7 +681,8 @@ class MasterCoordinator:
                         market_price = float(item['csdac_pln'])
                         item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
                         final_price = self.charging_controller.calculate_final_price(market_price, item_time)
-                        final_price_kwh = final_price / 1000  # Convert PLN/MWh to PLN/kWh
+                        # Use abs check to correctly handle negative prices
+                        final_price_kwh = final_price / 1000 if abs(final_price) > 10 else final_price
                         prices.append((final_price_kwh, item_time.hour))
                     if prices:
                         cheapest_price, cheapest_hour = min(prices, key=lambda x: x[0])

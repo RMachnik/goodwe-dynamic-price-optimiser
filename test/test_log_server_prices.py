@@ -11,14 +11,21 @@ from unittest.mock import patch, MagicMock
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-# Patch background refresh globally
-background_refresh_patcher = patch('log_web_server.LogWebServer._start_background_refresh', lambda self: None)
-background_refresh_patcher.start()
-
 from log_web_server import LogWebServer
 
 class TestLogWebServerPrices(unittest.TestCase):
     """Test log web server prices endpoint"""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Set up class-level patches"""
+        cls.background_refresh_patcher = patch('log_web_server.LogWebServer._start_background_refresh', lambda self: None)
+        cls.background_refresh_patcher.start()
+        
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up class-level patches"""
+        cls.background_refresh_patcher.stop()
     
     def setUp(self):
         """Set up test environment"""
