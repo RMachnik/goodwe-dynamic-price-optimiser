@@ -102,13 +102,13 @@ class TestPricingConsistency(unittest.TestCase):
         charger = AutomatedPriceCharger(config_path=self.temp_config_file.name)
         
         # Test SC component calculation with tariff-aware pricing
-        market_price_pln_kwh = 0.300  # 300 PLN/MWh = 0.300 PLN/kWh
+        market_price_pln_mwh = 300.0  # 300 PLN/MWh
         timestamp = datetime(2025, 9, 7, 8, 0)  # 08:00 - peak hour for G12w
         
-        # Expected: (market + SC + distribution) * 1000 = PLN/MWh
+        # Expected: (market/1000 + SC + distribution) * 1000 = PLN/MWh
         # 0.300 + 0.0892 + 0.3566 = 0.7458 PLN/kWh = 745.8 PLN/MWh
         expected_final_price = 745.8  # PLN/MWh
-        actual_final_price = charger.calculate_final_price(market_price_pln_kwh, timestamp)
+        actual_final_price = charger.calculate_final_price(market_price_pln_mwh, timestamp)
         
         self.assertAlmostEqual(actual_final_price, expected_final_price, places=1)
     
@@ -261,7 +261,7 @@ class TestPricingConsistency(unittest.TestCase):
         
         # Test AutomatedPriceCharger (returns PLN/MWh)
         charger = AutomatedPriceCharger(config_path=self.temp_config_file.name)
-        final_price_mwh_from_charger = charger.calculate_final_price(market_price_pln_kwh, timestamp)
+        final_price_mwh_from_charger = charger.calculate_final_price(market_price_pln_mwh, timestamp)
         self.assertAlmostEqual(final_price_mwh_from_charger, expected_final_pln_mwh, places=1)
         
         # Test PriceWindowAnalyzer
@@ -318,23 +318,26 @@ class TestPricingConsistency(unittest.TestCase):
         """Test price calculation with edge cases and tariff-aware pricing"""
         charger = AutomatedPriceCharger(config_path=self.temp_config_file.name)
         # Use off-peak hour (23:00) for G12w to simplify calculations
-        timestamp = datetime(2025, 9, 7, 23, 0)
+        midnight = datetime(2025, 9, 7, 23, 0)
         # Off-peak distribution: 0.0749 PLN/kWh = 74.9 PLN/MWh
         
-        # Test with zero market price (returns PLN/MWh)
-        final_price = charger.calculate_final_price(0.0, timestamp)
-        # (0.0 + 0.0892 + 0.0749) * 1000 = 164.1 PLN/MWh
-        self.assertAlmostEqual(final_price, 164.1, places=1)
+        # Edge case 1: Very low positive price
+        # 1.0 PLN/MWh = 0.001 PLN/kWh
+        # Expected final: (0.001 + 0.0892 + 0.0749) * 1000 = 165.1 PLN/MWh
+        price1 = charger.calculate_final_price(1.0, midnight)
+        self.assertAlmostEqual(price1, 165.1, places=1)
         
-        # Test with negative market price (can happen with negative electricity prices)
-        final_price = charger.calculate_final_price(-0.1, timestamp)
-        # (-0.1 + 0.0892 + 0.0749) * 1000 = 64.1 PLN/MWh
-        self.assertAlmostEqual(final_price, 64.1, places=1)
+        # Edge case 2: Negative price
+        # -100.0 PLN/MWh = -0.1 PLN/kWh
+        # Expected final: (-0.1 + 0.0892 + 0.0749) * 1000 = 64.1 PLN/MWh
+        price2 = charger.calculate_final_price(-100.0, midnight)
+        self.assertAlmostEqual(price2, 64.1, places=1)
         
-        # Test with very high market price (>10, treated as PLN/MWh)
-        final_price = charger.calculate_final_price(10000.0, timestamp)
-        # 10000 / 1000 = 10.0 PLN/kWh, then (10.0 + 0.0892 + 0.0749) * 1000 = 10164.1 PLN/MWh
-        self.assertAlmostEqual(final_price, 10164.1, places=1)
+        # Edge case 3: Very high market price
+        # 10000.0 PLN/MWh = 10.0 PLN/kWh
+        # Expected final: (10.0 + 0.0892 + 0.0749) * 1000 = 10164.1 PLN/MWh
+        price3 = charger.calculate_final_price(10000.0, midnight)
+        self.assertAlmostEqual(price3, 10164.1, places=1)
     
     def test_minimum_price_floor(self):
         """Test minimum price floor application"""

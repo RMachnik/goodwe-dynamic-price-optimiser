@@ -315,8 +315,8 @@ class AutomatedPriceCharger:
         
         # Use tariff calculator if available
         if self.tariff_calculator:
-            # Convert from PLN/MWh to PLN/kWh if needed (abs check to handle negative prices)
-            market_price_kwh = market_price / 1000 if abs(market_price) > 10 else market_price
+            # Always convert from PLN/MWh to PLN/kWh (removal of unreliable heuristic)
+            market_price_kwh = market_price / 1000
             
             components = self.tariff_calculator.calculate_final_price(
                 market_price_kwh,
