@@ -562,9 +562,10 @@ class AutomatedPriceCharger:
         # 2. Fallback: Try to find any price for the same hour if 15-minute match failed
         # This is vital for hourly data where only 00:00, 01:00, etc. records exist
         current_hour = now.hour
+        current_date = now.date()
         for item in price_data['value']:
             item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
-            if item_time.hour == current_hour:
+            if item_time.hour == current_hour and item_time.date() == current_date:
                 market_price_pln_mwh = float(item['csdac_pln'])
                 final_price_pln_mwh = self.calculate_final_price(market_price_pln_mwh, item_time, kompas_status)
                 logger.info(f"get_current_price: HOURLY FALLBACK MATCH {item['dtime']} for hour {current_hour} -> Final: {final_price_pln_mwh:.2f} PLN/MWh")
