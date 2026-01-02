@@ -549,18 +549,25 @@ class AutomatedPriceCharger:
         
         logger.info(f"get_current_price: Looking for period matching {current_time.strftime('%Y-%m-%d %H:%M')}")
         
-        # Find the current 15-minute period
+        # 1. Try to find the exact 15-minute period match
         for item in price_data['value']:
             item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
             period_end = item_time + timedelta(minutes=15)
-            matches = item_time <= current_time < period_end
-            
-            if matches:
+            if item_time <= current_time < period_end:
                 market_price_pln_mwh = float(item['csdac_pln'])
-                # Calculate final price with tariff-aware pricing
                 final_price_pln_mwh = self.calculate_final_price(market_price_pln_mwh, item_time, kompas_status)
-                logger.info(f"get_current_price: MATCHED {item['dtime']} -> Market: {market_price_pln_mwh:.2f} PLN/MWh, Final: {final_price_pln_mwh:.2f} PLN/MWh ({final_price_pln_mwh/1000:.4f} PLN/kWh)")
-                # Return in PLN/MWh for consistency with other methods
+                logger.info(f"get_current_price: EXACT MATCH {item['dtime']} -> Final: {final_price_pln_mwh:.2f} PLN/MWh")
+                return final_price_pln_mwh
+                
+        # 2. Fallback: Try to find any price for the same hour if 15-minute match failed
+        # This is vital for hourly data where only 00:00, 01:00, etc. records exist
+        current_hour = now.hour
+        for item in price_data['value']:
+            item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M')
+            if item_time.hour == current_hour:
+                market_price_pln_mwh = float(item['csdac_pln'])
+                final_price_pln_mwh = self.calculate_final_price(market_price_pln_mwh, item_time, kompas_status)
+                logger.info(f"get_current_price: HOURLY FALLBACK MATCH {item['dtime']} for hour {current_hour} -> Final: {final_price_pln_mwh:.2f} PLN/MWh")
                 return final_price_pln_mwh
         
         logger.warning(f"get_current_price: No matching period found for {current_time}")

@@ -598,16 +598,17 @@ class LogWebServer:
                 raise Exception("Price API returned no data")
             
             # Process price data (calculate cheapest, average, etc.)
-            current_price = charger.get_current_price(price_data)
-            if current_price is None:
-                raise Exception("Could not determine current price")
+            # Use the improved get_current_price for the current price point
+            current_price_pln_mwh = charger.get_current_price(price_data)
+            if current_price_pln_mwh is None:
+                # Fallback: if we still can't find current price, don't crash, just log and use 0 or something safe
+                # This prevents the whole cache update from failing
+                logger.warning("Could not determine current price even with fallback matching")
+                current_price_kwh = 0.0
+            else:
+                current_price_kwh = current_price_pln_mwh / 1000
             
-            current_price_kwh = current_price / 1000
-            
-            # Find cheapest and calculate stats
-            current_price_kwh = current_price / 1000
-            
-            # Find cheapest and calculate stats
+            # Find cheapest and calculate stats consistently with get_current_price logic
             prices_list = []
             prices_tuples = []
             for item in price_data['value']:
@@ -617,6 +618,7 @@ class LogWebServer:
                 except ValueError:
                     item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M:%S')
                 
+                # Use same calculation as get_current_price
                 final_price = charger.calculate_final_price(market_price, item_time)
                 final_price_kwh = final_price / 1000
                 
@@ -629,10 +631,11 @@ class LogWebServer:
                 })
             
             if not prices_tuples:
-                raise Exception("No valid prices found")
+                raise Exception("No valid prices found after processing")
             
+            # Find cheapest price for the whole day
             cheapest_price, cheapest_hour = min(prices_tuples, key=lambda x: x[0])
-            avg_price = sum(price for price, _ in prices_tuples) / len(prices_tuples)
+            avg_price = sum(p for p, h in prices_tuples) / len(prices_tuples)
             
             result = {
                 'current_price_pln_kwh': round(current_price_kwh, 4),
