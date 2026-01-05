@@ -9,10 +9,17 @@ Tests the _is_price_cheap_for_normal_tier() method which implements:
 """
 
 import pytest
+import sys
+from pathlib import Path
 import numpy as np
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
-from src.automated_price_charging import AutomatedPriceCharger
+
+# Add src directory to path
+src_dir = Path(__file__).parent.parent / "src"
+sys.path.insert(0, str(src_dir))
+
+from automated_price_charging import AutomatedPriceCharger
 
 
 @pytest.fixture
@@ -48,8 +55,8 @@ def config():
 @pytest.fixture
 def price_charging(config):
     """Create AutomatedPriceCharger instance with mocked dependencies."""
-    with patch('src.automated_price_charging.GoodWeFastCharger'):
-        with patch('src.automated_price_charging.PriceHistoryManager') as MockPriceHistory:
+    with patch('automated_price_charging.GoodWeFastCharger'):
+        with patch('automated_price_charging.PriceHistoryManager') as MockPriceHistory:
             # Create a mock price_history instance
             mock_price_history = Mock()
             MockPriceHistory.return_value = mock_price_history

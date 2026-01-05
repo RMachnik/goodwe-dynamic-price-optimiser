@@ -11,9 +11,16 @@ Tests cover:
 """
 
 import pytest
+import sys
+from pathlib import Path
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
-from src.automated_price_charging import AutomatedPriceCharger
+
+# Add src directory to path
+src_dir = Path(__file__).parent.parent / "src"
+sys.path.insert(0, str(src_dir))
+
+from automated_price_charging import AutomatedPriceCharger
 
 
 @pytest.fixture
@@ -57,8 +64,8 @@ def config():
 @pytest.fixture
 def price_charging(config):
     """Create AutomatedPriceCharger instance with mocked dependencies."""
-    with patch('src.automated_price_charging.GoodWeFastCharger'):
-        with patch('src.automated_price_charging.PriceHistoryManager'):
+    with patch('automated_price_charging.GoodWeFastCharger'):
+        with patch('automated_price_charging.PriceHistoryManager'):
             instance = AutomatedPriceCharger(config)
             instance.is_charging = False
             instance.charging_start_time = None

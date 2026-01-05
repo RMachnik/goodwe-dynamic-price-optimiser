@@ -4061,6 +4061,10 @@ class LogWebServer:
                     avg_price = sum(p['price'] for p in prices) / len(prices)
                     cached_data['average_price_pln_kwh'] = round(avg_price, 4)
 
+                # Set data_source if not already set
+                if 'data_source' not in cached_data:
+                    cached_data['data_source'] = 'background_cache'
+
                 return cached_data
             
             return None

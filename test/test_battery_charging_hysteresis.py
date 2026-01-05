@@ -6,9 +6,16 @@ charging sessions from 8-10 to 1-2 per night for battery longevity.
 """
 
 import pytest
+import sys
+from pathlib import Path
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
-from src.automated_price_charging import AutomatedPriceCharger
+
+# Add src directory to path
+src_dir = Path(__file__).parent.parent / "src"
+sys.path.insert(0, str(src_dir))
+
+from automated_price_charging import AutomatedPriceCharger
 
 
 @pytest.fixture

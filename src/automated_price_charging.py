@@ -1160,13 +1160,14 @@ class AutomatedPriceCharger:
             hours_to_wait += 24  # Next day
         
         # OPTIMIZATION RULE 1: At 10% SOC with high price, always wait for price drop
-        if (self.wait_at_10_percent_if_high_price and 
-            battery_soc == 10 and 
-            current_price > self.get_high_price_threshold()):
-            high_threshold = self.get_high_price_threshold()
+        # Also wait if fixed threshold exceeded or it's a high price for critical charging
+        high_threshold = self.get_high_price_threshold()
+        is_high_price = current_price > high_threshold
+        
+        if self.wait_at_10_percent_if_high_price and battery_soc == 10 and is_high_price:
             return {
                 'should_charge': False,
-                'reason': f'Low battery (10%) but price too high - waiting for drop',
+                'reason': f'Low battery (10%) but price too high ({current_price:.3f} > {high_threshold:.3f}) - waiting for drop',
                 'priority': 'critical',
                 'confidence': 0.9
             }
@@ -1246,21 +1247,23 @@ class AutomatedPriceCharger:
         
         # Adjust based on savings percentage
         if savings_percent >= 80:
-            savings_multiplier = 1.5
+            savings_multiplier = 2.0  # Increased from 1.5 to allow longer wait for huge savings
         elif savings_percent >= 60:
-            savings_multiplier = 1.2
+            savings_multiplier = 1.6  # Increased from 1.2
         elif savings_percent >= 40:
-            savings_multiplier = 1.0
+            savings_multiplier = 1.2  # Increased from 1.0
         else:
-            savings_multiplier = 0.7
+            savings_multiplier = 0.8  # Slight increase from 0.7
         
         # Adjust based on battery level (lower battery = shorter wait)
         # For high savings (>=60%), be more willing to wait even at 9-10% SOC
         if battery_soc <= 8:
             battery_multiplier = 0.5
         elif battery_soc <= 10:
-            # At 9-10% with high savings (>=60%), use full base time
-            if savings_percent >= 60:
+            # At 9-10% with high savings (>=60%), use full or near-full base time
+            if savings_percent >= 70:
+                battery_multiplier = 1.2  # Boost wait if savings are excellent
+            elif savings_percent >= 50:
                 battery_multiplier = 1.0
             else:
                 battery_multiplier = 0.7
@@ -1269,6 +1272,10 @@ class AutomatedPriceCharger:
         
         # Calculate final wait time
         max_wait_hours = base_wait_hours * savings_multiplier * battery_multiplier
+        
+        # Boost for extreme savings
+        if savings_percent >= 85:
+            max_wait_hours += 2.0
         
         # Ensure reasonable bounds (1-12 hours)
         return max(1.0, min(12.0, max_wait_hours))
@@ -1627,6 +1634,15 @@ class AutomatedPriceCharger:
                     'reason': f'Battery nearly full ({battery_soc}%) - stop charging',
                     'priority': 'high',
                     'confidence': 0.95
+                }
+            
+            # Check if current price is too high for continuing (except if emergency)
+            if battery_soc > 5 and current_price and current_price > self.get_high_price_threshold():
+                return {
+                    'should_charge': False,
+                    'reason': f'Charging in progress but price spiked ({current_price:.3f} > {self.get_high_price_threshold():.3f}) - pausing',
+                    'priority': 'medium',
+                    'confidence': 0.8
                 }
             
             # Continue charging if still within reasonable conditions

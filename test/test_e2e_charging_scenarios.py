@@ -17,10 +17,17 @@ Tariff Configuration:
 """
 
 import pytest
+import sys
+from pathlib import Path
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, MagicMock
 from typing import Dict, List, Optional
-from src.automated_price_charging import AutomatedPriceCharger
+
+# Add src directory to path
+src_dir = Path(__file__).parent.parent / "src"
+sys.path.insert(0, str(src_dir))
+
+from automated_price_charging import AutomatedPriceCharger
 
 
 # ============================================================================
@@ -74,9 +81,9 @@ def base_config():
 @pytest.fixture
 def price_charger(base_config):
     """Create AutomatedPriceCharger with mocked dependencies."""
-    with patch('src.automated_price_charging.GoodWeFastCharger'):
-        with patch('src.automated_price_charging.EnhancedDataCollector'):
-            with patch('src.automated_price_charging.TariffPricingCalculator'):
+    with patch('automated_price_charging.GoodWeFastCharger'):
+        with patch('automated_price_charging.EnhancedDataCollector'):
+            with patch('automated_price_charging.TariffPricingCalculator'):
                 charger = AutomatedPriceCharger(base_config)
                 charger.is_charging = False
                 charger.charging_start_time = None
@@ -370,7 +377,7 @@ def test_opportunistic_tier_boundary_at_50_percent(price_charger):
     
     price_data = build_price_data(24, base_price=0.6, pattern='tariff_realistic', tariff='g12', start_time=mock_datetime_value)
     
-    with patch('src.automated_price_charging.datetime') as mock_dt:
+    with patch('automated_price_charging.datetime') as mock_dt:
         # Mock now() to return fixed time (after 16h cutoff)
         mock_dt.now.return_value = mock_datetime_value
         # Preserve all other datetime methods
@@ -455,7 +462,7 @@ def test_opportunistic_tier_pre_peak_charging_evening_forecast(price_charger):
     current_afternoon = sum(afternoon_prices) / len(afternoon_prices) if afternoon_prices else 0.85
     
     # Make decision with mocked time
-    with patch('src.automated_price_charging.datetime') as mock_dt:
+    with patch('automated_price_charging.datetime') as mock_dt:
         # Mock now() to return our fixed time
         mock_dt.now.return_value = mock_datetime_value
         # Preserve all other datetime methods (fromisoformat, etc.)
@@ -534,7 +541,7 @@ def test_opportunistic_pre_peak_edge_cases(price_charger, soc, current_time_hour
     price_data = build_price_data(24, pattern=pattern, start_time=mock_datetime_value.replace(hour=0))
     
     # Make decision with mocked time at specified hour
-    with patch('src.automated_price_charging.datetime') as mock_dt:
+    with patch('automated_price_charging.datetime') as mock_dt:
         # Mock now() to return our fixed time
         mock_dt.now.return_value = mock_datetime_value
         # Preserve all other datetime methods (fromisoformat, etc.)
@@ -617,7 +624,7 @@ def test_opportunistic_absolute_cheapest_preserved(price_charger, soc, current_p
     price_data = {'value': price_points}
     
     # Make decision with mocked time (after 16h cutoff)
-    with patch('src.automated_price_charging.datetime') as mock_dt:
+    with patch('automated_price_charging.datetime') as mock_dt:
         # Mock now() to return fixed time
         mock_dt.now.return_value = mock_datetime_value
         # Preserve all other datetime methods
@@ -819,7 +826,7 @@ def test_multi_tier_progression_night_valley_charging(price_charger):
     # Build price data with cheapest in the middle for fallback calculation
     price_data = build_price_data(24, base_price=0.6, pattern='night_valley', start_time=mock_datetime_value)
     
-    with patch('src.automated_price_charging.datetime') as mock_dt:
+    with patch('automated_price_charging.datetime') as mock_dt:
         mock_dt.now.return_value = mock_datetime_value
         mock_dt.fromisoformat = real_datetime.fromisoformat
         mock_dt.strptime = real_datetime.strptime
@@ -920,7 +927,7 @@ def test_super_low_price_event(price_charger):
     # 0.25 ≤ 0.25 × 1.10 (0.275) → should charge
     price_data = build_price_data(24, base_price=0.6, pattern='super_low', start_time=mock_datetime_value)
     
-    with patch('src.automated_price_charging.datetime') as mock_dt:
+    with patch('automated_price_charging.datetime') as mock_dt:
         mock_dt.now.return_value = mock_datetime_value
         mock_dt.fromisoformat = real_datetime.fromisoformat
         mock_dt.strptime = real_datetime.strptime
