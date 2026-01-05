@@ -97,29 +97,33 @@ class DailySnapshotManager:
         logger.info(f"Creating daily snapshot for {target_date}")
         
         decisions = []
+        energy_data_list = []
         
         # Try to fetch from storage first (only if we can safely run async)
         if self.storage:
             try:
-                async def _fetch_decisions():
+                async def _fetch_data():
                     if not await self.storage.connect():
-                        return []
+                        return [], []
                     
                     start_time = datetime.combine(target_date, datetime.min.time())
                     end_time = datetime.combine(target_date, datetime.max.time())
                     
-                    data = await self.storage.get_decisions(start_time, end_time)
+                    decisions = await self.storage.get_decisions(start_time, end_time)
+                    energy_data = await self.storage.get_energy_data(start_time, end_time)
                     await self.storage.disconnect()
-                    return data
+                    return decisions, energy_data
                 
-                result = self._run_async(_fetch_decisions())
-                if result:
-                    decisions = result
+                res_decisions, res_energy = self._run_async(_fetch_data())
+                if res_decisions:
+                    decisions = res_decisions
                     logger.info(f"Retrieved {len(decisions)} decisions from storage for {target_date}")
+                if res_energy:
+                    energy_data_list = res_energy
+                    logger.info(f"Retrieved {len(energy_data_list)} energy records from storage for {target_date}")
             except Exception as e:
-                logger.error(f"Failed to fetch decisions from storage: {e}")
+                logger.error(f"Failed to fetch data from storage: {e}")
         
-        # Fallback to file system if no decisions found in storage
         if not decisions:
             # Find all decision files for this date
             date_str = target_date.strftime('%Y%m%d')
@@ -142,11 +146,8 @@ class DailySnapshotManager:
                     logger.warning(f"Error reading decision file {file_path}: {e}")
                     continue
         
-        if not decisions:
-            return None
-        
         # Calculate daily summary
-        snapshot = self._calculate_daily_summary(decisions, target_date)
+        snapshot = self._calculate_daily_summary(decisions, target_date, energy_data_list)
         
         # Save snapshot to file
         snapshot_path = self.get_snapshot_path(target_date)
@@ -159,7 +160,7 @@ class DailySnapshotManager:
         
         return snapshot
     
-    def _calculate_daily_summary(self, decisions: List[Dict[str, Any]], target_date: date) -> Dict[str, Any]:
+    def _calculate_daily_summary(self, decisions: List[Dict[str, Any]], target_date: date, energy_data: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Calculate summary metrics for a day's decisions"""
         
         # Categorize decisions
@@ -236,8 +237,47 @@ class DailySnapshotManager:
                 'max': round(max_price, 4),
                 'avg': round(avg_price, 4)
             },
-            'file_count': len(decisions)
+            'file_count': len(decisions),
+            'real_grid_import_kwh': 0,
+            'grid_import_t1_kwh': 0,
+            'grid_import_t2_kwh': 0,
+            'energy_charged_t1_kwh': round(sum(d.get('energy_kwh', 0) for d in charging_decisions if d.get('tariff_zone', 'T1') == 'T1'), 2),
+            'energy_charged_t2_kwh': round(sum(d.get('energy_kwh', 0) for d in charging_decisions if d.get('tariff_zone', 'T1') == 'T2'), 2)
         }
+        
+        # Calculate real meter import if energy data available
+        if energy_data and len(energy_data) > 1:
+            # Sort by timestamp just in case
+            sorted_energy = sorted(energy_data, key=lambda x: x['timestamp'])
+            
+            # 1. Total import from first/last reading
+            first_import = sorted_energy[0].get('grid_import_total_kwh')
+            last_import = sorted_energy[-1].get('grid_import_total_kwh')
+            
+            if first_import is not None and last_import is not None:
+                snapshot['real_grid_import_kwh'] = round(last_import - first_import, 3)
+                
+            # 2. T1/T2 split by summing increments
+            t1_import = 0.0
+            t2_import = 0.0
+            
+            for i in range(1, len(sorted_energy)):
+                curr = sorted_energy[i]
+                prev = sorted_energy[i-1]
+                
+                imp_curr = curr.get('grid_import_total_kwh')
+                imp_prev = prev.get('grid_import_total_kwh')
+                
+                if imp_curr is not None and imp_prev is not None:
+                    delta = max(0, imp_curr - imp_prev)
+                    zone = curr.get('tariff_zone', 'T1')
+                    if zone == 'T1':
+                        t1_import += delta
+                    else:
+                        t2_import += delta
+            
+            snapshot['grid_import_t1_kwh'] = round(t1_import, 3)
+            snapshot['grid_import_t2_kwh'] = round(t2_import, 3)
         
         return snapshot
     
@@ -388,7 +428,9 @@ class DailySnapshotManager:
         if not decisions:
             return None
         
-        return self._calculate_daily_summary(decisions, today)
+        return self._calculate_daily_summary(decisions, today, [])
+        # Note: energy_data_list is [] as we don't have a clean way to fetch live meter data here yet
+        # without affecting performance. Live meter data will be available in next day's snapshot.
     
     def _aggregate_summaries(self, daily_summaries: List[Dict[str, Any]], year: int, month: int) -> Dict[str, Any]:
         """Aggregate daily summaries into monthly totals"""
@@ -407,6 +449,11 @@ class DailySnapshotManager:
                 'savings_percentage': 0,
                 'avg_confidence': 0,
                 'days_with_data': 0,
+                'real_grid_import_kwh': 0,
+                'grid_import_t1_kwh': 0,
+                'grid_import_t2_kwh': 0,
+                'energy_charged_t1_kwh': 0,
+                'energy_charged_t2_kwh': 0,
                 'source_breakdown': {},
                 'daily_summaries': []
             }
@@ -421,6 +468,11 @@ class DailySnapshotManager:
         total_cost = sum(s['total_cost_pln'] for s in daily_summaries)
         total_savings = sum(s['total_savings_pln'] for s in daily_summaries)
         selling_revenue = sum(s.get('selling_revenue_pln', 0) for s in daily_summaries)
+        real_grid_import = sum(s.get('real_grid_import_kwh', 0) for s in daily_summaries)
+        grid_import_t1 = sum(s.get('grid_import_t1_kwh', 0) for s in daily_summaries)
+        grid_import_t2 = sum(s.get('grid_import_t2_kwh', 0) for s in daily_summaries)
+        energy_charged_t1 = sum(s.get('energy_charged_t1_kwh', 0) for s in daily_summaries)
+        energy_charged_t2 = sum(s.get('energy_charged_t2_kwh', 0) for s in daily_summaries)
         
         # Calculate weighted average confidence
         confidence_sum = sum(s['avg_confidence'] * s['total_decisions'] for s in daily_summaries)
@@ -453,6 +505,11 @@ class DailySnapshotManager:
             'savings_percentage': round(savings_percentage, 1),
             'avg_confidence': round(avg_confidence, 4),
             'days_with_data': len(daily_summaries),
+            'real_grid_import_kwh': round(real_grid_import, 2),
+            'grid_import_t1_kwh': round(grid_import_t1, 2),
+            'grid_import_t2_kwh': round(grid_import_t2, 2),
+            'energy_charged_t1_kwh': round(energy_charged_t1, 2),
+            'energy_charged_t2_kwh': round(energy_charged_t2, 2),
             'source_breakdown': source_breakdown,
             'daily_summaries': daily_summaries
         }

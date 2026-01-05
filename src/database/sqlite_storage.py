@@ -250,11 +250,15 @@ class SQLiteStorage(DataStorageInterface):
                     INSERT OR REPLACE INTO energy_data (
                         timestamp, battery_soc, pv_power, grid_power, house_consumption,
                         battery_power, grid_voltage, grid_frequency, battery_voltage,
-                        battery_current, battery_temperature, price_pln
+                        battery_current, battery_temperature, price_pln,
+                        grid_import_total_kwh, grid_export_total_kwh,
+                        house_consumption_total_kwh, pv_generation_total_kwh, tariff_zone
                     ) VALUES (
                         :timestamp, :battery_soc, :pv_power, :grid_power, :house_consumption,
                         :battery_power, :grid_voltage, :grid_frequency, :battery_voltage,
-                        :battery_current, :battery_temperature, :price_pln
+                        :battery_current, :battery_temperature, :price_pln,
+                        :grid_import_total_kwh, :grid_export_total_kwh,
+                        :house_consumption_total_kwh, :pv_generation_total_kwh, :tariff_zone
                     )
                     """
                     
@@ -270,7 +274,12 @@ class SQLiteStorage(DataStorageInterface):
                         'battery_voltage': None,
                         'battery_current': None,
                         'battery_temperature': None,
-                        'price_pln': None
+                        'price_pln': None,
+                        'grid_import_total_kwh': None,
+                        'grid_export_total_kwh': None,
+                        'house_consumption_total_kwh': None,
+                        'pv_generation_total_kwh': None,
+                        'tariff_zone': None
                     }
                     
                     # Process data and ensure all required fields exist

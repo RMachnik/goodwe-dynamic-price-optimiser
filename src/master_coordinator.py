@@ -712,9 +712,13 @@ class MasterCoordinator:
                     # Calculate energy needed based on battery capacity and current SOC
                     battery_capacity = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)
                     current_soc = self.current_data.get('battery', {}).get('soc_percent', 0)
-                    target_soc = 80.0  # Target 80% SOC
+                    target_soc = self.config.get('battery_management', {}).get('target_soc', 80.0)
                     energy_needed = battery_capacity * (target_soc - current_soc) / 100.0
-                    energy_kwh = max(0, min(energy_needed, 5.0))  # Cap at 5kWh per decision
+                    
+                    # Cap by physical possibility (Power * Time)
+                    max_power_kw = self.config.get('charging', {}).get('max_power', 10000) / 1000.0
+                    max_energy_per_interval = max_power_kw * (self.decision_interval / 3600.0)
+                    energy_kwh = max(0, min(energy_needed, max_energy_per_interval))
                 
                 # Calculate cost based on current price
                 if current_price > 0 and energy_kwh > 0:
@@ -739,11 +743,12 @@ class MasterCoordinator:
                 'reason': decision_record['reasoning'],
                 'priority': decision_record['priority'],
                 'battery_soc': self.current_data.get('battery', {}).get('soc_percent', 0),
-                'pv_power': self.current_data.get('photovoltaic', {}).get('current_power_w', 0),
-                'house_consumption': self.current_data.get('house_consumption', {}).get('current_power_w', 0),
+                'pv_power': self.current_data.get('photovoltaic', {}).get('current_power_kw', 0),
+                'house_consumption': self.current_data.get('house_consumption', {}).get('calculated_power_kw', 0),
                 'current_price': current_price,
                 'cheapest_price': cheapest_price,
-                'cheapest_hour': cheapest_hour
+                'cheapest_hour': cheapest_hour,
+                'tariff_zone': self.current_data.get('tariff_zone', 'T1')
             }
             
             # Save to storage

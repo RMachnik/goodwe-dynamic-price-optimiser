@@ -1,7 +1,7 @@
 
 # SQL Schema Definitions for GoodWe Dynamic Price Optimiser
 
-SCHEMA_VERSION = 3  # Increment when schema changes
+SCHEMA_VERSION = 4  # Increment when schema changes
 
 # Table: schema_version
 # Tracks database schema version for migrations
@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS energy_data (
     battery_current REAL,
     battery_temperature REAL,
     price_pln REAL,
+    grid_import_total_kwh REAL,
+    grid_export_total_kwh REAL,
+    house_consumption_total_kwh REAL,
+    pv_generation_total_kwh REAL,
+    tariff_zone TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -167,6 +172,9 @@ CREATE_INDEXES = [
     # Index for energy data range queries with filtering
     "CREATE INDEX IF NOT EXISTS idx_energy_timestamp_soc ON energy_data(timestamp, battery_soc);",
     
+    # Index for tariff zone queries
+    "CREATE INDEX IF NOT EXISTS idx_energy_tariff_zone ON energy_data(tariff_zone);",
+    
     # Index for system state filtering
     "CREATE INDEX IF NOT EXISTS idx_state_timestamp_state ON system_state(timestamp, state);",
     
@@ -208,5 +216,15 @@ MIGRATIONS = [
         "CREATE INDEX IF NOT EXISTS idx_energy_timestamp_soc ON energy_data(timestamp, battery_soc);",
         "CREATE INDEX IF NOT EXISTS idx_state_timestamp_state ON system_state(timestamp, state);",
         "CREATE INDEX IF NOT EXISTS idx_weather_source_time ON weather_data(source, timestamp);"
+    ]),
+    
+    # Version 4: Add cumulative energy columns and tariff_zone
+    (4, "Add cumulative energy columns and tariff_zone to energy_data", [
+        "ALTER TABLE energy_data ADD COLUMN grid_import_total_kwh REAL;",
+        "ALTER TABLE energy_data ADD COLUMN grid_export_total_kwh REAL;",
+        "ALTER TABLE energy_data ADD COLUMN house_consumption_total_kwh REAL;",
+        "ALTER TABLE energy_data ADD COLUMN pv_generation_total_kwh REAL;",
+        "ALTER TABLE energy_data ADD COLUMN tariff_zone TEXT;",
+        "CREATE INDEX IF NOT EXISTS idx_energy_tariff_zone ON energy_data(tariff_zone);"
     ]),
 ]

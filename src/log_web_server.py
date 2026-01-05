@@ -1943,10 +1943,6 @@ class LogWebServer:
                     <div id="current-state">Loading...</div>
                 </div>
                 
-                <div class="card">
-                    <h3>Performance Metrics</h3>
-                    <div id="performance-metrics">Loading...</div>
-                </div>
                 
                 <div class="card">
                     <h3 style="margin-bottom: 10px;">Cost & Savings</h3>
@@ -2263,95 +2259,6 @@ class LogWebServer:
                 });
         }
         
-        function loadPerformanceMetrics() {
-            fetch('/metrics')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        document.getElementById('performance-metrics').innerHTML = `<p>Error: ${data.error}</p>`;
-                        return;
-                    }
-                    
-                    const hasChargingDecisions = data.charging_count > 0;
-                    const hasAnyDecisions = data.total_count > 0;
-                    
-                    if (!hasAnyDecisions) {
-                        // No decisions at all
-                        document.getElementById('performance-metrics').innerHTML = `
-                            <div class="no-data-state">
-                                <div class="no-data-icon">📊</div>
-                                <div class="no-data-message">
-                                    <h4>No Performance Data</h4>
-                                    <p>System hasn't made any decisions yet</p>
-                                </div>
-                            </div>
-                        `;
-                        return;
-                    }
-                    
-                    if (!hasChargingDecisions) {
-                        // Only wait decisions - show monitoring state
-                        const waitPercentage = data.total_count > 0 ? ((data.wait_count / data.total_count) * 100).toFixed(1) : 0;
-                        document.getElementById('performance-metrics').innerHTML = `
-                            <div class="monitoring-state">
-                                <div class="metric" title="Total number of decisions made by the system (charging + waiting)">
-                                    <span class="metric-label">Total Decisions</span>
-                                    <span class="metric-value">${data.total_count}</span>
-                                </div>
-                                <div class="metric" title="Number of decisions that resulted in actual charging">
-                                    <span class="metric-label">Charging Decisions</span>
-                                    <span class="metric-value waiting">0</span>
-                                </div>
-                                <div class="metric" title="Number of decisions to wait for better conditions">
-                                    <span class="metric-label">Wait Decisions</span>
-                                    <span class="metric-value">${data.wait_count} (${waitPercentage}%)</span>
-                                </div>
-                                <div class="metric" title="Current system operational status">
-                                    <span class="metric-label">System Status</span>
-                                    <span class="metric-value monitoring">Monitoring</span>
-                                </div>
-                                <div class="metric" title="Average confidence level of all decisions made">
-                                    <span class="metric-label">Avg Confidence</span>
-                                    <span class="metric-value">${data.avg_confidence.toFixed(1)}%</span>
-                                </div>
-                                <div class="monitoring-note">
-                                    <small>System is actively monitoring conditions for optimal charging opportunities</small>
-                                </div>
-                            </div>
-                        `;
-                        return;
-                    }
-                    
-                    // Normal state with charging decisions
-                    const metricsHtml = `
-                        <div class="metric" title="Total number of decisions made by the system (charging + waiting)">
-                            <span class="metric-label">Total Decisions</span>
-                            <span class="metric-value">${data.total_count}</span>
-                        </div>
-                        <div class="metric" title="Number of decisions that resulted in actual charging">
-                            <span class="metric-label">Charging Decisions</span>
-                            <span class="metric-value">${data.charging_count}</span>
-                        </div>
-                        <div class="metric" title="Number of decisions to wait for better conditions">
-                            <span class="metric-label">Wait Decisions</span>
-                            <span class="metric-value">${data.wait_count}</span>
-                        </div>
-                        <div class="metric" title="Overall system efficiency score based on confidence, savings, and charging ratio (0-100)">
-                            <span class="metric-label">Efficiency Score</span>
-                            <span class="metric-value">${data.efficiency_score}/100</span>
-                        </div>
-                        <div class="metric" title="Average confidence level of all decisions made">
-                            <span class="metric-label">Avg Confidence</span>
-                            <span class="metric-value">${data.avg_confidence.toFixed(1)}%</span>
-                        </div>
-                    `;
-                    document.getElementById('performance-metrics').innerHTML = metricsHtml;
-                })
-                .catch(error => {
-                    document.getElementById('performance-metrics').innerHTML = `<p>Error loading metrics: ${error.message}</p>`;
-                });
-        }
-        
         function populateMonthSelector() {
             const selector = document.getElementById('comparison-month');
             if (!selector) return;
@@ -2418,43 +2325,64 @@ class LogWebServer:
                         <div style="padding: 10px;">
                             <h4 style="margin: 0 0 15px 0; color: var(--accent-primary); text-align: center;">${summary.month_name} ${summary.year} Overview</h4>
                             
-                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px;">
-                                <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color);">
-                                    <div style="font-size: 0.9em; color: var(--text-secondary); margin-bottom: 5px;">Total Cost</div>
-                                    <div style="font-size: 1.4em; font-weight: bold; color: var(--text-primary);">${summary.total_cost_pln.toFixed(2)} PLN</div>
+                            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 15px;">
+                                <div class="metric-box" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color);">
+                                    <div style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 5px;">Total Cost</div>
+                                    <div style="font-size: 1.25em; font-weight: bold; color: var(--text-primary);">${summary.total_cost_pln.toFixed(2)} PLN</div>
                                 </div>
                                 
-                                <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color);">
-                                    <div style="font-size: 0.9em; color: var(--text-secondary); margin-bottom: 5px;">Total Savings</div>
-                                    <div style="font-size: 1.4em; font-weight: bold; color: #28a745;">${summary.total_savings_pln.toFixed(2)} PLN</div>
+                                <div class="metric-box" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color);">
+                                    <div style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 5px;">Total Savings</div>
+                                    <div style="font-size: 1.25em; font-weight: bold; color: #28a745;">${summary.total_savings_pln.toFixed(2)} PLN</div>
                                 </div>
                                 
-                                <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color);">
-                                    <div style="font-size: 0.9em; color: var(--text-secondary); margin-bottom: 5px;">Energy Charged</div>
-                                    <div style="font-size: 1.4em; font-weight: bold; color: var(--accent-primary);">${summary.total_energy_kwh.toFixed(2)} kWh</div>
+                                <div class="metric-box" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color);">
+                                    <div style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 5px;">Energy Charged</div>
+                                    <div style="font-size: 1.25em; font-weight: bold; color: var(--accent-primary);">${summary.total_energy_kwh.toFixed(1)} kWh</div>
                                 </div>
                                 
-                                <div class="metric-box" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color);">
-                                    <div style="font-size: 0.9em; color: var(--text-secondary); margin-bottom: 5px;">Avg Cost/kWh</div>
-                                    <div style="font-size: 1.4em; font-weight: bold; color: var(--text-primary);">${summary.avg_cost_per_kwh.toFixed(4)} PLN</div>
+                                <div class="metric-box" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color);">
+                                    <div style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 5px;">Grid Import (Meter)</div>
+                                    <div style="font-size: 1.25em; font-weight: bold; color: #e67e22;">${(summary.real_grid_import_kwh || 0).toFixed(1)} kWh</div>
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 15px; border-top: 1px solid var(--border-color); padding-top: 15px;">
+                                <div style="background: rgba(255, 255, 255, 0.03); padding: 10px; border-radius: 6px;">
+                                    <div style="font-size: 0.8em; color: var(--text-muted); text-transform: uppercase;">T1 (Peak)</div>
+                                    <div style="display: flex; justify-content: space-between; margin-top: 5px;">
+                                        <span style="font-size: 0.85em; color: var(--text-secondary);">Charged:</span>
+                                        <span style="font-weight: bold; color: var(--accent-primary);">${(summary.energy_charged_t1_kwh || 0).toFixed(1)} kWh</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; margin-top: 3px;">
+                                        <span style="font-size: 0.85em; color: var(--text-secondary);">Imported:</span>
+                                        <span style="font-weight: bold;">${(summary.grid_import_t1_kwh || 0).toFixed(1)} kWh</span>
+                                    </div>
+                                </div>
+                                <div style="background: rgba(255, 255, 255, 0.03); padding: 10px; border-radius: 6px;">
+                                    <div style="font-size: 0.8em; color: var(--text-muted); text-transform: uppercase;">T2 (Off-Peak)</div>
+                                    <div style="display: flex; justify-content: space-between; margin-top: 5px;">
+                                        <span style="font-size: 0.85em; color: var(--text-secondary);">Charged:</span>
+                                        <span style="font-weight: bold; color: #28a745;">${(summary.energy_charged_t2_kwh || 0).toFixed(1)} kWh</span>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; margin-top: 3px;">
+                                        <span style="font-size: 0.85em; color: var(--text-secondary);">Imported:</span>
+                                        <span style="font-weight: bold;">${(summary.grid_import_t2_kwh || 0).toFixed(1)} kWh</span>
+                                    </div>
                                 </div>
                             </div>
                             
                             ${summary.selling_revenue_pln > 0 ? `
-                            <div style="margin-top: 20px; padding: 15px; background: rgba(39, 174, 96, 0.1); border-radius: 8px; border: 1px solid #27ae60;">
+                            <div style="margin-top: 15px; padding: 12px; background: rgba(39, 174, 96, 0.1); border-radius: 8px; border: 1px solid #27ae60;">
                                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                                    <span style="font-weight: bold; color: #27ae60;">Battery Selling Revenue (Net 80%)</span>
-                                    <span style="font-weight: bold; font-size: 1.2em; color: #27ae60;">+${summary.selling_revenue_pln.toFixed(2)} PLN</span>
-                                </div>
-                                <div style="font-size: 0.9em; color: var(--text-secondary); margin-top: 8px; display: flex; justify-content: space-between;">
-                                    <span>Energy Sold: <strong>${summary.total_energy_sold_kwh.toFixed(2)} kWh</strong></span>
-                                    <span>Sessions: <strong>${summary.selling_count}</strong></span>
+                                    <span style="font-weight: bold; color: #27ae60; font-size: 0.9em;">Selling Revenue (Net 80%)</span>
+                                    <span style="font-weight: bold; font-size: 1.1em; color: #27ae60;">+${summary.selling_revenue_pln.toFixed(2)} PLN</span>
                                 </div>
                             </div>
                             ` : ''}
                             
-                            <div style="margin-top: 15px; font-size: 0.85em; color: var(--text-muted); text-align: center;">
-                                Based on ${summary.total_decisions} decisions (${summary.charging_count} charging, ${summary.wait_count} waiting)
+                            <div style="margin-top: 15px; font-size: 0.8em; color: var(--text-muted); text-align: center;">
+                                Based on ${summary.total_decisions} decisions for ${summary.month_name} ${summary.year}
                             </div>
                         </div>
                     `;
@@ -3097,13 +3025,11 @@ class LogWebServer:
         // Initialize
         updateStatus();
         loadCurrentState();
-        loadPerformanceMetrics();
         loadCostSavings();
         loadLogs();
         setInterval(() => {
             updateStatus();
             loadCurrentState();
-            loadPerformanceMetrics();
             loadCostSavings();
             // Only refresh time series if the tab is active
             if (document.getElementById('time-series').classList.contains('active')) {

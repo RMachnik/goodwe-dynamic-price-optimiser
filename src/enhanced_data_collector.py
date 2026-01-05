@@ -29,6 +29,7 @@ sys.path.insert(0, str(current_dir))
 
 from fast_charge import GoodWeFastCharger
 from database.storage_factory import StorageFactory
+from tariff_pricing import TariffPricingCalculator
 
 # Setup logging
 import os
@@ -65,6 +66,9 @@ class EnhancedDataCollector:
 
         # Initialize storage via factory
         self.storage = StorageFactory.create_storage(self.config.get('data_storage', {}))
+        
+        # Initialize tariff pricing calculator
+        self.tariff_calculator = TariffPricingCalculator(self.config)
         
         # Data storage with deque for efficient O(1) operations
         # 30240 data points = 7 days at 20-second intervals
@@ -209,6 +213,17 @@ class EnhancedDataCollector:
                     'last_update': datetime.now().isoformat()
                 }
             }
+            
+            # Determine current tariff zone (T1/T2) for real-time decisions
+            try:
+                ts = datetime.fromisoformat(comprehensive_data['timestamp'])
+                dist_price = self.tariff_calculator._get_distribution_price(ts)
+                g12_config = self.config.get('electricity_tariff', {}).get('distribution_pricing', {}).get('g12', {})
+                peak_price = g12_config.get('prices', {}).get('peak', 0.3566)
+                comprehensive_data['tariff_zone'] = 'T1' if dist_price == peak_price else 'T2'
+            except Exception as e:
+                logger.warning(f"Failed to determine real-time tariff zone: {e}")
+                comprehensive_data['tariff_zone'] = 'T1'
             
             # Add compatibility aliases for backward compatibility
             # Map 'system' to 'inverter' for battery_selling_monitor
@@ -461,8 +476,14 @@ class EnhancedDataCollector:
                 'battery_voltage': self._safe_float(battery.get('voltage')),
                 'battery_current': self._safe_float(battery.get('current')),
                 'battery_temperature': self._safe_float(battery.get('temperature')),
-                'price_pln': None  # Will be set by caller if price data available
+                'price_pln': None,  # Will be set by caller if price data available
+                'grid_import_total_kwh': self._safe_float(grid.get('total_imported_kwh')),
+                'grid_export_total_kwh': self._safe_float(grid.get('total_exported_kwh')),
+                'house_consumption_total_kwh': self._safe_float(consumption.get('total_consumption_kwh')),
+                'pv_generation_total_kwh': self._safe_float(pv.get('daily_production_kwh')),  # Placeholder if total not available
+                'tariff_zone': data.get('tariff_zone', 'T1')
             }
+
             return flat
         except Exception as e:
             logger.error(f"Failed to flatten data: {e}")
