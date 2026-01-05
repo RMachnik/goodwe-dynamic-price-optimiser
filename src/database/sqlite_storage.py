@@ -181,8 +181,14 @@ class SQLiteStorage(DataStorageInterface):
                     # Execute all SQL statements for this migration
                     for sql in sql_statements:
                         if sql.strip():
-                            self.logger.debug(f"Executing: {sql[:100]}...")
-                            await cursor.execute(sql)
+                            try:
+                                self.logger.debug(f"Executing: {sql[:100]}...")
+                                await cursor.execute(sql)
+                            except aiosqlite.OperationalError as e:
+                                if "duplicate column name" in str(e).lower():
+                                    self.logger.warning(f"Column already exists, skipping: {e}")
+                                else:
+                                    raise
                     
                     # Record the migration
                     await cursor.execute(

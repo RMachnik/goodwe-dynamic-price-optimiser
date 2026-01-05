@@ -3,7 +3,13 @@
 
 SCHEMA_VERSION = 4  # Increment when schema changes
 
-# Table: schema_version
+# CRITICAL RULES FOR SCHEMA UPDATES:
+# 1. DO NOT modify CREATE_TABLE strings for existing tables. They must remain 
+#    at Version 1 for the migration system to work correctly.
+# 2. To add a column, ONLY add an ALTER TABLE statement to the MIGRATIONS list.
+# 3. New installs will run all CREATE statements and then play through the MIGRATIONS.
+# 4. If you add a column to a CREATE statement AND a migration, the migration 
+#    will fail on existing databases.
 # Tracks database schema version for migrations
 CREATE_SCHEMA_VERSION_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -29,11 +35,6 @@ CREATE TABLE IF NOT EXISTS energy_data (
     battery_current REAL,
     battery_temperature REAL,
     price_pln REAL,
-    grid_import_total_kwh REAL,
-    grid_export_total_kwh REAL,
-    house_consumption_total_kwh REAL,
-    pv_generation_total_kwh REAL,
-    tariff_zone TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 """
