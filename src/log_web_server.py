@@ -569,15 +569,6 @@ class LogWebServer:
     def _refresh_price_data(self):
         """Refresh price data in background thread (uses background storage instance)."""
         try:
-            # Try disk cache first
-            cached = self._load_price_from_disk()
-            if cached:
-                with self._background_cache_lock:
-                    self._background_cache['price_data'] = cached
-                    self._background_cache['last_price_refresh'] = time.time()
-                    self._background_cache['last_price_error'] = None
-                return
-            
             # Extract logic from _get_real_price_data() - fetch from PSE API
             from automated_price_charging import AutomatedPriceCharger
             
@@ -585,12 +576,24 @@ class LogWebServer:
             
             today = datetime.now().strftime('%Y-%m-%d')
             
+            logger.info("Refreshing price data from PSE API...")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
                 price_data = loop.run_until_complete(
                     asyncio.wait_for(charger.fetch_price_data_for_date(today), timeout=30.0)
                 )
+            except Exception as api_err:
+                logger.warning(f"API refresh failed ({api_err}), attempting disk cache fallback...")
+                # Fallback to disk cache if API fails
+                cached = self._load_price_from_disk()
+                if cached:
+                    with self._background_cache_lock:
+                        self._background_cache['price_data'] = cached
+                        self._background_cache['last_price_refresh'] = time.time()
+                        self._background_cache['last_price_error'] = None
+                    return
+                raise api_err  # Re-raise if even disk fallback fails
             finally:
                 loop.close()
             
@@ -598,19 +601,8 @@ class LogWebServer:
                 raise Exception("Price API returned no data")
             
             # Process price data (calculate cheapest, average, etc.)
-            # Use the improved get_current_price for the current price point
-            current_price_pln_mwh = charger.get_current_price(price_data)
-            if current_price_pln_mwh is None:
-                # Fallback: if we still can't find current price, don't crash, just log and use 0 or something safe
-                # This prevents the whole cache update from failing
-                logger.warning("Could not determine current price even with fallback matching")
-                current_price_kwh = 0.0
-            else:
-                current_price_kwh = current_price_pln_mwh / 1000
-            
-            # Find cheapest and calculate stats consistently with get_current_price logic
-            prices_list = []
-            prices_tuples = []
+            # Aggregating hourly to ensure grid consistency with summary boxes
+            hourly_data = {}
             for item in price_data['value']:
                 market_price = float(item['csdac_pln'])
                 try:
@@ -618,35 +610,48 @@ class LogWebServer:
                 except ValueError:
                     item_time = datetime.strptime(item['dtime'], '%Y-%m-%d %H:%M:%S')
                 
-                # Use same calculation as get_current_price
                 final_price = charger.calculate_final_price(market_price, item_time)
                 final_price_kwh = final_price / 1000
                 
-                prices_tuples.append((final_price_kwh, item_time.hour))
-                prices_list.append({
-                    'hour': item_time.hour,
-                    'hour_str': f"{item_time.hour:02d}:00",
-                    'price': round(final_price_kwh, 4),
-                    'market_price': round(market_price/1000, 4)
+                hour = item_time.hour
+                if hour not in hourly_data:
+                    hourly_data[hour] = []
+                hourly_data[hour].append({
+                    'price': final_price_kwh,
+                    'market_price': market_price / 1000
                 })
-            
-            if not prices_tuples:
+
+            # Calculate hourly averages
+            prices_list = []
+            for hour in sorted(hourly_data.keys()):
+                entries = hourly_data[hour]
+                avg_price = sum(e['price'] for e in entries) / len(entries)
+                avg_market = sum(e['market_price'] for e in entries) / len(entries)
+                
+                prices_list.append({
+                    'hour': hour,
+                    'hour_str': f"{hour:02d}:00",
+                    'price': round(avg_price, 4),
+                    'market_price': round(avg_market, 4)
+                })
+
+            if not prices_list:
                 raise Exception("No valid prices found after processing")
             
-            # Find cheapest price for the whole day
-            cheapest_price, cheapest_hour = min(prices_tuples, key=lambda x: x[0])
-            avg_price = sum(p for p, h in prices_tuples) / len(prices_tuples)
+            # Note: current_price and cheapest_price will be recalculated on-the-fly in _get_real_price_data
+            # We store the latest calculation here as a base/metadata
+            cheapest_entry = min(prices_list, key=lambda x: x['price'])
+            avg_all = sum(x['price'] for x in prices_list) / len(prices_list)
             
             result = {
-                'current_price_pln_kwh': round(current_price_kwh, 4),
-                'cheapest_price_pln_kwh': round(cheapest_price, 4),
-                'cheapest_hour': f"{cheapest_hour:02d}:00",
-                'average_price_pln_kwh': round(avg_price, 4),
+                'average_price_pln_kwh': round(avg_all, 4),
                 'price_trend': 'stable',
                 'data_source': 'PSE API (CSDAC-PLN)',
                 'last_updated': datetime.now().isoformat(),
                 'calculation_method': 'tariff_aware',
                 'prices': prices_list
+                # current_price and cheapest_price intentionally omitted from static result
+                # to trigger on-the-fly calculation in the getter
             }
             
             # Save to disk
@@ -658,7 +663,7 @@ class LogWebServer:
                 self._background_cache['last_price_refresh'] = time.time()
                 self._background_cache['last_price_error'] = None
             
-            logger.info(f"✅ Refreshed price data: {current_price_kwh:.4f} PLN/kWh")
+            logger.info("✅ Aggregated hourly price data refreshed")
             
         except Exception as e:
             logger.warning(f"Price refresh failed: {e}")
@@ -4010,35 +4015,53 @@ class LogWebServer:
             return self._price_charger
     
     def _get_real_price_data(self) -> Optional[Dict[str, Any]]:
-        """Get price data from background cache with direct fetch fallback."""
+        """Get price data from background cache and recalculate metrics on-the-fly."""
         try:
             # Check background cache first
             with self._background_cache_lock:
                 cached_data = self._background_cache.get('price_data')
                 last_refresh = self._background_cache.get('last_price_refresh', 0)
             
+            if not cached_data:
+                # Skip disk cache and go directly to fetch for immediate/fresh data
+                logger.debug("Price cache MISS, fetching fresh data...")
+                cached_data = self._fetch_price_data_directly()
+                
+                # If direct fetch fails, try disk cache as last resort
+                if not cached_data:
+                    cached_data = self._load_price_from_disk()
+                    if cached_data:
+                        cached_data['data_source'] = 'disk_cache_fallback'
+
             if cached_data:
-                cache_age = time.time() - last_refresh
-                if cache_age < 3600:  # Fresh: <1 hour
-                    cached_data['data_source'] = 'background_cache'
-                    logger.debug(f"Price cache HIT: current={cached_data.get('current_price_pln_kwh')} PLN/kWh (age: {cache_age:.0f}s)")
-                    return cached_data
-            
-            # Skip disk cache and go directly to fetch for immediate/fresh data
-            # This ensures tests with mocked data work correctly
-            logger.debug("Price cache MISS, fetching fresh data...")
-            logger.warning("⚠️ Cache unavailable, fetching price data directly")
-            result = self._fetch_price_data_directly()
-            
-            # If direct fetch succeeded, return it (don't fall back to potentially stale disk cache)
-            if result is not None:
-                return result
-            
-            # Only if direct fetch fails, try disk cache as last resort
-            disk_data = self._load_price_from_disk()
-            if disk_data:
-                disk_data['data_source'] = 'disk_cache_fallback'
-                return disk_data
+                # DYNAMIC RECALCULATION: Ensure current and cheapest prices are always fresh
+                # based on the current time and the stored price list.
+                prices = cached_data.get('prices', [])
+                if prices:
+                    now = datetime.now()
+                    current_hour = now.hour
+                    
+                    # 1. Recalculate Current Price (PLN/kWh)
+                    # Find price for the current hour
+                    current_entry = next((p for p in prices if p['hour'] == current_hour), None)
+                    if current_entry:
+                        cached_data['current_price_pln_kwh'] = current_entry['price']
+                    else:
+                        # If no match for current hour, use first available as fallback
+                        cached_data['current_price_pln_kwh'] = prices[0]['price']
+                        logger.warning(f"No price found for current hour {current_hour}, using fallback")
+
+                    # 2. Recalculate Cheapest Price (PLN/kWh)
+                    # This ensures consistency with the "BEST" badge in the grid
+                    cheapest_entry = min(prices, key=lambda x: x['price'])
+                    cached_data['cheapest_price_pln_kwh'] = cheapest_entry['price']
+                    cached_data['cheapest_hour'] = cheapest_entry['hour_str']
+                    
+                    # 3. Recalculate Average (PLN/kWh)
+                    avg_price = sum(p['price'] for p in prices) / len(prices)
+                    cached_data['average_price_pln_kwh'] = round(avg_price, 4)
+
+                return cached_data
             
             return None
             
