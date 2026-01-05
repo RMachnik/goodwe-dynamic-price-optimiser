@@ -33,7 +33,12 @@ class PVForecaster:
         # Initialize storage
         self.storage = None
         try:
-            self.storage = StorageFactory.create_storage(self.config)
+            # Pass the data_storage section to StorageFactory
+            data_storage_config = self.config.get('data_storage', {})
+            if data_storage_config:
+                self.storage = StorageFactory.create_storage(data_storage_config)
+            else:
+                logger.warning("No data_storage configuration found, storage will not be available")
         except Exception as e:
             logger.error(f"Failed to create storage: {e}")
         
