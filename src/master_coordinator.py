@@ -114,7 +114,7 @@ class MasterCoordinator:
         self.historical_data = []
         self.decision_history = []
         self.performance_metrics = {}
-        self.last_save_time = datetime.now()  # Track last data save time
+        self.last_save_time = datetime.now() - timedelta(minutes=10)  # Trigger immediate save on startup
         
         # Configuration
         self.config = self._load_config()

@@ -480,6 +480,14 @@ class LogWebServer:
                 try:
                     now = time.time()
                     
+                    # Ensure background storage is connected
+                    if not self._background_storage_connected or not self._background_storage:
+                        # Limit reconnect attempts to once every 60 seconds
+                        if now - self._storage_last_reconnect_attempt > 60:
+                            logger.info("Attempting to reconnect background storage...")
+                            self._storage_last_reconnect_attempt = now
+                            self._init_background_storage()
+                    
                     # Refresh coordinator PID
                     if now - last_pid >= pid_interval:
                         self._refresh_coordinator_pid()
