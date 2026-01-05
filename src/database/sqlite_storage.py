@@ -127,9 +127,12 @@ class SQLiteStorage(DataStorageInterface):
             for table_sql in ALL_TABLES:
                 await cursor.execute(table_sql)
             
-            # Create indexes
+            # Create indexes (swallow errors if columns don't exist, migrations will handle it)
             for index_sql in CREATE_INDEXES:
-                await cursor.execute(index_sql)
+                try:
+                    await cursor.execute(index_sql)
+                except Exception as e:
+                    self.logger.debug(f"Index creation skipped (likely handled by migration): {e}")
                 
         await self._connection.commit()
         

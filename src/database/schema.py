@@ -172,8 +172,6 @@ CREATE_INDEXES = [
     # Index for energy data range queries with filtering
     "CREATE INDEX IF NOT EXISTS idx_energy_timestamp_soc ON energy_data(timestamp, battery_soc);",
     
-    # Index for tariff zone queries
-    "CREATE INDEX IF NOT EXISTS idx_energy_tariff_zone ON energy_data(tariff_zone);",
     
     # Index for system state filtering
     "CREATE INDEX IF NOT EXISTS idx_state_timestamp_state ON system_state(timestamp, state);",
