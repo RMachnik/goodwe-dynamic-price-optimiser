@@ -13,8 +13,11 @@ WorkingDirectory=/home/rmachnik/sources/goodwe-dynamic-price-optimiser
 # -o StrictHostKeyChecking=no: Don't fail if host key is not in known_hosts
 # -o ExitOnForwardFailure=yes: Fail if the port is already in use on the VPS
 # -o ServerAliveInterval=60: Keep connection alive
-# -i /home/rmachnik/.ssh/id_goodwe_tunnel: Use a dedicated key without a passphrase
-ExecStart=/usr/bin/ssh -N -R 20358:localhost:8080 -p 10358 -o StrictHostKeyChecking=no -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 -i /home/rmachnik/.ssh/id_goodwe_tunnel root@andrzej358.mikrus.xyz
+# Cleanup: Kill any previous tunnel process on the VPS using port 20358
+ExecStartPre=/usr/bin/ssh -p 10358 -o StrictHostKeyChecking=no -i /home/rmachnik/.ssh/id_goodwe_tunnel root@andrzej358.mikrus.xyz "fuser -k 20358/tcp || true"
+# Reverse SSH Tunnel: Expose Pi's local 8080 to VPS 0.0.0.0:20358
+# 0.0.0.0:20358 ensures the Mikrus public proxy can connect to the internal tunnel endpoint
+ExecStart=/usr/bin/ssh -N -R 0.0.0.0:20358:localhost:8080 -p 10358 -o StrictHostKeyChecking=no -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 -i /home/rmachnik/.ssh/id_goodwe_tunnel root@andrzej358.mikrus.xyz
 # Maintenance
 Restart=always
 RestartSec=30
