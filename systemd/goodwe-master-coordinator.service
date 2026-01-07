@@ -21,7 +21,7 @@ StandardError=journal
 SyslogIdentifier=goodwe-master-coordinator
 
 # Environment variables
-Environment=PYTHONPATH=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/src:/home/rmachnik/sources/goodwe-dynamic-price-optimiser/venv/lib/python3.12/site-packages
+Environment=PYTHONPATH=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/src
 Environment=PYTHONUNBUFFERED=1
 Environment=HOME=/home/rmachnik
 Environment=USER=rmachnik
