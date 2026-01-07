@@ -4,7 +4,7 @@
 
 set -e
 
-SERVICES=("goodwe-master-coordinator" "goodwe-ngrok")
+SERVICES=("goodwe-master-coordinator" "goodwe-ngrok" "goodwe-vps-tunnel")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 SYSTEMD_DIR="/etc/systemd/system"

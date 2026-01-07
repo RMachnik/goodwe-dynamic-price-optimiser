@@ -1,0 +1,21 @@
+[Unit]
+Description=GoodWe Master Coordinator VPS SSH Tunnel
+After=goodwe-master-coordinator.service
+BindsTo=goodwe-master-coordinator.service
+
+[Service]
+Type=simple
+User=rmachnik
+Group=rmachnik
+WorkingDirectory=/home/rmachnik/sources/goodwe-dynamic-price-optimiser
+# Reverse SSH Tunnel: Expose Pi's local 8080 to VPS local 20358
+ExecStart=/usr/bin/ssh -N -R 20358:localhost:8080 -p 10358 root@andrzej358.mikrus.xyz
+# Maintenance
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=goodwe-vps-tunnel
+
+[Install]
+WantedBy=multi-user.target
