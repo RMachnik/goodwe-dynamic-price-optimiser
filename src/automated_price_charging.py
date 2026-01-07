@@ -10,8 +10,8 @@ import json
 import logging
 import time
 import argparse
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Tuple, Any, Union
 from pathlib import Path
 
 try:
@@ -1136,7 +1136,8 @@ class AutomatedPriceCharger:
         return True
 
     def _smart_critical_charging_decision(self, battery_soc: int, current_price: Optional[float],
-                                        cheapest_price: Optional[float], cheapest_hour: Optional[int]) -> Dict[str, any]:
+                                        cheapest_price: Optional[float], cheapest_hour: Optional[int],
+                                        price_data: Optional[Dict] = None) -> Dict[str, Any]:
         """Smart critical charging decision that considers price, timing, weather, and PV forecast"""
         
         if not self.smart_critical_enabled:
@@ -1168,7 +1169,7 @@ class AutomatedPriceCharger:
         high_threshold = self.get_high_price_threshold()
         is_high_price = current_price > high_threshold
         
-        if self.wait_at_10_percent_if_high_price and battery_soc == 10 and is_high_price:
+        if self.wait_at_10_percent_if_high_price and battery_soc == 10 and current_price >= high_threshold:
             return {
                 'should_charge': False,
                 'reason': f'Low battery (10%) but price too high ({current_price:.3f} > {high_threshold:.3f}) - waiting for drop',
@@ -1179,7 +1180,20 @@ class AutomatedPriceCharger:
         # Decision logic for critical battery
         critical_threshold = self.get_critical_price_threshold()
         if current_price <= critical_threshold:
-            # Price is acceptable for critical charging
+            # Price is acceptable for critical charging, but check for imminent big drop
+            if battery_soc >= 10 and price_data:
+                # Look ahead only 2 hours for critical tier
+                cheaper_soon = self._find_cheapest_price_next_hours(2, price_data)
+                if cheaper_soon and current_price > 0.8: # Only delay if currently expensive
+                    drop_percent = ((current_price - cheaper_soon) / current_price) * 100
+                    if drop_percent >= 30: # Significant drop coming (>30%)
+                        return {
+                            'should_charge': False,
+                            'reason': f'Critical battery ({battery_soc}%) - significant price drop coming in next 2h ({current_price:.3f} -> {cheaper_soon:.3f}, -{drop_percent:.0f}%)',
+                            'priority': 'critical',
+                            'confidence': 0.8
+                        }
+
             return {
                 'should_charge': True,
                 'reason': f'Critical battery ({battery_soc}%) + acceptable price ({current_price:.3f} PLN/kWh ≤ {critical_threshold:.3f} PLN/kWh)',
@@ -1425,7 +1439,19 @@ class AutomatedPriceCharger:
             for item in price_data.get('value', []):
                 try:
                     dtime = datetime.fromisoformat(item['dtime'].replace('Z', '+00:00'))
-                    if now <= dtime <= scan_end:
+                    
+                    # Ensure now and dtime are both aware or both naive for comparison
+                    if dtime.tzinfo and not now.tzinfo:
+                        local_now = now.replace(tzinfo=timezone.utc)
+                        local_scan_end = scan_end.replace(tzinfo=timezone.utc)
+                    elif not dtime.tzinfo and now.tzinfo:
+                        local_now = now.replace(tzinfo=None)
+                        local_scan_end = scan_end.replace(tzinfo=None)
+                    else:
+                        local_now = now
+                        local_scan_end = scan_end
+
+                    if local_now <= dtime <= local_scan_end:
                         price_kwh = self.calculate_final_price(float(item['csdac_pln']), dtime) / 1000
                         prices.append(price_kwh)
                 except (KeyError, ValueError, TypeError):
@@ -1710,7 +1736,7 @@ class AutomatedPriceCharger:
         # TIER 2 - CRITICAL (5-12%): Smart price-aware charging with adaptive thresholds
         if battery_soc < self.critical_battery_threshold:
             decision = self._smart_critical_charging_decision(
-                battery_soc, current_price, cheapest_price, cheapest_hour
+                battery_soc, current_price, cheapest_price, cheapest_hour, price_data
             )
             # Add tier label to reason
             decision['reason'] = f"CRITICAL tier: {decision['reason']}"
