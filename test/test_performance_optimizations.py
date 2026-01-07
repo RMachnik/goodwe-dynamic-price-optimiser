@@ -430,14 +430,14 @@ class TestSchemaVersion:
         return StorageConfig(db_path=temp_db)
     
     @pytest.mark.asyncio
-    async def test_version_3_indexes_created(self, storage_config):
-        """Test that version 3 migration creates performance indexes"""
+    async def test_version_4_indexes_created(self, storage_config):
+        """Test that version 4 migration creates performance indexes"""
         storage = SQLiteStorage(storage_config)
         assert await storage.connect()
         
         # Check schema version
         version = await storage._get_current_schema_version()
-        assert version == 3
+        assert version == 4
         
         # Verify new indexes exist
         async with storage._connection.execute(

@@ -65,6 +65,8 @@ def base_config():
                 },
                 'optimization_rules': {
                     'proactive_charging_enabled': False,  # Test tier logic in isolation
+                    'opportunistic_pre_peak_enabled': True,
+                    'super_low_price_charging_enabled': True,
                     'wait_at_10_percent_if_high_price': True,
                     'high_price_threshold_pln': 1.35
                 }
@@ -325,9 +327,11 @@ def test_opportunistic_tier_price_tolerance(price_charger, battery_soc, current_
     # Get tolerance from config (15% default)
     tolerance = price_charger.opportunistic_tolerance_percent  # 0.15 from config
     
-    # Build price data with varying prices - cheapest in next 12h
-    # Note: csdac_pln is in PLN/MWh, so multiply kWh prices by 1000
-    start_time = datetime.now().replace(minute=0, second=0, microsecond=0)
+    from datetime import datetime as real_datetime
+    # Mock time to 18:00 (after 16h cutoff) to avoid pre-peak logic interfering
+    mock_datetime_value = real_datetime(2025, 12, 5, 18, 0, 0)
+    start_time = mock_datetime_value.replace(minute=0, second=0, microsecond=0)
+    
     price_points = []
     
     # Current hour
@@ -354,14 +358,22 @@ def test_opportunistic_tier_price_tolerance(price_charger, battery_soc, current_
     
     price_data = {'value': price_points}
     
-    decision = make_decision_with_mocks(
-        price_charger,
-        battery_soc=battery_soc,
-        current_price=current_price,
-        cheapest_price=cheapest_next_12h,
-        cheapest_hour=6,
-        price_data=price_data
-    )
+    with patch('automated_price_charging.datetime') as mock_datetime:
+        mock_datetime.now.return_value = mock_datetime_value
+        mock_datetime.fromisoformat = real_datetime.fromisoformat
+        mock_datetime.strptime = real_datetime.strptime
+        mock_datetime.combine = real_datetime.combine
+        mock_datetime.min = real_datetime.min
+        mock_datetime.max = real_datetime.max
+        
+        decision = make_decision_with_mocks(
+            price_charger,
+            battery_soc=battery_soc,
+            current_price=current_price,
+            cheapest_price=cheapest_next_12h,
+            cheapest_hour=6,
+            price_data=price_data
+        )
     
     expected_priority = 'medium' if expected_charge else 'low'
     assert_decision_outcome(decision, expected_charge, expected_priority)

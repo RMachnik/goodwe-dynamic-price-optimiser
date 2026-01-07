@@ -1729,7 +1729,7 @@ class AutomatedPriceCharger:
                         if evening_avg > current_price * self.evening_price_multiplier:
                             return {
                                 'should_charge': True,
-                                'reason': f'Charging before evening peak ({hours_until:.0f}h away) - price will rise to ~{evening_avg:.2f} PLN',
+                                'reason': f'OPPORTUNISTIC tier: Charging before evening peak ({hours_until:.0f}h away) - price will rise to ~{evening_avg:.2f} PLN',
                                 'priority': 'medium',
                                 'confidence': 0.75
                             }

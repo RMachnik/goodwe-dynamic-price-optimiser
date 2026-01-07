@@ -46,7 +46,9 @@ def config():
             'smart_critical_charging': {
                 'enabled': True,
                 'optimization_rules': {
-                    'proactive_charging_enabled': False  # Disable to test tier logic in isolation
+                    'proactive_charging_enabled': False,  # Disable to test tier logic in isolation
+                    'opportunistic_pre_peak_enabled': False,
+                    'super_low_price_charging_enabled': False
                 }
             }
         },

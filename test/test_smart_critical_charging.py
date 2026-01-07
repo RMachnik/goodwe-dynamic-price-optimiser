@@ -119,12 +119,13 @@ def test_smart_critical_charging():
         logger.info(f"Decision: {decision}")
         
         # Verify expected action (dynamic where applicable)
-        if scenario.get('expected_action_dynamic'):
+        if scenario.get('expected_action') == 'dynamic':
             now_hour = datetime.now().hour
             hours_to_wait = scenario['cheapest_hour'] - now_hour
             if hours_to_wait < 0:
                 hours_to_wait += 24
-            savings_percent = float(scenario['expected_savings'].replace('%',''))
+            savings_percent = ((scenario['current_price'] - scenario['cheapest_price']) / scenario['current_price']) * 100
+            
             # Calculate dynamic max wait hours based on battery SOC and savings
             # For 8% SOC: battery_multiplier = 0.5 (very critical, <= 8)
             # For 73.3% savings: savings_multiplier = 1.2 (high savings, >= 60)
@@ -133,20 +134,27 @@ def test_smart_critical_charging():
             if battery_soc <= 8:
                 battery_multiplier = 0.5
             elif battery_soc <= 10:
-                battery_multiplier = 0.7
+                if savings_percent >= 70:
+                    battery_multiplier = 1.2
+                elif savings_percent >= 50:
+                    battery_multiplier = 1.0
+                else:
+                    battery_multiplier = 0.7
             else:
                 battery_multiplier = 1.0
             
             if savings_percent >= 80:
-                savings_multiplier = 1.5
+                savings_multiplier = 2.0
             elif savings_percent >= 60:
-                savings_multiplier = 1.2
+                savings_multiplier = 1.6
             elif savings_percent >= 40:
-                savings_multiplier = 1.0
+                savings_multiplier = 1.2
             else:
-                savings_multiplier = 0.7
+                savings_multiplier = 0.8
             
-            dynamic_max_wait = 6.0 * savings_multiplier * battery_multiplier
+            dynamic_max_wait = float(charger.max_wait_hours) * savings_multiplier * battery_multiplier
+            if savings_percent >= 85:
+                dynamic_max_wait += 2.0
             dynamic_max_wait = max(1.0, min(12.0, dynamic_max_wait))
             
             expect_wait = hours_to_wait <= dynamic_max_wait and savings_percent >= 30.0
@@ -181,20 +189,27 @@ def test_smart_critical_charging():
             if battery_soc <= 8:
                 battery_multiplier = 0.5
             elif battery_soc <= 10:
-                battery_multiplier = 0.7
+                if savings_percent >= 70:
+                    battery_multiplier = 1.2
+                elif savings_percent >= 50:
+                    battery_multiplier = 1.0
+                else:
+                    battery_multiplier = 0.7
             else:
                 battery_multiplier = 1.0
             
             if savings_percent >= 80:
-                savings_multiplier = 1.5
+                savings_multiplier = 2.0
             elif savings_percent >= 60:
-                savings_multiplier = 1.2
+                savings_multiplier = 1.6
             elif savings_percent >= 40:
-                savings_multiplier = 1.0
+                savings_multiplier = 1.2
             else:
-                savings_multiplier = 0.7
+                savings_multiplier = 0.8
             
-            dynamic_max_wait = 6.0 * savings_multiplier * battery_multiplier
+            dynamic_max_wait = float(charger.max_wait_hours) * savings_multiplier * battery_multiplier
+            if savings_percent >= 85:
+                dynamic_max_wait += 2.0
             dynamic_max_wait = max(1.0, min(12.0, dynamic_max_wait))
             
             expect_wait = hours_to_wait <= dynamic_max_wait and savings_percent >= 30.0
