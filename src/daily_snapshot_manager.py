@@ -278,6 +278,8 @@ class DailySnapshotManager:
             
             snapshot['grid_import_t1_kwh'] = round(t1_import, 3)
             snapshot['grid_import_t2_kwh'] = round(t2_import, 3)
+            # Add calculated total for consistency with breakdown
+            snapshot['grid_import_total_kwh'] = round(t1_import + t2_import, 3)
         
         return snapshot
     
@@ -468,11 +470,12 @@ class DailySnapshotManager:
         total_cost = sum(s['total_cost_pln'] for s in daily_summaries)
         total_savings = sum(s['total_savings_pln'] for s in daily_summaries)
         selling_revenue = sum(s.get('selling_revenue_pln', 0) for s in daily_summaries)
+        energy_charged_t1 = sum(s.get('energy_charged_t1_kwh', 0) for s in daily_summaries)
+        energy_charged_t2 = sum(s.get('energy_charged_t2_kwh', 0) for s in daily_summaries)
         real_grid_import = sum(s.get('real_grid_import_kwh', 0) for s in daily_summaries)
         grid_import_t1 = sum(s.get('grid_import_t1_kwh', 0) for s in daily_summaries)
         grid_import_t2 = sum(s.get('grid_import_t2_kwh', 0) for s in daily_summaries)
-        energy_charged_t1 = sum(s.get('energy_charged_t1_kwh', 0) for s in daily_summaries)
-        energy_charged_t2 = sum(s.get('energy_charged_t2_kwh', 0) for s in daily_summaries)
+        grid_import_total = sum(s.get('grid_import_total_kwh', 0) for s in daily_summaries)
         
         # Calculate weighted average confidence
         confidence_sum = sum(s['avg_confidence'] * s['total_decisions'] for s in daily_summaries)
@@ -508,6 +511,7 @@ class DailySnapshotManager:
             'real_grid_import_kwh': round(real_grid_import, 2),
             'grid_import_t1_kwh': round(grid_import_t1, 2),
             'grid_import_t2_kwh': round(grid_import_t2, 2),
+            'grid_import_total_kwh': round(grid_import_total, 2),
             'energy_charged_t1_kwh': round(energy_charged_t1, 2),
             'energy_charged_t2_kwh': round(energy_charged_t2, 2),
             'source_breakdown': source_breakdown,

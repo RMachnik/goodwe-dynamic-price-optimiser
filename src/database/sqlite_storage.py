@@ -482,7 +482,7 @@ class SQLiteStorage(DataStorageInterface):
                     params = decision.get('parameters', {})
                     extra_fields = ['should_charge', 'confidence', 'current_price', 'current_price_pln', 'cheapest_price', 
                                    'cheapest_hour', 'battery_soc', 'pv_power', 'consumption', 'decision_score',
-                                   'energy_kwh', 'estimated_cost_pln', 'estimated_savings_pln', 'expected_revenue_pln']
+                                   'energy_kwh', 'estimated_cost_pln', 'estimated_savings_pln', 'expected_revenue_pln', 'tariff_zone']
                     for field in extra_fields:
                         if field in decision:
                             params[field] = decision[field]
@@ -533,7 +533,7 @@ class SQLiteStorage(DataStorageInterface):
                                     # Flatten parameter fields to top level for compatibility
                                     for key in ['should_charge', 'confidence', 'current_price', 'current_price_pln', 'cheapest_price',
                                                 'cheapest_hour', 'battery_soc', 'pv_power', 'consumption', 'decision_score',
-                                                'energy_kwh', 'estimated_cost_pln', 'estimated_savings_pln', 'expected_revenue_pln']:
+                                                'energy_kwh', 'estimated_cost_pln', 'estimated_savings_pln', 'expected_revenue_pln', 'tariff_zone']:
                                         if key in params:
                                             d[key] = params[key]
                                 except:

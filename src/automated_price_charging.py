@@ -284,7 +284,7 @@ class AutomatedPriceCharger:
             # Session management
             self.min_session_duration_minutes = hysteresis_config.get('min_session_duration_minutes', 30)
             self.min_discharge_depth_percent = hysteresis_config.get('min_discharge_depth_percent', 10)
-            self.max_sessions_per_day = hysteresis_config.get('max_sessions_per_day', 4)
+            self.max_sessions_per_day = hysteresis_config.get('max_sessions_per_day', 6)
             
             # Override settings
             self.override_on_emergency = hysteresis_config.get('override_on_emergency', True)
@@ -624,6 +624,9 @@ class AutomatedPriceCharger:
             # Get current and future prices
             current_price, cheapest_price, cheapest_hour = self._analyze_prices(price_data)
             
+            # Extract tariff zone from current data
+            tariff_zone = current_data.get('tariff_zone', 'T1')
+            
             # Make charging decision
             decision = self._make_charging_decision(
                 battery_soc=battery_soc,
@@ -633,7 +636,8 @@ class AutomatedPriceCharger:
                 current_price=current_price,
                 cheapest_price=cheapest_price,
                 cheapest_hour=cheapest_hour,
-                price_data=price_data  # Pass full price data for enhanced logic
+                price_data=price_data,  # Pass full price data for enhanced logic
+                tariff_zone=tariff_zone
             )
             
             # Store decision in history
@@ -1304,6 +1308,27 @@ class AutomatedPriceCharger:
             logger.error(f"Error checking PV improvement for critical battery: {e}")
             return False
 
+    def _calculate_remaining_t2_hours(self) -> float:
+        """Calculate how many hours remain in the current T2 window"""
+        now = datetime.now()
+        hour = now.hour
+        
+        # G12 Tariff windows
+        # 13:00 - 15:00
+        # 22:00 - 06:00
+        
+        if 13 <= hour < 15:
+            end_time = now.replace(hour=15, minute=0, second=0, microsecond=0)
+            return (end_time - now).total_seconds() / 3600.0
+        elif hour >= 22:
+            end_time = (now + timedelta(days=1)).replace(hour=6, minute=0, second=0, microsecond=0)
+            return (end_time - now).total_seconds() / 3600.0
+        elif hour < 6:
+            end_time = now.replace(hour=6, minute=0, second=0, microsecond=0)
+            return (end_time - now).total_seconds() / 3600.0
+        
+        return 0.0
+
     def _is_approaching_evening_peak(self) -> Tuple[bool, float]:
         """
         Check if current time is approaching evening peak (before 16:00).
@@ -1601,7 +1626,8 @@ class AutomatedPriceCharger:
     def _make_charging_decision(self, battery_soc: int, overproduction: int, grid_power: int,
                               grid_direction: str, current_price: Optional[float],
                               cheapest_price: Optional[float], cheapest_hour: Optional[int],
-                              price_data: Optional[Dict] = None) -> Dict[str, any]:
+                              price_data: Optional[Dict] = None,
+                              tariff_zone: str = 'T1') -> Dict[str, any]:
         """
         Make the final charging decision using 4-tier SOC-based logic.
         
@@ -1710,7 +1736,32 @@ class AutomatedPriceCharger:
                     'confidence': 0.3
                 }
             
-            threshold = cheapest_next_12h * (1 + self.opportunistic_tolerance_percent)
+            threshold_multiplier = 1.0 + self.opportunistic_tolerance_percent
+            
+            # T2-AWARE TOLERANCE: Increase tolerance during off-peak hours
+            if tariff_zone == 'T2':
+                threshold_multiplier = 1.25  # 25% tolerance for T2
+                logger.debug(f"OPPORTUNISTIC tier: Using T2-enhanced price tolerance (25%)")
+            
+            threshold = cheapest_next_12h * threshold_multiplier
+            
+            # DEADLINE-AWARE FALLBACK: If in T2 and time is running out, charge anyway
+            if tariff_zone == 'T2':
+                remaining_t2_hours = self._calculate_remaining_t2_hours()
+                charge_rate = 3.0  # kW default
+                # Rough estimation of hours to reach target (target is usually 85% or 95%)
+                target_soc = 85
+                energy_needed = self.battery_capacity_kwh * (target_soc - battery_soc) / 100.0
+                hours_needed = energy_needed / charge_rate
+                
+                if remaining_t2_hours > 0 and remaining_t2_hours <= hours_needed + 0.5: # 30 min buffer
+                    return {
+                        'should_charge': True,
+                        'reason': f'OPPORTUNISTIC tier: T2 window ending soon ({remaining_t2_hours:.1f}h left) - charging to reach target',
+                        'priority': 'medium',
+                        'confidence': 0.9,
+                        'tariff_zone': 'T2'
+                    }
             
             # PRE-PEAK CHARGING LOGIC: Check if we should charge before evening peak
             if (self.opportunistic_pre_peak_enabled and 
@@ -1731,27 +1782,30 @@ class AutomatedPriceCharger:
                                 'should_charge': True,
                                 'reason': f'OPPORTUNISTIC tier: Charging before evening peak ({hours_until:.0f}h away) - price will rise to ~{evening_avg:.2f} PLN',
                                 'priority': 'medium',
-                                'confidence': 0.75
+                                'confidence': 0.75,
+                                'tariff_zone': tariff_zone
                             }
                         else:
                             logger.debug(f"OPPORTUNISTIC pre-peak: evening avg {evening_avg:.3f} not significantly higher than current {current_price:.3f} (threshold {current_price * self.evening_price_multiplier:.3f})")
                     else:
                         logger.warning("OPPORTUNISTIC pre-peak: evening forecast unavailable, using normal logic")
             
-            # NORMAL LOGIC: Use 15% tolerance threshold
+            # NORMAL LOGIC: Use tolerance threshold
             if current_price <= threshold:
                 return {
                     'should_charge': True,
                     'reason': f'OPPORTUNISTIC tier: Near best price today ({current_price:.2f} PLN) - charging now',
                     'priority': 'medium',
-                    'confidence': 0.75
+                    'confidence': 0.75,
+                    'tariff_zone': tariff_zone
                 }
             else:
                 return {
                     'should_charge': False,
-                    'reason': f'OPPORTUNISTIC tier: Cheaper price coming ({cheapest_next_12h:.2f} PLN) - waiting',
+                    'reason': f'OPPORTUNISTIC tier: Battery OK ({battery_soc}%) but current price ({current_price:.2f} PLN) > threshold ({threshold:.2f} PLN)',
                     'priority': 'low',
-                    'confidence': 0.7
+                    'confidence': 0.7,
+                    'tariff_zone': tariff_zone
                 }
         
         # TIER 4 - NORMAL (50%+): Charge if price very cheap (percentile-based)

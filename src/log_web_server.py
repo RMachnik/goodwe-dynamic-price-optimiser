@@ -2351,7 +2351,7 @@ class LogWebServer:
                                 
                                 <div class="metric-box" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid var(--border-color);">
                                     <div style="font-size: 0.85em; color: var(--text-secondary); margin-bottom: 5px;">Grid Import (Meter)</div>
-                                    <div style="font-size: 1.25em; font-weight: bold; color: #e67e22;">${(summary.real_grid_import_kwh || 0).toFixed(1)} kWh</div>
+                                    <div style="font-size: 1.25em; font-weight: bold; color: #e67e22;">${(summary.grid_import_total_kwh || (summary.grid_import_t1_kwh || 0) + (summary.grid_import_t2_kwh || 0) || summary.real_grid_import_kwh || 0).toFixed(1)} kWh</div>
                                 </div>
                             </div>
 
