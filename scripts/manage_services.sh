@@ -4,9 +4,10 @@
 
 set -e
 
-SERVICE="goodwe-master-coordinator"
+SERVICES=("goodwe-master-coordinator" "goodwe-ngrok")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+SYSTEMD_DIR="/etc/systemd/system"
 
 # Colors for output
 RED='\033[0;31m'
@@ -39,186 +40,177 @@ check_root() {
 }
 
 check_service_exists() {
-    if ! systemctl list-unit-files | grep -q "^${SERVICE}.service"; then
-        error "Service ${SERVICE} not found. Make sure systemd service is installed."
+    local service=$1
+    if ! systemctl list-unit-files | grep -q "^${service}.service"; then
         return 1
     fi
+    return 0
 }
 
 start_services() {
-    log "Starting GoodWe Master Coordinator..."
-    if check_service_exists; then
-        if sudo systemctl start "$SERVICE"; then
-            success "$SERVICE started successfully"
+    log "Starting GoodWe Services..."
+    # Start app first, then ngrok
+    for service in "${SERVICES[@]}"; do
+        if check_service_exists "$service"; then
+            log "Starting $service..."
+            if sudo systemctl start "$service"; then
+                success "$service started successfully"
+            else
+                error "Failed to start $service"
+            fi
         else
-            error "Failed to start $SERVICE"
+            warning "Service $service not installed. Run install first."
         fi
-    fi
+    done
 }
 
 stop_services() {
-    log "Stopping GoodWe Master Coordinator..."
-    if check_service_exists; then
-        if sudo systemctl stop "$SERVICE"; then
-            success "$SERVICE stopped via systemctl"
-        else
-            warning "Failed to stop $SERVICE via systemctl, attempting manual cleanup..."
+    log "Stopping GoodWe Services..."
+    # Stop in reverse order (ngrok first, then app)
+    for (( i=${#SERVICES[@]}-1; i>=0; i-- )); do
+        local service="${SERVICES[$i]}"
+        if check_service_exists "$service"; then
+            log "Stopping $service..."
+            if sudo systemctl stop "$service"; then
+                success "$service stopped"
+            else
+                warning "Failed to stop $service via systemctl"
+            fi
         fi
-        
-        # Additional cleanup for stuck processes
-        log "Checking for stuck processes..."
-        
-        # Kill master coordinator if still running
-        if pgrep -f "src/master_coordinator.py" > /dev/null; then
-            log "Found stuck master_coordinator process, killing..."
-            sudo pkill -f "src/master_coordinator.py" || true
-            sleep 1
-        fi
-        
-        # Kill web server if running standalone or stuck
-        if pgrep -f "src/log_web_server.py" > /dev/null; then
-             log "Found stuck log_web_server process, killing..."
-             sudo pkill -f "src/log_web_server.py" || true
-             sleep 1
-        fi
-        
-        success "Cleanup complete"
+    done
+    
+    # Additional cleanup for stuck processes
+    log "Checking for stuck processes..."
+    if pgrep -f "src/master_coordinator.py" > /dev/null; then
+        log "Found stuck master_coordinator process, killing..."
+        sudo pkill -f "src/master_coordinator.py" || true
     fi
+    if pgrep -f "ngrok start" > /dev/null; then
+        log "Found stuck ngrok process, killing..."
+        sudo pkill -f "ngrok start" || true
+    fi
+    success "Cleanup complete"
 }
 
 restart_services() {
-    log "Restarting GoodWe Master Coordinator..."
-    if check_service_exists; then
-        if sudo systemctl restart "$SERVICE"; then
-            success "$SERVICE restarted successfully"
-        else
-            error "Failed to restart $SERVICE"
-        fi
-    fi
+    log "Restarting GoodWe Services..."
+    stop_services
+    sleep 2
+    start_services
 }
 
 show_status() {
-    log "GoodWe Master Coordinator Status:"
+    log "GoodWe Services Status:"
     echo
-    if check_service_exists; then
-        echo -e "${BLUE}=== $SERVICE ===${NC}"
-        sudo systemctl status "$SERVICE" --no-pager -l
-        echo
-    fi
+    for service in "${SERVICES[@]}"; do
+        if check_service_exists "$service"; then
+            echo -e "${BLUE}=== $service ===${NC}"
+            sudo systemctl status "$service" --no-pager -l
+            echo
+        else
+            warning "Service $service is not installed"
+        fi
+    done
 }
 
 show_logs() {
-    local lines=${1:-100}
-    if check_service_exists; then
-        log "Showing logs for $SERVICE (last $lines lines):"
-        sudo journalctl -u "$SERVICE" -n "$lines" --no-pager -f
+    local service_input=$1
+    local lines=${2:-50}
+    
+    # If first argument is -f or a number, it's lines/flags, default to app service
+    local target_service="goodwe-master-coordinator"
+    if [[ "$service_input" == "goodwe-ngrok" ]]; then
+        target_service="goodwe-ngrok"
+        lines=${2:-50}
+    elif [[ "$service_input" =~ ^[0-9]+$ ]] || [[ "$service_input" == "-f" ]]; then
+        lines=$service_input
+    fi
+
+    if check_service_exists "$target_service"; then
+        log "Showing logs for $target_service:"
+        if [[ "$lines" == "-f" ]]; then
+            sudo journalctl -u "$target_service" -f
+        else
+            sudo journalctl -u "$target_service" -n "$lines" --no-pager
+        fi
     else
-        error "Service $SERVICE not found"
+        error "Service $target_service not found"
     fi
 }
 
 enable_services() {
-    log "Enabling GoodWe Master Coordinator to start on boot..."
-    if check_service_exists; then
-        if sudo systemctl enable "$SERVICE"; then
-            success "$SERVICE enabled successfully"
-        else
-            error "Failed to enable $SERVICE"
+    log "Enabling services to start on boot..."
+    for service in "${SERVICES[@]}"; do
+        if check_service_exists "$service"; then
+            sudo systemctl enable "$service"
+            success "$service enabled"
         fi
-    fi
+    done
 }
 
 disable_services() {
-    log "Disabling GoodWe Master Coordinator from starting on boot..."
-    if check_service_exists; then
-        if sudo systemctl disable "$SERVICE"; then
-            success "$SERVICE disabled successfully"
-        else
-            error "Failed to disable $SERVICE"
+    log "Disabling services from starting on boot..."
+    for service in "${SERVICES[@]}"; do
+        if check_service_exists "$service"; then
+            sudo systemctl disable "$service"
+            success "$service disabled"
         fi
-    fi
+    done
 }
 
 install_services() {
-    log "Installing GoodWe Master Coordinator systemd service..."
+    log "Installing GoodWe services using symbolic links..."
     
-    # Check if service file exists
-    if [[ ! -f "$PROJECT_DIR/systemd/goodwe-master-coordinator.service" ]]; then
-        error "Master coordinator service file not found at $PROJECT_DIR/systemd/goodwe-master-coordinator.service"
-        exit 1
-    fi
+    for service in "${SERVICES[@]}"; do
+        local src="$PROJECT_DIR/systemd/$service.service"
+        local dest="$SYSTEMD_DIR/$service.service"
+        
+        if [[ -f "$src" ]]; then
+            log "Linking $service.service..."
+            sudo ln -sf "$src" "$dest"
+            success "Linked $service"
+        else
+            error "Service file not found: $src"
+        fi
+    done
     
-    # Copy service file
-    log "Installing goodwe-master-coordinator.service..."
-    sudo cp "$PROJECT_DIR/systemd/goodwe-master-coordinator.service" "/etc/systemd/system/"
-    success "Master coordinator service installed"
-    
-    # Reload systemd
     log "Reloading systemd daemon..."
     sudo systemctl daemon-reload
     success "Systemd daemon reloaded"
-    
-    log "Service installed successfully. Use 'enable' to start it on boot."
 }
 
 show_help() {
-    echo "GoodWe Master Coordinator Management Script"
+    echo "GoodWe Services Management Script"
     echo
     echo "Usage: $0 [COMMAND] [OPTIONS]"
     echo
     echo "Commands:"
-    echo "  install     Install systemd service file"
-    echo "  start       Start the master coordinator"
-    echo "  stop        Stop the master coordinator"
-    echo "  restart     Restart the master coordinator"
-    echo "  status      Show status of the master coordinator"
-    echo "  logs [lines] Show logs (default: 100 lines, use -f for follow)"
-    echo "  enable      Enable master coordinator to start on boot"
-    echo "  disable     Disable master coordinator from starting on boot"
-    echo "  help        Show this help message"
+    echo "  install           Link systemd service files"
+    echo "  start             Start all services"
+    echo "  stop              Stop all services"
+    echo "  restart           Restart all services"
+    echo "  status            Show status of all services"
+    echo "  logs [service] [lines/-f]  Show logs (default: coordinator, 50 lines)"
+    echo "  enable            Enable services to start on boot"
+    echo "  disable           Disable services from starting on boot"
     echo
     echo "Examples:"
-    echo "  $0 install"
     echo "  $0 start"
-    echo "  $0 logs 50"
-    echo "  $0 logs -f"
+    echo "  $0 logs goodwe-ngrok -f"
     echo "  $0 status"
 }
 
-# Main script logic
 check_root
 
 case "${1:-help}" in
-    install)
-        install_services
-        ;;
-    start)
-        start_services
-        ;;
-    stop)
-        stop_services
-        ;;
-    restart)
-        restart_services
-        ;;
-    status)
-        show_status
-        ;;
-    logs)
-        show_logs "$2"
-        ;;
-    enable)
-        enable_services
-        ;;
-    disable)
-        disable_services
-        ;;
-    help|--help|-h)
-        show_help
-        ;;
-    *)
-        error "Unknown command: $1"
-        show_help
-        exit 1
-        ;;
+    install) install_services ;;
+    start) start_services ;;
+    stop) stop_services ;;
+    restart) restart_services ;;
+    status) show_status ;;
+    logs) show_logs "$2" "$3" ;;
+    enable) enable_services ;;
+    disable) disable_services ;;
+    help|--help|-h) show_help ;;
+    *) error "Unknown command: $1"; show_help; exit 1 ;;
 esac

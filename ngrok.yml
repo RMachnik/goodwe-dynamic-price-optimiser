@@ -5,7 +5,7 @@ tunnels:
     addr: 8080
     schemes: [https]
     # IMPORTANT: Security layer - CHANGE THESE CREDENTIALS
-    basic_auth: ["admin:admin"]
+    basic_auth: ["admin:mnikow236"]
     # Note: Use your static domain if you have one (Free tier offers 1)
     # domain: your-domain.ngrok-free.app 
     inspect: true

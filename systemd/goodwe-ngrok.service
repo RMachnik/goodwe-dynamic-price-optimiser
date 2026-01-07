@@ -1,0 +1,19 @@
+[Unit]
+Description=GoodWe Master Coordinator Ngrok Tunnel
+After=goodwe-master-coordinator.service
+BindsTo=goodwe-master-coordinator.service
+
+[Service]
+Type=simple
+User=rmachnik
+Group=rmachnik
+WorkingDirectory=/home/rmachnik/sources/goodwe-dynamic-price-optimiser
+ExecStart=/usr/local/bin/ngrok start --config /home/rmachnik/.config/ngrok/ngrok.yml --config /home/rmachnik/sources/goodwe-dynamic-price-optimiser/ngrok.yml goodwe-web-ui
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=goodwe-ngrok
+
+[Install]
+WantedBy=multi-user.target
