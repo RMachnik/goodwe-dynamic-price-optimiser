@@ -8,17 +8,17 @@ Type=simple
 User=rmachnik
 Group=rmachnik
 WorkingDirectory=/home/rmachnik/sources/goodwe-dynamic-price-optimiser
-# Reverse SSH Tunnel: Expose Pi's local 8080 to VPS local 20358
+# Reverse SSH Tunnel: Expose Pi's local 8080 to VPS local 30358
 # Options:
 # -o StrictHostKeyChecking=no: Don't fail if host key is not in known_hosts
 # -o ExitOnForwardFailure=yes: Fail if the port is already in use on the VPS
 # -o ServerAliveInterval=60: Keep connection alive
-# Cleanup: Kill any previous tunnel process on the VPS using port 20358
-# Cleanup: Kill any previous tunnel process on the VPS using port 20358
+# Cleanup: Kill any previous tunnel process on the VPS using port 30358
+# Cleanup: Kill any previous tunnel process on the VPS using port 30358
 # The '-' prefix tells systemd to continue even if this cleanup command fails
-ExecStartPre=-/usr/bin/ssh -p 10358 -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=10 -i /home/rmachnik/.ssh/id_goodwe_tunnel root@andrzej358.mikrus.xyz "fuser -k 20358/tcp 2>/dev/null || true"
-# Reverse SSH Tunnel: Expose Pi's local 8080 to VPS 0.0.0.0:20358
-ExecStart=/usr/bin/ssh -N -R 0.0.0.0:20358:localhost:8080 -p 10358 -o StrictHostKeyChecking=no -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 -i /home/rmachnik/.ssh/id_goodwe_tunnel root@andrzej358.mikrus.xyz
+ExecStartPre=-/usr/bin/ssh -p 10358 -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=10 -i /home/rmachnik/.ssh/id_goodwe_tunnel root@andrzej358.mikrus.xyz "fuser -k 30358/tcp 2>/dev/null || true"
+# Reverse SSH Tunnel: Expose Pi's local 8080 to VPS 0.0.0.0:30358
+ExecStart=/usr/bin/ssh -N -R 0.0.0.0:30358:localhost:8080 -p 10358 -o StrictHostKeyChecking=no -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 -i /home/rmachnik/.ssh/id_goodwe_tunnel root@andrzej358.mikrus.xyz
 # Maintenance
 Restart=always
 RestartSec=30
