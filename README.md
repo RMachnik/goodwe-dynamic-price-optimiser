@@ -20,7 +20,16 @@ This system transforms your GoodWe inverter into an intelligent energy manager t
 - **✅ PRICE FORECASTS**: PSE price forecasts enable earlier and more accurate charging decisions (180-360 PLN/year savings)
 - **✅ PROVEN**: Saves money by charging during optimal price windows and avoiding grid charging during PV overproduction
 
-**For detailed implementation strategy, technical specifications, and current progress, see the [Project Plan](docs/PROJECT_PLAN_Enhanced_Energy_Management.md).**
+**For historical development details and technical history, see [Project History](docs/archive/PROJECT_HISTORY.md).**
+
+## ☁️ **Multi-Tenant Cloud Hub (Vision)**
+
+We are currently expanding the system into a **Hub-and-Spoke** architecture:
+- **Central Cloud Hub**: A centralized management console to monitor multiple edge nodes (Raspberry Pi), manage configurations, and push automated code updates.
+- **Smart Edge Nodes**: Local Raspberry Pi instances continue to handle real-time inverter logic, ensuring **offline resilience** and local security.
+- **Unified Dashboard**: Aggregated data from all tenants visible in one place on a central VPS.
+
+See [Cloud Architecture Plan](docs/archive/PROJECT_HISTORY.md) (Planning stage).
 
 ## 🔌 **Supported Inverters**
 
@@ -113,177 +122,16 @@ The system includes an automatic schema migration mechanism that ensures databas
 - Schema version is tracked in the `schema_version` table
 - Use `IF NOT EXISTS` and `IF EXISTS` clauses for safety
 
-## 🆕 **Latest Updates (October 2025)**
+## 🌟 **Latest Updates (January 2026)**
 
-### **Codebase Cleanup** 🧹
-- **Removed Unused Files**: Cleaned up `src/` directory by removing unused modules
-- **Removed**: `battery_selling_scheduler.py` (never integrated), `battery_selling_analytics.py` (test-only), `polish_electricity_analyzer.py` (superseded by tariff_pricing.py)
-- **Cleaned Database Directory**: Removed empty `src/database/` directory
-- **Updated Tests**: All tests passing (20 battery selling, 19 G13s, 2 structure tests)
-- **Updated Documentation**: Removed outdated references from README and test files
+### **Raspberry Pi & VPS Integration** 🚀
+- **Systemd Service Suite**: Fully integrated suite of services (`master-coordinator`, `ngrok`, `vps-tunnel`) managed via a single script.
+- **Reverse SSH Tunneling**: Securely expose your local dashboard to the internet via Mikrus VPS without third-party services like Ngrok.
+- **Robust Path Handling**: Services now use dynamic path detection, making them easier to install on different systems.
+- **Multi-Tenant Planning**: Researching Hub-and-Spoke architecture for central management of multiple edge nodes.
 
-### **G13s Seasonal Tariff Implementation** 🎉
-- **Default Tariff**: G13s now the default with full seasonal awareness
-- **Polish Holiday Detection**: Automatic detection of all Polish public holidays (fixed and movable)
-- **Day-Type Awareness**: Weekends and holidays use flat 0.110 PLN/kWh rate
-- **Seasonal Pricing**: Different time zones for summer (Apr-Sep) and winter (Oct-Mar)
-- **Optimal Rates**: Summer day off-peak as low as 0.100 PLN/kWh
-- **19 New Tests**: All passing, comprehensive coverage of all scenarios
-- **Zero Breaking Changes**: All existing tariffs (G11, G12, G12as, G12w, G14dynamic) still work
-- **See [G13s Implementation Summary](docs/G13S_IMPLEMENTATION_SUMMARY.md) for complete details**
-
-### **Multi-Inverter Support via Abstraction Layer** 🎉
-- **Vendor-Agnostic Architecture**: Port and Adapter pattern (hexagonal architecture) enables support for multiple inverter brands
-- **Currently Supported**: GoodWe (ET, ES, DT families) with full backward compatibility
-- **Easy Extension**: Simple framework to add Fronius, SMA, Huawei, and other inverter brands
-- **Flexible Configuration**: Specify inverter vendor in configuration file
-- **Comprehensive Testing**: 22 new tests for abstraction layer, all passing ✅
-- **Zero Regression**: All 473 existing tests still passing, no breaking changes
-- **See [Inverter Abstraction Documentation](docs/INVERTER_ABSTRACTION.md) for architecture details**
-- **See [Adding New Inverter Guide](docs/ADDING_NEW_INVERTER.md) for extending to other brands**
-
-### **SOC Display and Blocking Reason Enhancement**
-- **Prominent SOC Display**: Battery State of Charge now shown prominently for all charging decisions
-- **Color-Coded SOC Badges**: Visual indicators (⚡ for executed, 🔋 for blocked) with color coding (Red <20%, Yellow 20-50%, Green >50%)
-- **Detailed Blocking Reasons**: Enhanced explanation of why charging decisions were blocked (peak hours, price conditions, safety)
-- **Enhanced Logging**: All decision logs now include SOC at moment of decision for better debugging
-- **Kompas Peak Hours Details**: Clear indication when charging blocked due to grid reduction requirements
-- **Better User Experience**: Immediate visibility into battery state and decision context
-- **All Tests Passing**: 404/405 tests passing (99.75% pass rate) - All previously failing tests fixed
-
-### **Dynamic SOC Threshold Update (November 2025)**
-- **Peak Hour Flexibility**: `battery_selling.smart_timing.dynamic_soc_thresholds.require_peak_hours` is now `false`, letting premium price windows trigger selling outside `[17, 21]` when SoC thresholds are met.
-- **Recharge Forecast Advisory**: `require_recharge_forecast` is also `false`, so recharge forecasts no longer block premium selling but remain part of advisory logic.
-- **Config Reference**: Update lives in `config/master_coordinator_config.yaml`; no other files require changes for this behavior shift.
-
-## 🆕 **Updates (September 2025)**
-
-### **Logging System Optimization**
-- **Eliminated Log Spam**: Implemented log deduplication to prevent repeated messages flooding systemd journal
-- **Reduced Inverter Requests**: Increased cache TTL from 10s to 60s, reducing inverter communication by 83%
-- **Request Throttling**: Added 5-second throttling to prevent excessive API calls from dashboard polling
-- **Smart Status Logging**: Status messages only logged when values change or every 5 minutes
-- **Enhanced Caching**: Endpoint-specific caching (30s) for status, metrics, and current-state endpoints
-- **Improved Debugging**: Clean systemd journal logs now show actual events instead of repetitive status messages
-
-### **PV Overproduction Threshold Optimization**
-- **Enhanced Negative Price Handling**: PV overproduction threshold increased from 500W to 1500W
-- **Better Market Utilization**: System now charges during negative prices (-0.25 PLN/kWh) even with moderate PV overproduction
-- **Improved Decision Logic**: Prevents missing charging opportunities during excellent market conditions
-- **Real-world Impact**: Better utilization of renewable energy market dynamics
-
-## 🆕 **Previous Updates (January 2025)**
-
-### **Enhanced Per-Phase Current Monitoring**
-- **L1/L2/L3 Current Monitoring**: Real-time per-phase current readings (igrid, igrid2, igrid3)
-- **High-Resolution Sampling**: 20-second intervals (180 samples/hour) for detailed phase analysis
-- **Dashboard Integration**: Per-phase currents displayed in web dashboard current state panel
-- **Load Balancing Detection**: Monitor phase imbalances and load distribution across L1/L2/L3
-- **Enhanced Data Collection**: 4,320 data points per day (24 hours at 20-second intervals)
-- **API Exposure**: L1/L2/L3 currents available via `/current-state` endpoint
-- **Console Logging**: Per-phase current values printed in enhanced data collector output
-
-### **Enhanced Critical Battery Charging**
-- **More Conservative Threshold**: Critical battery level lowered from 20% to 12% SOC
-- **Lower Price Limit**: Maximum critical charging price reduced from 0.6 to 0.7 PLN/kWh
-- **Weather-Aware Decisions**: System now considers PV forecast even at critical battery levels
-- **Smart PV Waiting**: Only waits for PV improvement if ≥2kW within 30 minutes AND price >0.4 PLN/kWh
-- **Better Cost Control**: Prevents unnecessary expensive charging while maintaining safety
-- **Dynamic Wait Times**: High savings (80%+) can wait up to 9 hours, considering both price and PV improvement
-- **Intelligent Decision Matrix**: Considers both price savings AND weather/PV forecast for optimal decisions
-
-## 🆕 **Recent Updates (December 2024)**
-
-### **Advanced Optimization Rules**
-- **Smart Critical Charging**: Emergency (5% SOC) vs Critical (12% SOC) with weather-aware price optimization (max 0.7 PLN/kWh)
-- **Cost Optimization**: Real-world tested rules save up to 70% on charging costs
-- **Proactive Charging**: Charges when conditions are favorable, not just when battery is low
-- **Prevents Expensive Charging**: Avoids charging at high prices when better prices are available soon
-
-### **Real-World Problems Solved**
-- **Issue 1**: System charged at 1.577 PLN/kWh when 0.468 PLN/kWh was available 3.5 hours later
-- **Solution 1**: Smart critical charging rules now prevent expensive charging decisions
-- **Result 1**: Up to 70.3% cost savings on charging operations
-
-- **Issue 2**: System waited for PV charging during super low prices (0.2 PLN/kWh), missing opportunity for full battery
-- **Solution 2**: Super low price charging rule now charges fully from grid during super low prices
-- **Result 2**: Up to 66.7% savings + full battery ready for PV selling at high prices
-
-### **Enhanced Dashboard**
-- **Decision Intelligence**: Real-time visibility into charging decisions and reasoning
-- **Cost & Savings Tracking**: Live monitoring of energy costs and optimization savings
-- **Performance Metrics**: System efficiency scores and decision analytics
-- **Interactive Monitoring**: Tabbed interface with charts and real-time data
-- **Parameter Visibility**: Monitor algorithm performance and decision factors
-- **Smart State Handling**: Informative displays for "no data" and "waiting" scenarios
-- **Historical Data Integration**: Includes older charging decisions for comprehensive metrics
-- **Contextual Information**: Shows current system state and why system is waiting
-- **Helpful Tooltips**: Explains what each metric means for better understanding
-- **Time Series Visualization**: NEW - Dual-axis chart showing Battery SOC and PV production over time
-
-### **New Documentation**
-- [Smart Critical Charging Guide](docs/SMART_CRITICAL_CHARGING.md)
-- [Enhanced Dashboard Documentation](docs/ENHANCED_DASHBOARD.md)
-- [Battery Energy Selling Guide](docs/README_battery_selling.md)
-
-### **Enhanced Aggressive Charging (REVISED - NEW)**
-- **🎯 Smart Price Detection**: Compares to median/percentiles (not just cheapest price)
-- **📊 Price Categories**: Super cheap (<0.20), Very cheap (0.20-0.30), Cheap (0.30-0.40)
-- **📈 Percentage-Based**: Uses 10% threshold that adapts to market (not fixed 0.05 PLN)
-- **⏰ Period Detection**: Detects multi-hour cheap periods (not just ±1 hour window)
-- **🔮 D+1 Forecast**: Checks tomorrow's prices before charging (avoids missing better opportunities)
-- **🤝 Selling Coordination**: Reserves capacity for high-price battery selling
-- **✅ Verified**: Validated against [Gadek.pl API](https://www.gadek.pl/api) - [See Validation Report](docs/GADEK_VALIDATION_SUMMARY.md)
-- **💰 Impact**: 62.5% cost reduction + better selling revenue
-- **See**: [Enhanced Aggressive Charging Documentation](docs/ENHANCED_AGGRESSIVE_CHARGING.md)
-
-### **PSE Price Forecasts (NEW)**
-- **Early Planning**: Price forecasts available before 12:42 CSDAC publication
-- **Enhanced Decisions**: Better timing with 24-hour price predictions
-- **Cost Savings**: 180-360 PLN/year additional savings from improved timing
-- **API Integration**: Official PSE price-fcst API for reliable forecasts
-- **Smart Waiting**: Wait for better prices when forecasts show 15%+ savings
-- **Fallback Safety**: Automatic fallback to CSDAC if forecasts unavailable
-
-### **PSE Peak Hours (Kompas Energetyczny) (NEW)**
-- **Grid Status Awareness**: Real-time monitoring of Polish grid load status
-- **Smart Charging Decisions**: Adapts charging behavior based on grid conditions
-- **WYMAGANE OGRANICZANIE**: Blocks all grid charging when grid is overloaded
-- **ZALECANE OSZCZĘDZANIE**: Increases wait thresholds and limits charging power
-- **ZALECANE / NORMALNE UŻYTKOWANIE**: Relaxes charging conditions when grid has capacity
-- **API Integration**: Official PSE pdgsz API for reliable grid status data
-- **Network Stability**: Supports Polish grid stability by avoiding charging during peak load
-
-### Bugfixes
-- Fixed division-by-zero in forecast waiting logic when `current_price` is non-positive (0 or negative). This affects:
-  - `src/pse_price_forecast_collector.py::should_wait_for_better_price`
-  - `src/price_window_analyzer.py::should_wait_for_better_price`
-  - `src/price_window_analyzer.py::_should_wait_for_better_price`
-  Guard clauses now return safe results without raising `ZeroDivisionError`.
-
-### **Battery Energy Selling (NEW - Enhanced with Smart Timing)**
-- **🎯 Smart Timing**: Avoid selling too early - wait for peak prices using forecast analysis
-- **📈 Peak Detection**: Automatically identifies and waits for optimal selling times
-- **📊 Trend Analysis**: Detects rising/falling price trends for better decisions
-- **💰 Revenue Generation**: ~520 PLN/year additional revenue (improved with smart timing)
-- **⚡ Opportunity Cost**: Calculates revenue gains from waiting vs selling immediately
-- **🔒 Conservative Safety**: 80% min SOC, 50% safety margin for battery protection
-- **🔄 Multi-Session**: Plans multiple selling sessions throughout the day
-- **🛡️ Safety Monitoring**: Real-time safety checks and emergency stop capabilities
-- **🔌 GoodWe Integration**: Uses standard `eco_discharge` mode and grid export controls
-- **📊 Performance Analytics**: Comprehensive revenue tracking and efficiency metrics
-
-### **Implementation Status**
-- **Overall Progress**: ~98% complete
-- **Advanced Optimization Rules**: ✅ Fully implemented and tested
-- **Smart Critical Charging**: ✅ Emergency (5% SOC) vs Critical (10% SOC) with price awareness
-- **Battery Energy Selling**: ✅ Fully implemented with smart timing to avoid selling too early
-- **Proactive Charging**: ✅ PV poor + battery <80% + low price + weather poor = charge
-- **Cost Optimization**: ✅ Real-world tested rules save up to 70% on charging costs
-- **Test Coverage**: ✅ 227/234 tests passing (97.0% pass rate)
-- **Configuration System**: ✅ Fixed critical config loading bug
-- **Recent Fixes**: ✅ Price window analyzer, critical battery thresholds, test data formats
-- **Latest Updates**: ✅ Critical battery threshold lowered to 12% SOC, max price reduced to 0.7 PLN/kWh, weather-aware critical charging
+> [!NOTE]
+> Detailed historical updates have been moved to [HISTORY.md](HISTORY.md).
 
 ## 🏗️ **System Architecture**
 
@@ -439,171 +287,48 @@ docker compose -f docker-compose.simple.yml up --build
 
 ### **Quick Start**
 
-#### **Option 1: Docker Setup (Recommended)**
-```bash
-# Clone the repository
-git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git
-cd goodwe-dynamic-price-optimiser
+### **Option 1: Raspberry Pi (Systemd) - RECOMMENDED**
+The system is optimized to run as a persistent service on Linux/Raspberry Pi.
 
-# Simple Docker setup (recommended for development)
-docker compose -f docker-compose.simple.yml up --build
-
-# Or use the management script
-./scripts/docker_manage.sh build
-./scripts/docker_manage.sh start
-
-# Check status
-./scripts/docker_manage.sh status
-
-# View logs
-./scripts/docker_manage.sh logs
-```
-
-#### **Option 2: Automated Ubuntu Docker Setup**
-```bash
-# Clone and run automated Docker setup
-git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git
-cd goodwe-dynamic-price-optimiser
-chmod +x scripts/ubuntu_docker_setup.sh
-./scripts/ubuntu_docker_setup.sh
-```
-
-#### **Option 3: Manual Ubuntu Setup (Systemd Services)**
-```bash
-# Clone and run automated setup
-git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git
-cd goodwe-dynamic-price-optimiser
-chmod +x scripts/ubuntu_setup.sh
-./scripts/ubuntu_setup.sh
-```
-
-#### **Option 4: Manual Setup**
-1. **Clone the repository**
+1. **Install services**:
    ```bash
-   git clone https://github.com/rafalmachnik/goodwe-dynamic-price-optimiser.git
-   cd goodwe-dynamic-price-optimiser
+   chmod +x scripts/manage_services.sh
+   ./scripts/manage_services.sh install
    ```
 
-2. **Set up Python virtual environment**
+2. **Configure**:
    ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
-
-3. **Configure the Master Coordinator**
-   ```bash
-   # Edit the master coordinator configuration
    nano config/master_coordinator_config.yaml
-   # Update inverter IP address and other settings
    ```
 
-4. **Configure PSE Price Forecasts (Optional)**
-   ```yaml
-   # PSE Price Forecast Configuration
-   pse_price_forecast:
-     enabled: true                              # Enable price forecasts
-     api_url: "https://api.raporty.pse.pl/api/price-fcst"
-     update_interval_minutes: 60                # Update every 60 minutes
-     forecast_hours_ahead: 24                   # Forecast 24 hours ahead
-     confidence_threshold: 0.7                  # Minimum confidence to use forecasts
-     
-     # Forecast-based decision rules
-     decision_rules:
-       wait_for_better_price_enabled: true      # Wait if forecast shows better prices
-       min_savings_to_wait_percent: 15          # Wait if forecast shows 15%+ savings
-       max_wait_time_hours: 4                   # Maximum time to wait for better price
-       prefer_forecast_over_current: true       # Prefer forecast when available
-       
-     # Fallback configuration
-     fallback:
-       use_csdac_if_unavailable: true          # Use CSDAC if forecast unavailable
-       retry_attempts: 3                        # Retry attempts for API calls
-       retry_delay_seconds: 60                  # Delay between retries
-   ```
-
-5. **Configure PSE Peak Hours (Kompas Energetyczny) (Optional)**
-   ```yaml
-   # PSE Peak Hours Configuration (Kompas Energetyczny)
-   pse_peak_hours:
-     enabled: true                              # Enable Peak Hours monitoring
-     api_url: "https://api.raporty.pse.pl/api/pdgsz"
-     update_interval_minutes: 60                # Update every 60 minutes
-     peak_hours_ahead: 24                     # Monitor 24 hours ahead
-     
-    # Decision rules based on Peak Hours status
-    decision_rules:
-      # WYMAGANE OGRANICZANIE (usage_fcst = 3)
-      required_reduction:
-        block_charging: true                 # Block all grid charging
-        prefer_discharge_for_home: true      # Prefer battery discharge for home use
-        ignore_price_opportunities: true     # Ignore low price opportunities
-        
-      # ZALECANE OSZCZĘDZANIE (usage_fcst = 2)
-      recommended_saving:
-        increase_wait_threshold_percent: 10  # Increase min_savings_to_wait_percent by 10%
-        limit_charging_power_percent: 50    # Limit charging power to 50%
-        
-      # NORMALNE UŻYTKOWANIE (usage_fcst = 1)
-      recommended_usage:
-        decrease_wait_threshold_percent: 5   # Decrease min_savings_to_wait_percent by 5%
-        
-      # ZALECANE UŻYTKOWANIE (usage_fcst = 0)
-      normal_usage:
-        default_logic: true                  # Use default charging logic
-         
-     # Fallback configuration
-     fallback:
-       use_default_if_unavailable: true       # Use default logic if Peak Hours data unavailable
-       retry_attempts: 3                      # Retry attempts for API calls
-       retry_delay_seconds: 60                # Delay between retries
-   ```
-
-6. **Test the Master Coordinator**
+3. **Start everything**:
    ```bash
-   # Test mode (single decision cycle)
-   python src/master_coordinator.py --test
-   
-   # Show current status
-   python src/master_coordinator.py --status
-   
-   # Start the coordinator
-   python src/master_coordinator.py
+   ./scripts/manage_services.sh start
    ```
 
-### **Production Deployment (Ubuntu Server)**
+4. **Monitor logs**:
+   ```bash
+   ./scripts/manage_services.sh logs -f
+   ```
 
-#### **Using Systemd Service (Recommended)**
+### **Option 2: VPS SSH Tunnel (External Access)**
+Expose your dashboard securely without third-party services:
+1. Configure `goodwe-vps-tunnel.service` with your VPS details.
+2. Link the service: `./scripts/manage_services.sh install`.
+3. Start the tunnel: `./scripts/manage_services.sh start`.
+4. Access via `http://your-vps-ip:30358`.
+
+### **Option 3: Ngrok Tunnel**
+Use Ngrok for quick public access:
+1. Configure `ngrok.yml` with your auth token and domain.
+2. Start the service: `./scripts/manage_services.sh start_service goodwe-ngrok`.
+
+### **Option 4: Docker Setup**
+For those who prefer containerization:
 ```bash
-# Install the service
-sudo cp systemd/goodwe-master-coordinator.service /etc/systemd/system/
-sudo systemctl daemon-reload
-
-# Start the service
-sudo systemctl start goodwe-master-coordinator
-
-# Enable auto-start on boot
-sudo systemctl enable goodwe-master-coordinator
-
-# Check status
-sudo systemctl status goodwe-master-coordinator
-
-# View logs
-sudo journalctl -u goodwe-master-coordinator -f
+docker compose -f docker-compose.simple.yml up -d
 ```
-
-#### **Service Management**
-```bash
-# Using the management script (single service)
-./scripts/manage_services.sh start     # Start the master coordinator
-./scripts/manage_services.sh stop      # Stop the master coordinator
-./scripts/manage_services.sh restart   # Restart the master coordinator
-./scripts/manage_services.sh status    # Check status
-./scripts/manage_services.sh logs      # View logs (last 100 lines)
-./scripts/manage_services.sh logs -f   # Follow logs in real-time
-./scripts/manage_services.sh enable    # Enable auto-start on boot
-./scripts/manage_services.sh disable   # Disable auto-start on boot
-```
+See [Docker Deployment Guide](docs/DOCKER_DEPLOYMENT.md).
 
 ## 🎯 **Master Coordinator Features**
 
@@ -793,11 +518,18 @@ coordinator:
 
 ## 📚 **Documentation**
 
-### **📋 Project Planning**
-- **[PROJECT_PLAN_Enhanced_Energy_Management.md](docs/PROJECT_PLAN_Enhanced_Energy_Management.md)** - Comprehensive project plan with tasks, timelines, and progress tracking
-
 ### **🎯 Master Coordinator**
 - **[README_MASTER_COORDINATOR.md](docs/README_MASTER_COORDINATOR.md)** - Master Coordinator documentation and usage
+
+### **📚 Knowledge Base**
+- **[TARIFF_CONFIGURATION.md](docs/TARIFF_CONFIGURATION.md)** - Complete Polish tariff guide (G11, G12, G13s, G14dynamic)
+- **[SMART_CRITICAL_CHARGING.md](docs/SMART_CRITICAL_CHARGING.md)** - Logic behind critical charging optimization
+- **[ADDING_NEW_INVERTER.md](docs/ADDING_NEW_INVERTER.md)** - Adding support for other brands
+- **[TESTING_GUIDE.md](docs/TESTING_GUIDE.md)** - Developer guide for test suite
+
+### **📜 History & Archive**
+- **[HISTORY.md](HISTORY.md)** - Log of all major project updates
+- **[Project History Archive](docs/archive/PROJECT_HISTORY.md)** - Detailed development logs and past plans
 
 ### **🌐 Remote Access**
 - **[REMOTE_LOG_ACCESS.md](docs/REMOTE_LOG_ACCESS.md)** - Remote access guide including web dashboard, API, and ngrok public access
