@@ -11,14 +11,20 @@ Distributed energy optimization with central management and local resilience.
 - **Admin Dashboard**: Full visibility, user management, remote command center.
 - **User Dashboard**: Scoped view of their node's history and status.
 - **Latency**: Near real-time (1-5 min updates).
+- **Communication Core**: Centralized `MQTTManager` (singleton) for shared broker connection between background workers and API routers.
 
 ### 1.2 Local Dashboard (Raspberry Pi)
 - **Purpose**: Real-time Diagnostics (sub-second polling).
 - **Benefit**: Offline-first. Works even without internet.
 
-### 1.3 External Managed Services
-- **Database**: Managed PostgreSQL (Supabase, Neon).
 - **Message Broker**: Managed MQTT (CloudAMQP, HiveMQ).
+
+#### 1.3.1 RabbitMQ Setup (Production)
+When using RabbitMQ as the MQTT broker, the following configuration is required:
+1.  **Enable MQTT Plugin**: `rabbitmq-plugins enable rabbitmq_mqtt`.
+2.  **Exchange Mapping**: RabbitMQ automatically maps MQTT topics to the `amq.topic` exchange.
+3.  **Authentication**: Create a dedicated `hub_api` user and `edge_node` users with restricted permissions to the `/` vhost.
+4.  **SSL/TLS**: Ensure port `8883` is configured with valid certificates for secure edge-to-cloud communication.
 
 ## 2. Communication Strategy
 
@@ -124,6 +130,8 @@ graph TD
 | **Secret Management** | Hash `NODE_SECRET` in DB. |
 | **Rate Limiting** | Per-node throttling to protect Hub. |
 | **Audit Logs** | Log all remote commands with Admin ID. |
+| **Schema Migrations** | **Alembic** for async versioned DB updates. |
+| **Fault Tolerance** | Automatic MQTT/DB reconnection logic. |
 
 ## 9. Repository Structure (Modular Monorepo)
 
@@ -142,7 +150,9 @@ goodwe-dynamic-price-optimiser/
 - **Node Auth**: Each Pi signs requests with `NODE_SECRET`.
 - **Encryption**: All traffic over HTTPS/WSS.
 - **Command Whitelist**: No arbitrary shell execution.
-- **MQTT ACLs**: Strict Broker Access Control. `user=node_X` can separate read/write only to `nodes/node_X/#`.
+- **MQTT ACLs**: Strict Broker Access Control. `user=node_X` only has access to `nodes/node_X/#`. Hub API has wildcard access.
+- **Database Migrations**: Alembic used to manage schema versions, preventing manual SQL errors.
+- **Verification Strategy**: Full E2E verification stack using **Dockerized Mock Agents** that simulate inverter telemetry and command receipt, enabling local/CI/CD testing without physical hardware.
 
 ## 10.1 Edge OS Maintenance
 
@@ -301,6 +311,7 @@ Applies to **both Edge (SQLite)** and **Cloud (PostgreSQL per node)**.
 | 2.4 | Implement command handlers: `RESTART`, `FETCH_LOGS` | Agent can restart Coordinator, read logs |
 | 2.5 | Create `systemd` service for Agent | `goodwe-agent.service` added to repo |
 | 2.6 | Generate Node UUID (from `/proc/cpuinfo` serial or `uuid` file) | Unique ID per device |
+| 2.7 | **Edge Mocking** | Mock Agent for E2E verification in Docker |
 
 ---
 
@@ -316,6 +327,8 @@ Applies to **both Edge (SQLite)** and **Cloud (PostgreSQL per node)**.
 | 3.5 | `POST /api/v1/nodes/{id}/command` - send MQTT command | Hub publishes to broker |
 | 3.6 | JWT auth middleware (Supabase Auth or custom) | Protected endpoints require valid token |
 | 3.7 | RBAC: Admin vs User scope filtering | User only sees their node(s) |
+| 3.8 | **Alembic Migration Setup** | Versioned DB schema management |
+| 3.9 | **MQTT Security (ACLs)** | Tenant isolation at the broker level |
 
 ---
 

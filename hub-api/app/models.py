@@ -9,14 +9,14 @@ class Base(DeclarativeBase):
     pass
 
 class UserRole(str, enum.Enum):
-    ADMIN = "admin"
-    USER = "user"
+    admin = "admin"
+    user = "user"
 
 class CommandStatus(str, enum.Enum):
-    PENDING = "pending"
-    SENT = "sent"
-    ACKNOWLEDGED = "acknowledged"
-    FAILED = "failed"
+    pending = "pending"
+    sent = "sent"
+    acknowledged = "acknowledged"
+    failed = "failed"
 
 class User(Base):
     __tablename__ = "users"
@@ -24,7 +24,7 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    role = Column(Enum(UserRole), default=UserRole.USER)
+    role = Column(Enum(UserRole, name="userrole"), default=UserRole.user)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
@@ -65,7 +65,7 @@ class CommandAudit(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     command = Column(String, nullable=False)
     payload = Column(JSONB, default={})
-    status = Column(Enum(CommandStatus), default=CommandStatus.PENDING)
+    status = Column(Enum(CommandStatus, name="commandstatus"), default=CommandStatus.pending)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     node = relationship("Node", back_populates="commands")

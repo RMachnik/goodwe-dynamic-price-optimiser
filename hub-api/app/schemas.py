@@ -16,7 +16,7 @@ class TokenData(BaseModel):
 # User Schemas
 class UserBase(BaseModel):
     email: EmailStr
-    role: UserRole = UserRole.USER
+    role: UserRole = UserRole.user
 
 class UserCreate(UserBase):
     password: str

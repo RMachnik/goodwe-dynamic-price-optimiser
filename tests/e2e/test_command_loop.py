@@ -4,7 +4,7 @@ import time
 import subprocess
 
 @pytest.mark.e2e
-def test_command_loop_execution(docker_stack):
+def test_command_loop_execution(mock_node):
     """
     Verify Hub -> Edge command flow:
     1. API receives POST /command.
@@ -13,6 +13,7 @@ def test_command_loop_execution(docker_stack):
     """
     base_url = "http://localhost:8000"
     hardware_id = "mock-node-01"
+    node_uuid = mock_node
     
     # 1. Login
     login_response = requests.post(
@@ -21,11 +22,6 @@ def test_command_loop_execution(docker_stack):
     )
     token = login_response.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
-    
-    # 2. Get Node UUID
-    nodes_resp = requests.get(f"{base_url}/nodes/", headers=headers)
-    node = next(n for n in nodes_resp.json() if n["hardware_id"] == hardware_id)
-    node_uuid = node["id"]
     
     # 3. Send Command
     print(f"\n⚡ Sending 'FORCE_CHARGE' command to {hardware_id}...")
@@ -41,7 +37,6 @@ def test_command_loop_execution(docker_stack):
     cmd_id = audit_data["id"]
     
     # 4. Check Edge Logs (Verify receipt)
-    # We wait a bit for the mock agent to log it
     print("⏳ Waiting for Mock Agent to log command receipt...")
     time.sleep(3)
     
@@ -53,6 +48,10 @@ def test_command_loop_execution(docker_stack):
     )
     logs = logs_proc.stdout
     
-    expected_log = f"Received command: FORCE_CHARGE (ID: {cmd_id})"
-    assert expected_log in logs, f"Mock Agent did not log command receipt. Logs: {logs}"
+    # The mock agent logs: 🎮 [CMD] Received command: {"command_id": "...", "command": "FORCE_CHARGE", ...}
+    expected_command_part = f'"command": "FORCE_CHARGE"'
+    expected_id_part = f'"command_id": "{cmd_id}"'
+    
+    assert expected_command_part in logs, f"Mock Agent did not log command type. Logs: {logs}"
+    assert expected_id_part in logs, f"Mock Agent did not log command ID. Logs: {logs}"
     print(f"✅ Mock Agent logged receipt of command {cmd_id}")

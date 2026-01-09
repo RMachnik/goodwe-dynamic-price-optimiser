@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 import json
 from ..database import get_db
-from ..models import Node, User, CommandAudit, CommandStatus
+from ..models import Node, User, UserRole, CommandAudit, CommandStatus
 from ..schemas import CommandRequest, CommandAuditResponse
 from ..mqtt import mqtt_manager
 from .auth import get_current_user
@@ -27,7 +27,7 @@ async def send_command(
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
     
-    if current_user.role != "admin" and node.owner_id != current_user.id:
+    if current_user.role != UserRole.admin and node.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to control this node")
 
     # 2. Create Audit Entry
@@ -36,7 +36,7 @@ async def send_command(
         user_id=current_user.id,
         command=cmd_in.command,
         payload=cmd_in.payload,
-        status=CommandStatus.PENDING
+        status=CommandStatus.pending
     )
     db.add(audit)
     await db.commit()
@@ -52,11 +52,11 @@ async def send_command(
     
     try:
         await mqtt_manager.publish(topic, json.dumps(payload))
-        audit.status = CommandStatus.SENT
+        audit.status = CommandStatus.sent
         await db.commit()
     except Exception as e:
         print(f"❌ Failed to publish command: {e}")
-        audit.status = CommandStatus.FAILED
+        audit.status = CommandStatus.failed
         await db.commit()
         raise HTTPException(status_code=500, detail="Failed to transmit command to broker")
 

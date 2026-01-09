@@ -41,7 +41,7 @@ async def list_nodes(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role == UserRole.ADMIN:
+    if current_user.role == UserRole.admin:
         result = await db.execute(select(Node))
     else:
         result = await db.execute(select(Node).where(Node.owner_id == current_user.id))
@@ -58,7 +58,7 @@ async def get_node(
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
     
-    if current_user.role != UserRole.ADMIN and node.owner_id != current_user.id:
+    if current_user.role != UserRole.admin and node.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to access this node")
     
     return node
@@ -75,7 +75,7 @@ async def update_node(
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
     
-    if current_user.role != UserRole.ADMIN and node.owner_id != current_user.id:
+    if current_user.role != UserRole.admin and node.owner_id != current_user.id:
         raise HTTPException(status_code=43, detail="Not authorized to update this node")
     
     if node_update.name is not None:
@@ -104,7 +104,7 @@ async def get_node_telemetry(
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
     
-    if current_user.role != UserRole.ADMIN and node.owner_id != current_user.id:
+    if current_user.role != UserRole.admin and node.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to access this node's telemetry")
     
     # Get telemetry

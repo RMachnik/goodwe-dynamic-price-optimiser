@@ -20,35 +20,29 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
     worker_task = loop.create_task(mqtt_worker())
     
-    # Initialize Database Tables
-    print("🛠️ Initializing database tables...")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
     # Create Default Admin if it doesn't exist
-    async with engine.connect() as conn:
-        # We need a session to query/add
-        from sqlalchemy.ext.asyncio import AsyncSession
-        async_session = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-        async with async_session() as session:
+    from .database import AsyncSessionLocal
+    async with AsyncSessionLocal() as session:
+        try:
             result = await session.execute(select(User).where(User.email == "admin@example.com"))
             if not result.scalars().first():
                 print("👤 Creating default admin user...")
                 admin_user = User(
                     email="admin@example.com",
                     hashed_password=get_password_hash("admin123"),
-                    role=UserRole.ADMIN
+                    role=UserRole.admin
                 )
                 session.add(admin_user)
                 await session.commit()
+                print("✅ Default admin user created.")
+        except Exception as e:
+            print(f"⚠️ Error creating default admin: {e}")
+            await session.rollback()
     
     yield
     await mqtt_manager.disconnect()
 
 app = FastAPI(title="GoodWe Cloud Hub API", version="0.1.0", lifespan=lifespan)
-
-# Import sessionmaker inside lifespan or here? Let's fix above.
-from sqlalchemy.orm import sessionmaker
 
 # Include Routers
 app.include_router(auth.router)
@@ -69,9 +63,7 @@ async def readiness_check(db = Depends(get_db)):
     except Exception as e:
         status["database"] = f"error: {str(e)}"
 
-    # MQTT check - for now, we'll keep it simple or mock it
-    # Ideally use a shared MQTT client
-    status["mqtt"] = "ok" # Mocked for now to allow health checks to pass
+    status["mqtt"] = "ok" # Mocked for now 
     
     if status["database"] == "ok":
         return {"status": "ready", "details": status}

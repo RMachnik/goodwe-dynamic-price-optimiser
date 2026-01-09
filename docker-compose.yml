@@ -57,6 +57,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:password@db:5432/goodwe_hub
       MQTT_BROKER: mqtt
       MQTT_PORT: 1883
+      MQTT_USER: hub_api
+      MQTT_PASS: hub_secret
     volumes:
       - ./hub-api:/app # Hot reload
 
@@ -87,6 +89,8 @@ services:
     environment:
       MQTT_BROKER: mqtt
       MQTT_PORT: 1883
+      MQTT_USER: mock-node-01
+      MQTT_PASS: secret123
       NODE_ID: mock-node-01
       PUBLISH_INTERVAL: 2
     depends_on:
