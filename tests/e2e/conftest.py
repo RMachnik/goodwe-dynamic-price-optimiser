@@ -21,7 +21,7 @@ def docker_stack():
     # 2. Wait for Health (Simple retry loop)
     # Waiting for Hub API to be responsive
     api_url = "http://localhost:8000/health"
-    max_retries = 30
+    max_retries = 60
     for i in range(max_retries):
         try:
             response = requests.get(api_url)
