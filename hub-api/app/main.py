@@ -5,13 +5,17 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from .database import engine, get_db
 from .models import Base, User, UserRole
 from .auth import get_password_hash
-from .routers import auth, nodes
+from .routers import auth, nodes, commands
 from .worker import mqtt_worker
+from .mqtt import mqtt_manager
 from contextlib import asynccontextmanager
 from sqlalchemy import select
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Connect MQTT Manager
+    await mqtt_manager.connect()
+
     # Start MQTT Worker Task
     loop = asyncio.get_event_loop()
     worker_task = loop.create_task(mqtt_worker())
@@ -39,6 +43,7 @@ async def lifespan(app: FastAPI):
                 await session.commit()
     
     yield
+    await mqtt_manager.disconnect()
 
 app = FastAPI(title="GoodWe Cloud Hub API", version="0.1.0", lifespan=lifespan)
 
@@ -48,6 +53,7 @@ from sqlalchemy.orm import sessionmaker
 # Include Routers
 app.include_router(auth.router)
 app.include_router(nodes.router)
+app.include_router(commands.router)
 
 @app.get("/health")
 async def health_check():

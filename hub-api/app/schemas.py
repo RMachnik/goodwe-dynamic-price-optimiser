@@ -51,6 +51,23 @@ class NodeResponse(NodeBase):
     class Config:
         from_attributes = True
 
+# Command Schemas
+class CommandRequest(BaseModel):
+    command: str
+    payload: dict = {}
+
+class CommandAuditResponse(BaseModel):
+    id: UUID
+    node_id: UUID
+    user_id: UUID
+    command: str
+    payload: dict
+    status: CommandStatus
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 # Telemetry Schemas
 class TelemetryResponse(BaseModel):
     timestamp: datetime

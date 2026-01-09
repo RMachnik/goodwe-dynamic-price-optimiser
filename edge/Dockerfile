@@ -6,4 +6,4 @@ RUN pip install --no-cache-dir aiomqtt
 
 COPY mock_agent.py .
 
-CMD ["python", "mock_agent.py"]
+CMD ["python", "-u", "mock_agent.py"]
