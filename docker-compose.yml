@@ -1,70 +1,81 @@
 services:
-  goodwe-optimiser:
-    build: 
-      context: .
-      dockerfile: Dockerfile
-    container_name: goodwe-dynamic-price-optimiser
-    restart: unless-stopped
-    
-    # Environment variables
+  # ----------------------------------------------------------------
+  # 1. Database (Mocking Supabase)
+  # ----------------------------------------------------------------
+  db:
+    image: postgres:15-alpine
+    container_name: goodwe-db
+    restart: always
     environment:
-      PYTHONPATH: /app/src
-      TZ: Europe/Warsaw
-      LOG_LEVEL: INFO
-      CONFIG_PATH: /app/config/master_coordinator_config.yaml
-    
-    # Host directory mounts for persistent data
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: goodwe_hub
+    ports:
+      - "5432:5432"
     volumes:
-      # Configuration files (read-only)
-      - ./config:/app/config:ro
-      
-      # Persistent data storage
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./out:/app/out
-      
-      # Optional: Mount source code for development
-      # - ./src:/app/src:ro
-    
-    # Network configuration
-    network_mode: host
-    
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '0.5'
-        reservations:
-          memory: 256M
-          cpus: '0.25'
-    
-    # Health check
+      - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    
-    # Logging configuration
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    
-    # Command override for different modes
-    # Uncomment one of the following:
-    # command: ["python", "src/master_coordinator.py", "--test"]
-    # command: ["python", "src/master_coordinator.py", "--daemon"]
-    # command: ["python", "src/fast_charge.py", "--test"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-# Named volumes for data persistence (optional)
+  # ----------------------------------------------------------------
+  # 2. MQTT Broker (Mocking CloudAMQP/HiveMQ)
+  # ----------------------------------------------------------------
+  mqtt:
+    image: eclipse-mosquitto:2.0
+    container_name: goodwe-mqtt
+    restart: always
+    ports:
+      - "1883:1883"  # MQTT
+      - "9001:9001"  # Websockets
+    volumes:
+      - ./config/mosquitto:/mosquitto/config
+      - mqtt_data:/mosquitto/data
+      - mqtt_log:/mosquitto/log
+    # Create simple config on the fly if needed, or mount file
+    command: ["mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
+
+  # ----------------------------------------------------------------
+  # 3. Hub API (FastAPI)
+  # ----------------------------------------------------------------
+  hub-api:
+    build:
+      context: ./hub-api
+      dockerfile: Dockerfile
+    container_name: goodwe-hub-api
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:password@db:5432/goodwe_hub
+      MQTT_BROKER: mqtt
+      MQTT_PORT: 1883
+    volumes:
+      - ./hub-api:/app  # Hot reload
+
+  # ----------------------------------------------------------------
+  # 4. Hub Dashboard (React / Vite)
+  # ----------------------------------------------------------------
+  hub-dashboard:
+    image: node:20-alpine
+    container_name: goodwe-hub-dashboard
+    working_dir: /app
+    volumes:
+      - ./hub-dashboard:/app
+    ports:
+      - "5173:5173"
+    command: sh -c "npm install && npm run dev -- --host"
+    depends_on:
+      - hub-api
+
 volumes:
-  goodwe_data:
-    driver: local
-  goodwe_logs:
-    driver: local
-  goodwe_config:
-    driver: local
+  db_data:
+  mqtt_data:
+  mqtt_log:

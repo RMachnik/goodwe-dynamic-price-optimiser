@@ -10,6 +10,7 @@ def base_config():
             'enabled': True,
             'emergency_battery_threshold': 5,
             'critical_battery_threshold': 30, # Match user config
+            'storage_mode': 'FILE', # Disable DB interactions for testing
         },
         'timing_awareness': {
             'smart_critical_charging': {

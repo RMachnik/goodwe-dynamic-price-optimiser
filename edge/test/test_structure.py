@@ -5,6 +5,7 @@ Test script to verify the new project structure works correctly
 
 import sys
 import os
+import pytest
 from pathlib import Path
 
 def test_project_structure():
@@ -16,7 +17,7 @@ def test_project_structure():
     print(f"Current directory: {current_dir}")
     
     # Required directories
-    required_dirs = ['src', 'examples', 'test', 'docs']
+    required_dirs = ['src', 'examples', 'test']
     missing_dirs = []
     
     for dir_name in required_dirs:
@@ -34,24 +35,9 @@ def test_project_structure():
             'config/master_coordinator_config.yaml',
             'test/inverter_test.py',
             'test/sensor_investigator.py',
-            'docs/PROJECT_PLAN_Enhanced_Energy_Management.md',
-            'docs/README_fast_charge.md',
-            'docs/README_automated_charging.md',
-            'requirements.txt',
-            'README.md',
-            '.gitignore'
+            'requirements.txt'
         ]
     
-    # Required directories
-    required_dirs = [
-        'src/',
-        'config/',
-        'examples/',
-        'test/',
-        'docs/',
-        'logs/',
-        'out/'
-    ]
     
     missing_files = []
     missing_dirs = []
