@@ -15,7 +15,7 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -28,14 +28,14 @@ services:
     container_name: goodwe-mqtt
     restart: always
     ports:
-      - "1883:1883"  # MQTT
-      - "9001:9001"  # Websockets
+      - "1883:1883" # MQTT
+      - "9001:9001" # Websockets
     volumes:
       - ./config/mosquitto:/mosquitto/config
       - mqtt_data:/mosquitto/data
       - mqtt_log:/mosquitto/log
     # Create simple config on the fly if needed, or mount file
-    command: ["mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
+    command: [ "mosquitto", "-c", "/mosquitto/config/mosquitto.conf" ]
 
   # ----------------------------------------------------------------
   # 3. Hub API (FastAPI)
@@ -58,7 +58,7 @@ services:
       MQTT_BROKER: mqtt
       MQTT_PORT: 1883
     volumes:
-      - ./hub-api:/app  # Hot reload
+      - ./hub-api:/app # Hot reload
 
   # ----------------------------------------------------------------
   # 4. Hub Dashboard (React / Vite)
@@ -74,6 +74,23 @@ services:
     command: sh -c "npm install && npm run dev -- --host"
     depends_on:
       - hub-api
+
+  # ----------------------------------------------------------------
+  # 5. Edge Node (Mock Agent)
+  # ----------------------------------------------------------------
+  edge-node:
+    build:
+      context: ./edge
+      dockerfile: Dockerfile
+    container_name: goodwe-edge-node
+    restart: always
+    environment:
+      MQTT_BROKER: mqtt
+      MQTT_PORT: 1883
+      NODE_ID: mock-node-01
+      PUBLISH_INTERVAL: 2
+    depends_on:
+      - mqtt
 
 volumes:
   db_data:
