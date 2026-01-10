@@ -18,15 +18,34 @@ COMMANDS_TOPIC = f"nodes/{NODE_ID}/commands"
 async def mqtt_publisher(client):
     while True:
         try:
+            # Simulate dynamic energy states
+            now = datetime.now()
+            hour = now.hour
+            is_peak = 18 <= hour <= 21
+            is_cheap = 0 <= hour <= 5
+            
+            soc = 45.0 + (hour % 5) * 10 # Mock SOC fluctuation
+            solar_power = 0 if (hour < 6 or hour > 19) else (2500 if 10 <= hour <= 15 else 800)
+
             payload = {
                 "node_id": NODE_ID,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": now.isoformat(),
                 "battery": {
-                    "soc_percent": 45.5,
-                    "voltage": 52.0
+                    "soc_percent": soc,
+                    "voltage": 52.0 + (soc * 0.05)
                 },
                 "solar": {
-                    "power_w": 2500
+                    "power_w": solar_power
+                },
+                "grid": {
+                    "current_price": 0.85 if is_peak else (0.35 if is_cheap else 0.55),
+                    "mode": "DISCHARGING_PROFITABLE" if is_peak else ("CHARGING_ECONOMY" if is_cheap else "PASSIVE")
+                },
+                "optimizer": {
+                    "latest_decision": "Profit Peak: Discharging battery to offset grid" if is_peak else 
+                                     ("Economy Mode: Charging at low rate" if is_cheap else "Optimal: Matching load with solar"),
+                    "daily_savings_pln": 12.45,
+                    "daily_cost_pln": 3.12
                 }
             }
             await client.publish(TELEMETRY_TOPIC, payload=json.dumps(payload))

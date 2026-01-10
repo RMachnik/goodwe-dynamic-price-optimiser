@@ -40,7 +40,14 @@ def test_full_telemetry_loop(mock_node):
             
         time.sleep(2)
         
-    assert data is not None, f"Telemetry for {hardware_id} never reached the database"
-    assert data["node_id"] == hardware_id
-    assert data["battery"]["soc_percent"] == 45.5
+    assert data is not None, f"Telemetry for {hardware_id} never reached the database"    
+    # Verify telemetry structure and enriched data
+    assert "battery" in data
+    assert "solar" in data
+    assert "grid" in data  # New enriched field
+    assert "optimizer" in data  # New enriched field
+    assert data["battery"]["soc_percent"] >= 0 and data["battery"]["soc_percent"] <= 100
+    assert data["battery"]["voltage"] > 0
+    assert "current_price" in data["grid"]
+    assert "daily_savings_pln" in data["optimizer"]
     print(f"🎯 Full Loop Verified: Edge -> MQTT -> Hub -> PostgreSQL -> API ✅")

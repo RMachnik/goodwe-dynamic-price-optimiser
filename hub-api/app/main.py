@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
 import os
 import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -43,6 +44,17 @@ async def lifespan(app: FastAPI):
     await mqtt_manager.disconnect()
 
 app = FastAPI(title="GoodWe Cloud Hub API", version="0.1.0", lifespan=lifespan)
+
+# CORS Configuration
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174").split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Include Routers
 app.include_router(auth.router)
