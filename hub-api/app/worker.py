@@ -8,46 +8,55 @@ from datetime import datetime
 
 async def mqtt_worker():
     """
-    Background worker that listens for telemetry.
+    Background worker that listens for telemetry via AMQP.
     """
-    print("🚀 Hub MQTT Worker: Starting...")
+    print("🚀 Hub AMQP Worker: Starting...")
     
     while True:
-        client = None
+        connection = None
         try:
-            client = await mqtt_manager.wait_for_connection()
-            client_id = id(client)
-            print(f"📡 Hub MQTT Worker: Using client [ID: {client_id}]")
+            # Wait for connection
+            connection = await mqtt_manager.wait_for_connection()
+            channel = await mqtt_manager.get_channel()
+            exchange = await mqtt_manager.get_exchange()
+            connection_id = id(connection)
             
-            await asyncio.sleep(1)
+            print(f"📡 Hub AMQP Worker: Using connection [ID: {connection_id}]")
             
-            print(f"📡 Hub MQTT Worker: Subscribing to telemetry [Client ID: {client_id}]...")
-            await client.subscribe("nodes/+/telemetry")
-            print(f"✅ Hub MQTT Worker: Subscribed [Client ID: {client_id}]")
+            # Create a queue for this worker to receive telemetry
+            queue = await channel.declare_queue(
+                "hub_telemetry_queue",
+                durable=True
+            )
             
-            async for message in client.messages:
-                # print(f"📥 Received on {message.topic}")
-                parts = str(message.topic).split("/")
-                if len(parts) < 2:
-                    continue
-                hardware_id = parts[1]
-                
-                try:
-                    payload = json.loads(message.payload.decode())
-                    if not isinstance(payload, dict):
-                        continue
-                    await process_telemetry(hardware_id, payload)
-                except Exception as e:
-                    print(f"⚠️ Error processing telemetry for {hardware_id}: {e}")
-                    
-            print(f"📡 Hub MQTT Worker: Message loop ended for [ID: {client_id}]")
-            # Notify manager so it reconnects
-            mqtt_manager.notify_disconnect(client)
+            # Bind to telemetry exchange with wildcard routing key
+            # nodes.*.telemetry will match nodes.node01.telemetry, nodes.rasp-01.telemetry, etc.
+            await queue.bind(exchange, routing_key="nodes.*.telemetry")
+            print(f"✅ Hub AMQP Worker: Bound to telemetry exchange [Connection ID: {connection_id}]")
+            
+            # Consume messages
+            async with queue.iterator() as queue_iter:
+                async for message in queue_iter:
+                    async with message.process():
+                        try:
+                            # Extract hardware_id from routing key (nodes.{hardware_id}.telemetry)
+                            routing_key = message.routing_key
+                            parts = routing_key.split(".")
+                            if len(parts) >= 2:
+                                hardware_id = parts[1]
+                                payload = json.loads(message.body.decode())
+                                if isinstance(payload, dict):
+                                    await process_telemetry(hardware_id, payload)
+                        except Exception as e:
+                            print(f"⚠️ Error processing telemetry: {e}")
+            
+            print(f"📡 Hub AMQP Worker: Message loop ended for [ID: {connection_id}]")
+            mqtt_manager.notify_disconnect(connection)
             
         except Exception as e:
-            print(f"❌ Hub MQTT Worker Loop Error: {e}. Retrying ingestion loop in 2s...")
-            if client:
-                mqtt_manager.notify_disconnect(client)
+            print(f"❌ Hub AMQP Worker Loop Error: {e}. Retrying in 2s...")
+            if connection:
+                mqtt_manager.notify_disconnect(connection)
             await asyncio.sleep(2)
 
 async def process_telemetry(hardware_id: str, data: dict):

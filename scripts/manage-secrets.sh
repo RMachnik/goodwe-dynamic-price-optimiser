@@ -117,7 +117,7 @@ MQTT_PASS=$MQTT_PASS
 JWT_SECRET_KEY=$JWT_SECRET
 
 # CORS (Including VPS direct access and localhost for testing)
-CORS_ORIGINS=http://localhost:5173,http://localhost:5174,http://srv26.mikr.us,http://srv26.mikr.us:40314
+CORS_ORIGINS=http://localhost:5173,http://localhost:5174,http://srv26.mikr.us,http://srv26.mikr.us:40314,http://srv26.mikr.us:40315
 
 # Admin Email (for initial setup)
 ADMIN_EMAIL=admin@example.com

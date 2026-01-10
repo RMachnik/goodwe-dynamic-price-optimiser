@@ -62,8 +62,34 @@ app.include_router(nodes.router)
 app.include_router(commands.router)
 
 @app.get("/health")
-async def health_check():
-    return {"status": "ok", "service": "hub-api"}
+async def health_check(db = Depends(get_db)):
+    """Enhanced health check with connection status."""
+    connections = {
+        "database": "unknown",
+        "mqtt": "unknown"
+    }
+    
+    # Check database connection
+    try:
+        from sqlalchemy import text
+        await db.execute(text("SELECT 1"))
+        connections["database"] = "connected"
+    except Exception as e:
+        connections["database"] = f"error: {str(e)[:50]}"
+    
+    # Check MQTT connection
+    if mqtt_manager.client is not None:
+        connections["mqtt"] = "connected"
+    else:
+        connections["mqtt"] = "disconnected"
+    
+    all_ok = connections["database"] == "connected"
+    
+    return {
+        "status": "ok" if all_ok else "degraded",
+        "service": "hub-api",
+        "connections": connections
+    }
 
 @app.get("/readiness")
 async def readiness_check(db = Depends(get_db)):
@@ -75,7 +101,11 @@ async def readiness_check(db = Depends(get_db)):
     except Exception as e:
         status["database"] = f"error: {str(e)}"
 
-    status["mqtt"] = "ok" # Mocked for now 
+    # Real MQTT check
+    if mqtt_manager.client is not None:
+        status["mqtt"] = "ok"
+    else:
+        status["mqtt"] = "disconnected"
     
     if status["database"] == "ok":
         return {"status": "ready", "details": status}

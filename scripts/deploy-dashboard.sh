@@ -56,7 +56,7 @@ echo "  ✓ Setting up Nginx configuration..."
 # Create Nginx config for dashboard
 cat > /etc/nginx/sites-available/goodwe-dashboard << 'EOF'
 server {
-    listen 80;
+    listen 40315;
     server_name _;  # Change this to your domain
     
     root /home/goodwe/goodwe-cloud-hub/dashboard;
@@ -66,7 +66,7 @@ server {
     gzip on;
     gzip_vary on;
     gzip_min_length 10240;
-    gzip_proxied expired no-cache no-store private must-revalidate;
+    gzip_proxied expired no-cache no-store private auth;
     gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
 
     location / {

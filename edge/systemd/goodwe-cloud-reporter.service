@@ -1,0 +1,17 @@
+[Unit]
+Description=GoodWe Cloud Reporter
+After=network.target goodwe-coordinator.service
+
+[Service]
+Type=simple
+User=rmachnik
+WorkingDirectory=/home/rmachnik/goodwe-edge
+EnvironmentFile=/home/rmachnik/goodwe-edge/.env
+ExecStart=/home/rmachnik/goodwe-edge/venv/bin/python3 cloud_reporter.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
