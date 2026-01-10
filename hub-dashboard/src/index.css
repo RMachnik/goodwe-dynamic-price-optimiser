@@ -1,139 +1,91 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
 
-/* Base Styles & Variables */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-main: 220 14% 96%;
+    --bg-card: 0 0% 100%;
+    --text-main: 222 47% 11%;
+    --text-dim: 215 16% 47%;
+    --primary: 221 83% 53%;
+    /* Blue */
+    --secondary: 262 83% 58%;
+    /* Purple */
+    --success: 142 71% 45%;
+    /* Green */
+    --error: 0 84% 60%;
+    /* Red */
+    --border: 214 32% 91%;
+    --radius: 0.75rem;
+    --sidebar-w: 280px;
+    --mob-nav-h: 70px;
+  }
+
+  .dark {
+    --bg-main: 222 47% 6%;
+    --bg-card: 217 33% 17%;
+    --text-main: 210 40% 98%;
+    --text-dim: 215 20% 65%;
+    --primary: 199 89% 48%;
+    /* Cyan */
+    --secondary: 262 83% 58%;
+    /* Purple */
+    --success: 142 70% 50%;
+    --error: 0 84% 60%;
+    --border: 217 32% 16%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground transition-colors duration-300 antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'Outfit', sans-serif;
+  }
+}
+
+@layer components {
+  .glass {
+    background-color: var(--glass-bg);
+    border-color: var(--glass-border);
+    @apply backdrop-blur-md border shadow-lg;
+  }
+
+  .glass-card {
+    @apply bg-card/80 backdrop-blur-xl border border-white/10 shadow-xl rounded-2xl;
+  }
+
+  .mob-touch-target {
+    @apply min-h-[44px] min-w-[44px];
+  }
+
+  .flex-center {
+    @apply flex items-center justify-center;
+  }
+}
+
+/* Custom Glass Vars needed if used directly */
 :root {
-  /* Common spacing/bloat */
-  --sidebar-w: 280px;
-  --mob-nav-h: 70px;
-}
-
-/* Dark Theme Variables */
-.dark {
-  --bg-main: 222 47% 4%;
-  --bg-card: 222 47% 8%;
-  --primary: 199 89% 48%;
-  /* Radiant Cyan */
-  --secondary: 262 83% 58%;
-  /* Purple */
-  --text-main: 210 40% 98%;
-  --text-dim: 215 20% 65%;
-  --border: 217 32% 12%;
-  --glass-bg: rgba(15, 23, 42, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.05);
-  --skeleton-base: rgba(255, 255, 255, 0.03);
-  --skeleton-pulse: rgba(255, 255, 255, 0.08);
-}
-
-/* Light Theme Variables */
-.light {
-  --bg-main: 210 40% 98%;
-  --bg-card: 0 0% 100%;
-  --primary: 221 83% 53%;
-  /* Bold Blue */
-  --secondary: 262 83% 58%;
-  /* Purple */
-  --text-main: 222 47% 11%;
-  --text-dim: 215 16% 47%;
-  --border: 214 32% 91%;
   --glass-bg: rgba(255, 255, 255, 0.8);
   --glass-border: rgba(15, 23, 42, 0.08);
-  --skeleton-base: rgba(0, 0, 0, 0.03);
-  --skeleton-pulse: rgba(0, 0, 0, 0.08);
 }
 
-/* Global Reset */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  background-color: hsl(var(--bg-main));
-  color: hsl(var(--text-main));
-  -webkit-font-smoothing: antialiased;
-  min-height: 100vh;
-  transition: background-color 0.3s ease, color 0.3s ease;
-}
-
-h1,
-h2,
-h3,
-h4,
-.font-heading {
-  font-family: 'Outfit', sans-serif;
-}
-
-/* Glassmorphism System */
-.glass {
-  background: var(--glass-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--glass-border);
-  box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.2);
-}
-
-.glass-card {
-  background: var(--glass-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--glass-border);
-  box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.2);
-  border-radius: 24px;
-}
-
-/* Skeleton System */
-@keyframes pulse {
-  0% {
-    background-color: var(--skeleton-base);
-  }
-
-  50% {
-    background-color: var(--skeleton-pulse);
-  }
-
-  100% {
-    background-color: var(--skeleton-base);
-  }
-}
-
-.skeleton {
-  animation: pulse 2s infinite ease-in-out;
-  border-radius: 12px;
-}
-
-/* Transitions */
-.page-enter {
-  animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* Scrollbar Fixes */
-::-webkit-scrollbar {
-  width: 6px;
-}
-
-::-webkit-scrollbar-thumb {
-  background: hsl(var(--text-dim) / 0.2);
-  border-radius: 10px;
-}
-
-/* Mobile Utilities */
-@media (max-width: 768px) {
-  .mob-touch-target {
-    min-height: 44px;
-    min-width: 44px;
-  }
+.dark {
+  --glass-bg: rgba(15, 23, 42, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.05);
 }
