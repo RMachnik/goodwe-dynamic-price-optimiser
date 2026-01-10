@@ -4,14 +4,16 @@ Automated scripts for deploying the Cloud Hub infrastructure.
 
 ## Quick Start
 
-### 1. Backup Raspberry Pi
+### 1. Backup Raspberry Pi (Phase 3 Only)
 ```bash
 ./scripts/backup-rasp.sh
 ```
+> **Note**: Only needed when deploying edge agent to Pi (Phase 3).
+> VPS-only deployment does NOT require this step.
+
 - **Stops** the `goodwe-coordinator` service for consistent backup
 - Backs up database, config, git state to `~/Desktop/backups/`
 - **Restarts** the service automatically after backup
-- Saves backup manifest with system info
 
 ### 1b. Restore Raspberry Pi (Emergency Recovery)
 ```bash
@@ -19,7 +21,6 @@ Automated scripts for deploying the Cloud Hub infrastructure.
 ```
 - Restores database, config, and git state from backup
 - Restarts service after restore
-- Shows verification commands
 
 ### 2. Setup VPS (First Time Only)
 ```bash

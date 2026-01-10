@@ -51,7 +51,7 @@ echo "Deployed: $(date)" >> "$DEPLOY_DIR/DEPLOY_BRANCH.txt"
 
 # Create production docker-compose override
 cat > "$DEPLOY_DIR/docker-compose.prod.yml" << 'EOF'
-version: '3.8'
+version: '3.3'
 
 services:
   hub-api:

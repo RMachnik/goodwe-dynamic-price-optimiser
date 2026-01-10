@@ -76,7 +76,7 @@ async def update_node(
         raise HTTPException(status_code=404, detail="Node not found")
     
     if current_user.role != UserRole.admin and node.owner_id != current_user.id:
-        raise HTTPException(status_code=43, detail="Not authorized to update this node")
+        raise HTTPException(status_code=403, detail="Not authorized to update this node")
     
     if node_update.name is not None:
         node.name = node_update.name
