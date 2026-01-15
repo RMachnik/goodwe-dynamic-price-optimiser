@@ -1,5 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum, BigInteger, UUID
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, Enum, BigInteger, UUID, JSON
 from sqlalchemy.orm import relationship, DeclarativeBase
 from datetime import datetime
 import uuid
@@ -39,7 +38,7 @@ class Node(Base):
     secret_hash = Column(String, nullable=False)
     name = Column(String, nullable=True)
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    config = Column(JSONB, default={})
+    config = Column(JSON, default={})
     last_seen = Column(DateTime, nullable=True)
     is_online = Column(Boolean, default=False)
     
@@ -53,7 +52,7 @@ class Telemetry(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     node_id = Column(UUID(as_uuid=True), ForeignKey("nodes.id"), nullable=False)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
-    data = Column(JSONB, nullable=False)
+    data = Column(JSON, nullable=False)
     
     node = relationship("Node", back_populates="telemetry")
 
@@ -64,9 +63,17 @@ class CommandAudit(Base):
     node_id = Column(UUID(as_uuid=True), ForeignKey("nodes.id"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     command = Column(String, nullable=False)
-    payload = Column(JSONB, default={})
+    payload = Column(JSON, default={})
     status = Column(Enum(CommandStatus, name="commandstatus"), default=CommandStatus.pending)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     node = relationship("Node", back_populates="commands")
     user = relationship("User", back_populates="commands")
+
+class MarketPrice(Base):
+    __tablename__ = "market_prices"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, nullable=False, index=True) # UTC
+    price_pln_mwh = Column(Integer, nullable=False) # Store as integer (MWh) or Float
+    source = Column(String, default="PSE")

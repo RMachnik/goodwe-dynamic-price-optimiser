@@ -9,7 +9,7 @@ to decision execution, including integration with the master coordinator.
 import pytest
 import asyncio
 import yaml
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from datetime import datetime, timedelta
 from pathlib import Path
 import sys
@@ -237,7 +237,12 @@ class TestBatterySellingEndToEnd:
         """Test data format compatibility between components"""
         
         # Test enhanced data collector format
-        collector = EnhancedDataCollector('config/master_coordinator_config.yaml')
+        mock_config = {
+            'data_storage': {'database_storage': {'enabled': True, 'engine': 'sqlite'}}
+        }
+        with patch("builtins.open", MagicMock()), \
+             patch("yaml.safe_load", return_value=mock_config):
+            collector = EnhancedDataCollector('config/master_coordinator_config.yaml')
         
         # Simulate the data structure that would be created
         expected_data_structure = {

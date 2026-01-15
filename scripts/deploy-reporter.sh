@@ -21,6 +21,10 @@ ssh $PI_USER@$PI_HOST "if [ ! -f $TARGET_DIR/.env ]; then cp $TARGET_DIR/.env.ex
 echo "📦 Key Setup: Creating python venv..."
 ssh $PI_USER@$PI_HOST "cd $TARGET_DIR && python3 -m venv venv && ./venv/bin/pip install --upgrade pip && ./venv/bin/pip install -r requirements.txt"
 
+# 5. Restart Service (if exists)
+echo "🔄 Restarting Service..."
+ssh $PI_USER@$PI_HOST "sudo systemctl restart goodwe-cloud-reporter || echo '⚠️ Service not found or not started (ignore if first run)'"
+
 echo "✅ Deployment complete!"
 echo "---------------------------------------------------"
 echo "NEXT STEPS:"

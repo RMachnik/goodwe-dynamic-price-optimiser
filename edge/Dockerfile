@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir aiomqtt
+RUN pip install --no-cache-dir aio-pika
 
 COPY mock_agent.py .
 

@@ -23,19 +23,24 @@ services:
   # ----------------------------------------------------------------
   # 2. MQTT Broker (Mocking CloudAMQP/HiveMQ)
   # ----------------------------------------------------------------
-  mqtt:
-    image: eclipse-mosquitto:2.0
+  rabbitmq:
+    image: rabbitmq:3-management
     container_name: goodwe-mqtt
     restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: hub_api
+      RABBITMQ_DEFAULT_PASS: hub_secret
     ports:
-      - "1883:1883" # MQTT
-      - "9001:9001" # Websockets
+      - "5672:5672" # AMQP
+      - "1883:1883" # MQTT (plugin)
+      - "15672:15672" # Management UI
     volumes:
-      - ./config/mosquitto:/mosquitto/config
-      - mqtt_data:/mosquitto/data
-      - mqtt_log:/mosquitto/log
-    # Create simple config on the fly if needed, or mount file
-    command: [ "mosquitto", "-c", "/mosquitto/config/mosquitto.conf" ]
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "check_running" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # ----------------------------------------------------------------
   # 3. Hub API (FastAPI)
@@ -49,14 +54,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      mqtt:
-        condition: service_started
+      rabbitmq:
+        condition: service_healthy
     ports:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:password@db:5432/goodwe_hub
-      MQTT_BROKER: mqtt
+      MQTT_BROKER: rabbitmq
       MQTT_PORT: 1883
+      AMQP_PORT: 5672
       MQTT_USER: hub_api
       MQTT_PASS: hub_secret
     volumes:
@@ -87,16 +93,17 @@ services:
     container_name: goodwe-edge-node
     restart: always
     environment:
-      MQTT_BROKER: mqtt
+      MQTT_BROKER: rabbitmq
       MQTT_PORT: 1883
       MQTT_USER: mock-node-01
       MQTT_PASS: secret123
       NODE_ID: mock-node-01
       PUBLISH_INTERVAL: 2
     depends_on:
-      - mqtt
+      - rabbitmq
 
 volumes:
   db_data:
+  rabbitmq_data:
   mqtt_data:
   mqtt_log:

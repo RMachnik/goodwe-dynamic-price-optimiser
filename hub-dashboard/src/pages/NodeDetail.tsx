@@ -28,6 +28,7 @@ import {
 import { useNodeTelemetry, useNodes } from '../api/queries';
 import Skeleton from '../components/common/Skeleton';
 import apiClient from '../api/client';
+import AnalyticsChart from '../components/AnalyticsChart';
 import { toast } from 'sonner';
 
 const NodeDetail: React.FC = () => {
@@ -247,6 +248,9 @@ const NodeDetail: React.FC = () => {
                         </div>
                     </div>
 
+                    {/* NEW: Analytics Chart */}
+                    <AnalyticsChart nodeId={nodeId || ''} />
+
                     {/* Decision Timeline */}
                     <div className="glass p-6 rounded-3xl border-white/5">
                         <div className="flex items-center gap-3 mb-6">
@@ -335,6 +339,21 @@ const NodeDetail: React.FC = () => {
                             <div className="p-6 rounded-3xl bg-secondary/10 border border-secondary/10 text-center">
                                 <p className="text-[9px] font-black text-secondary uppercase tracking-[0.2em]">Efficiency Rating</p>
                                 <p className="text-3xl font-heading font-black text-secondary mt-1">98.4<span className="text-sm">%</span></p>
+                            </div>
+
+                            {/* Fleet Config Card */}
+                            <div className="p-5 rounded-2xl bg-white/5 border border-white/5 shadow-sm">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h4 className="text-sm font-bold text-main">Fleet Config</h4>
+                                    <span className="text-[9px] font-bold text-dim uppercase">Loop-back</span>
+                                </div>
+                                <div className="max-h-48 overflow-y-auto rounded-lg bg-slate-900 p-3">
+                                    <pre className="text-[10px] text-slate-300 font-mono whitespace-pre-wrap">
+                                        {latest?.optimizer?.reported_config
+                                            ? JSON.stringify(latest.optimizer.reported_config, null, 2)
+                                            : 'No configuration reported yet.'}
+                                    </pre>
+                                </div>
                             </div>
                         </div>
                     </div>

@@ -47,6 +47,7 @@ class NodeResponse(NodeBase):
     owner_id: Optional[UUID]
     last_seen: Optional[datetime]
     is_online: bool
+    latest_telemetry: Optional[dict] = None
 
     class Config:
         from_attributes = True

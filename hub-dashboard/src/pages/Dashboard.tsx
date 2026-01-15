@@ -1,11 +1,15 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { Cpu, Wifi, WifiOff, Battery, Zap, Clock } from 'lucide-react';
 import { useNodes } from '../api/queries';
 import Skeleton from '../components/common/Skeleton';
 
+import MarketPriceChart from '../components/MarketPriceChart';
+
 const Dashboard: React.FC = () => {
     const { data: nodes, isLoading, error } = useNodes();
+    const navigate = useNavigate();
 
     if (isLoading) {
         return (
@@ -53,6 +57,11 @@ const Dashboard: React.FC = () => {
                 </div>
             </div>
 
+            {/* Global Market Price Chart */}
+            <div className="w-full">
+                <MarketPriceChart />
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {nodes?.map((node, index) => (
                     <motion.div
@@ -60,7 +69,8 @@ const Dashboard: React.FC = () => {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: index * 0.1 }}
-                        className="group glass p-6 rounded-3xl glass-hover relative overflow-hidden"
+                        onClick={() => navigate(`/nodes/${node.id}`)}
+                        className="group glass p-6 rounded-3xl glass-hover relative overflow-hidden cursor-pointer"
                     >
                         {/* Background Icon */}
                         <Cpu className="absolute -right-4 -bottom-4 text-white/5 group-hover:text-primary/10 transition-colors" size={120} />
@@ -81,6 +91,25 @@ const Dashboard: React.FC = () => {
                         <div className="relative z-10 mb-6">
                             <h3 className="text-xl font-heading font-bold text-white group-hover:text-primary transition-colors">{node.name || 'Unnamed Node'}</h3>
                             <p className="text-sm text-slate-500 font-mono tracking-tight mt-1">{node.hardware_id}</p>
+
+                            {/* Config Badges */}
+                            <div className="flex flex-wrap gap-2 mt-3">
+                                {node.config?.tariff && (
+                                    <span className="px-2 py-0.5 rounded-md bg-white/5 text-[10px] font-bold text-slate-400 border border-white/5 uppercase">
+                                        {node.config.tariff}
+                                    </span>
+                                )}
+                                {node.config?.pv_size_kw && (
+                                    <span className="px-2 py-0.5 rounded-md bg-white/5 text-[10px] font-bold text-slate-400 border border-white/5 uppercase">
+                                        PV: {node.config.pv_size_kw}kW
+                                    </span>
+                                )}
+                                {node.config?.bat_capacity_kwh && (
+                                    <span className="px-2 py-0.5 rounded-md bg-white/5 text-[10px] font-bold text-slate-400 border border-white/5 uppercase">
+                                        Bat: {node.config.bat_capacity_kwh}kWh
+                                    </span>
+                                )}
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4 relative z-10 pt-4 border-t border-white/5">
@@ -90,7 +119,11 @@ const Dashboard: React.FC = () => {
                                 </div>
                                 <div>
                                     <p className="text-[10px] uppercase font-bold text-slate-600 tracking-widest">Battery</p>
-                                    <p className="text-sm font-semibold text-slate-300">-- %</p>
+                                    <p className="text-sm font-semibold text-slate-300">
+                                        {node.latest_telemetry?.battery?.soc_percent !== undefined
+                                            ? `${node.latest_telemetry.battery.soc_percent.toFixed(1)} %`
+                                            : '-- %'}
+                                    </p>
                                 </div>
                             </div>
                             <div className="flex items-center gap-3">
@@ -99,7 +132,11 @@ const Dashboard: React.FC = () => {
                                 </div>
                                 <div>
                                     <p className="text-[10px] uppercase font-bold text-slate-600 tracking-widest">Solar</p>
-                                    <p className="text-sm font-semibold text-slate-300">-- W</p>
+                                    <p className="text-sm font-semibold text-slate-300">
+                                        {node.latest_telemetry?.solar?.power_w !== undefined
+                                            ? `${node.latest_telemetry.solar.power_w.toFixed(0)} W`
+                                            : '-- W'}
+                                    </p>
                                 </div>
                             </div>
                         </div>
@@ -109,7 +146,9 @@ const Dashboard: React.FC = () => {
                                 <Clock size={12} />
                                 <span>{node.last_seen ? new Date(node.last_seen).toLocaleTimeString() : 'Never'}</span>
                             </div>
-                            <button className="text-xs font-bold text-primary hover:text-white transition-colors uppercase tracking-widest">
+                            <button
+                                className="text-xs font-bold text-primary hover:text-white transition-colors uppercase tracking-widest"
+                            >
                                 Details →
                             </button>
                         </div>

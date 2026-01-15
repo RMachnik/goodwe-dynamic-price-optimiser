@@ -1,0 +1,11 @@
+battery_management:
+  capacity_kwh: 20
+inverter:
+  comm_addr: 247
+  family: ET
+  ip_address: 192.168.33.6
+  port: 8899
+  retries: 3
+  retry_delay: 2.0
+  timeout: 1
+  vendor: goodwe

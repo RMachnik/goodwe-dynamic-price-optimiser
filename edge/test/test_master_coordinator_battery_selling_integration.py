@@ -157,7 +157,12 @@ class TestMasterCoordinatorBatterySellingIntegration:
         """Test that enhanced data collector includes grid voltage"""
         from enhanced_data_collector import EnhancedDataCollector
         
-        collector = EnhancedDataCollector('config/master_coordinator_config.yaml')
+        mock_config = {
+            'data_storage': {'database_storage': {'enabled': True, 'engine': 'sqlite'}}
+        }
+        with patch("builtins.open", MagicMock()), \
+             patch("yaml.safe_load", return_value=mock_config):
+            collector = EnhancedDataCollector('config/master_coordinator_config.yaml')
         
         # Check the data structure that would be created
         # The grid voltage should be included in the comprehensive data

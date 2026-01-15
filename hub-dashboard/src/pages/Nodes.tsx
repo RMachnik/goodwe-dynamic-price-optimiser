@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import {
     Wifi,
     WifiOff,
@@ -14,6 +15,7 @@ import Skeleton from '../components/common/Skeleton';
 
 const Nodes: React.FC = () => {
     const { data: nodes, isLoading } = useNodes();
+    const navigate = useNavigate();
 
     return (
         <div className="space-y-8 fade-in">
@@ -35,6 +37,7 @@ const Nodes: React.FC = () => {
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Hardware ID</th>
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Name</th>
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Status</th>
+                            <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Metrics</th>
                             <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-widest">Last Seen</th>
                             <th className="px-6 py-4 text-right text-xs font-bold text-slate-500 uppercase tracking-widest">Actions</th>
                         </tr>
@@ -47,6 +50,7 @@ const Nodes: React.FC = () => {
                                     <td className="px-6 py-5"><Skeleton className="h-4 w-24" /></td>
                                     <td className="px-6 py-5"><Skeleton className="h-6 w-20 rounded-full" /></td>
                                     <td className="px-6 py-5"><Skeleton className="h-4 w-28" /></td>
+                                    <td className="px-6 py-5"><Skeleton className="h-4 w-28" /></td>
                                     <td className="px-6 py-5 text-right"><Skeleton className="h-8 w-8 rounded-lg ml-auto" /></td>
                                 </tr>
                             ))
@@ -57,12 +61,23 @@ const Nodes: React.FC = () => {
                                     initial={{ opacity: 0, x: -10 }}
                                     animate={{ opacity: 1, x: 0 }}
                                     transition={{ delay: index * 0.05 }}
-                                    className="group hover:bg-white/[0.02] transition-colors"
+                                    onClick={() => navigate(`/nodes/${node.id}`)}
+                                    className="group hover:bg-white/[0.02] transition-colors cursor-pointer"
                                 >
                                     <td className="px-6 py-5">
-                                        <span className="font-mono text-sm text-slate-300 group-hover:text-primary transition-colors">
-                                            {node.hardware_id}
-                                        </span>
+                                        <div className="flex flex-col gap-1">
+                                            <span className="font-mono text-sm text-slate-300 group-hover:text-primary transition-colors">
+                                                {node.hardware_id}
+                                            </span>
+                                            {/* Config Badges */}
+                                            <div className="flex flex-wrap gap-1">
+                                                {node.config?.tariff && (
+                                                    <span className="px-1.5 py-0.5 rounded-md bg-white/5 text-[9px] font-bold text-slate-500 border border-white/5 uppercase">
+                                                        {node.config.tariff}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
                                     </td>
                                     <td className="px-6 py-5">
                                         <span className="font-semibold text-slate-200">{node.name || '—'}</span>
@@ -77,12 +92,32 @@ const Nodes: React.FC = () => {
                                         </div>
                                     </td>
                                     <td className="px-6 py-5">
+                                        <div className="flex flex-col gap-1 text-xs">
+                                            <div className="flex items-center gap-2 text-slate-400">
+                                                <div className="w-16">Battery:</div>
+                                                <div className="font-mono text-slate-200">
+                                                    {node.latest_telemetry?.battery?.soc_percent !== undefined
+                                                        ? `${node.latest_telemetry.battery.soc_percent.toFixed(1)}%`
+                                                        : '--'}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 text-slate-400">
+                                                <div className="w-16">Solar:</div>
+                                                <div className="font-mono text-slate-200">
+                                                    {node.latest_telemetry?.solar?.power_w !== undefined
+                                                        ? `${node.latest_telemetry.solar.power_w.toFixed(0)} W`
+                                                        : '--'}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-5">
                                         <span className="text-sm text-slate-500">
                                             {node.last_seen ? new Date(node.last_seen).toLocaleString() : 'Never'}
                                         </span>
                                     </td>
                                     <td className="px-6 py-5 text-right">
-                                        <div className="flex items-center justify-end gap-2">
+                                        <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                                             <button title="Restart" className="p-2 text-slate-500 hover:text-primary hover:bg-primary/10 rounded-lg transition-all">
                                                 <RefreshCcw size={18} />
                                             </button>

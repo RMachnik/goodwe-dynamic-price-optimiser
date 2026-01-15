@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from .database import engine, get_db
 from .models import Base, User, UserRole
 from .auth import get_password_hash
-from .routers import auth, nodes, commands
+from .routers import auth, nodes, commands, stats
 from .worker import mqtt_worker
 from .mqtt import mqtt_manager
 from contextlib import asynccontextmanager
@@ -60,6 +60,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(nodes.router)
 app.include_router(commands.router)
+app.include_router(stats.router)
 
 @app.get("/health")
 async def health_check(db = Depends(get_db)):

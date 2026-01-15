@@ -75,6 +75,15 @@ class SystemState(Enum):
     ERROR = "error"
     MAINTENANCE = "maintenance"
 
+def deep_merge(base, override):
+    """Recursively merges two dictionaries."""
+    for key, value in override.items():
+        if isinstance(value, dict) and key in base and isinstance(base[key], dict):
+            deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
 class MasterCoordinator:
     """Master coordinator for the entire energy management system"""
     
@@ -84,7 +93,7 @@ class MasterCoordinator:
             current_dir = Path(__file__).parent.parent
             self.config_path = str(current_dir / "config" / "master_coordinator_config.yaml")
         else:
-            self.config_path = config_path
+            self.config_path = str(config_path)
             
         # System state
         self.state = SystemState.INITIALIZING
@@ -128,16 +137,60 @@ class MasterCoordinator:
             
         self._setup_logging()
         
+        # Signal handlers for local triggers (Gap 2 & 3)
+        self._reload_config_event = asyncio.Event()
+        self._force_decision_event = asyncio.Event()
+        
         # Signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
         
+        # Signal handlers for V2 features
+        try:
+            signal.signal(signal.SIGHUP, self._signal_handler_hup)   # Reload Config
+            signal.signal(signal.SIGUSR1, self._signal_handler_usr1) # Force Decision
+        except AttributeError:
+            # SIGHUP/SIGUSR1 not available on Windows, but our target is Linux/RPi
+            pass
+        
     def _load_config(self) -> Dict[str, Any]:
-        """Load configuration from file"""
+        """Load configuration using a layered approach: base -> local -> override (cloud)"""
         try:
             import yaml
-            with open(self.config_path, 'r') as f:
-                config = yaml.safe_load(f)
+            config = {}
+            config_path = Path(self.config_path)
+            
+            # Layer 1: Base (Tracked in Git)
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f) or {}
+            
+            # Layer 2: Local (Hardware specific, NOT in Git)
+            local_path = config_path.parent / config_path.name.replace('.yaml', '_local.yaml')
+            if local_path.exists():
+                with open(local_path, 'r') as f:
+                    local_config = yaml.safe_load(f) or {}
+                    config = deep_merge(config, local_config)
+            
+            # Layer 3: Override (Cloud pushed, NOT in Git)
+            override_path = config_path.parent / "override_config.yaml"
+            if override_path.exists():
+                with open(override_path, 'r') as f:
+                    override_config = yaml.safe_load(f) or {}
+                    config = deep_merge(config, override_config)
+            
+            # GAP REMOVAL: Automatic Migration
+            # If we have important hardware keys in the base but no local file, bootstrap it
+            if not local_path.exists() and 'inverter' in config:
+                logger.info(f"Bootstrapping {local_path.name} from base config...")
+                hardware_only = {
+                    'inverter': config.get('inverter', {}),
+                    'battery_management': {
+                        'capacity_kwh': config.get('battery_management', {}).get('capacity_kwh', 20.0)
+                    }
+                }
+                with open(local_path, 'w') as f:
+                    yaml.dump(hardware_only, f)
             
             # Add coordinator-specific configuration defaults (only if not present)
             if 'coordinator' not in config:
@@ -173,6 +226,19 @@ class MasterCoordinator:
         """Handle shutdown signals gracefully"""
         logger.info(f"Received signal {signum}, initiating graceful shutdown...")
         self.is_running = False
+
+    def _signal_handler_hup(self, signum, frame):
+        """Handle config reload (SIGHUP)"""
+        logger.info("🔔 Received SIGHUP: Triggering config reload...")
+        # Use call_soon_threadsafe because handlers run in main thread but loop might be elsewhere
+        loop = asyncio.get_event_loop()
+        loop.call_soon_threadsafe(self._reload_config_event.set)
+
+    def _signal_handler_usr1(self, signum, frame):
+        """Handle forced decision (SIGUSR1)"""
+        logger.info("🔔 Received SIGUSR1: Triggering immediate decision cycle...")
+        loop = asyncio.get_event_loop()
+        loop.call_soon_threadsafe(self._force_decision_event.set)
     
     async def initialize(self) -> bool:
         """Initialize all system components"""
@@ -366,8 +432,31 @@ class MasterCoordinator:
                 # Log system status
                 self._log_system_status()
                 
-                # Wait before next iteration
-                await asyncio.sleep(60)  # Check every minute
+                # Wait before next iteration, but allow interruption by events
+                try:
+                    # Wait for 60s OR any of our events
+                    await asyncio.wait([
+                        asyncio.create_task(asyncio.sleep(60)),
+                        asyncio.create_task(self._force_decision_event.wait()),
+                        asyncio.create_task(self._reload_config_event.wait())
+                    ], return_when=asyncio.FIRST_COMPLETED)
+                except Exception as wait_err:
+                    logger.debug(f"Wait interrupted: {wait_err}")
+
+                # Check if we need to reload config
+                if self._reload_config_event.is_set():
+                    logger.info("♻️ Reloading configuration...")
+                    self.config = self._load_config()
+                    self._reload_config_event.clear()
+                    # Re-initialize components that depend on config
+                    # (Simplified for now - just reload basic weights/thresholds)
+                    if hasattr(self, 'decision_engine'):
+                        self.decision_engine.config = self.config
+                
+                # Check if we forced a decision
+                if self._force_decision_event.is_set():
+                    logger.info("🎯 Forced decision cycle starting...")
+                    self._force_decision_event.clear() # Clear it so it runs in next loop iteration
                 
             except Exception as e:
                 logger.error(f"Error in coordination loop: {e}")
@@ -1337,7 +1426,7 @@ class MasterCoordinator:
             logger.error(f"Error during shutdown: {e}")
     
     async def _save_system_state(self):
-        """Save current system state to file"""
+        """Save current system state to file (legacy)"""
         try:
             state_data = {
                 'timestamp': datetime.now().isoformat(),

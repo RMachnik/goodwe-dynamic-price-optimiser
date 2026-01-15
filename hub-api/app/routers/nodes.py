@@ -41,11 +41,38 @@ async def list_nodes(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # Optimized query to fetch nodes with their latest telemetry
+    # Uses DISTINCT ON (PostgreSQL specific) to get the most recent telemetry per node
+    from ..models import Telemetry
+    from sqlalchemy import desc
+    
+    # Base query for nodes
     if current_user.role == UserRole.admin:
-        result = await db.execute(select(Node))
+        stmt = select(Node)
     else:
-        result = await db.execute(select(Node).where(Node.owner_id == current_user.id))
-    return result.scalars().all()
+        stmt = select(Node).where(Node.owner_id == current_user.id)
+    
+    result = await db.execute(stmt)
+    nodes = result.scalars().all()
+    
+    # 2. Fetch latest telemetry for these nodes in ONE query
+    # Equivalent to: SELECT DISTINCT ON (node_id) * FROM telemetry WHERE node_id IN (...) ORDER BY node_id, timestamp DESC
+    if nodes:
+        node_ids = [n.id for n in nodes]
+        t_stmt = (
+            select(Telemetry)
+            .distinct(Telemetry.node_id)
+            .where(Telemetry.node_id.in_(node_ids))
+            .order_by(Telemetry.node_id, desc(Telemetry.timestamp))
+        )
+        t_result = await db.execute(t_stmt)
+        latest_telemetry = {t.node_id: t.data for t in t_result.scalars().all()}
+        
+        # 3. Attach telemetry to response (pydantic will handle serialization)
+        for node in nodes:
+            node.latest_telemetry = latest_telemetry.get(node.id)
+            
+    return nodes
 
 @router.get("/{node_id}", response_model=NodeResponse)
 async def get_node(
@@ -82,7 +109,22 @@ async def update_node(
         node.name = node_update.name
     if node_update.config is not None:
         node.config = node_update.config
-        # Future: Trigger MQTT config update here
+        # TRIGGER: State Reconciliation (Active Sync)
+        # We push the new config immediately to the edge.
+        from ..mqtt import mqtt_manager
+        import json
+        
+        topic = f"nodes.{node.hardware_id}.commands"
+        payload = {
+            "command": "CONFIG_UPDATE",
+            "payload": node.config
+        }
+        try:
+            # We don't audit CONFIG_UPDATEs yet but we push them
+            # Ensuring it's fire-and-forget for the HTTP response, but we try-catch to log
+            await mqtt_manager.publish(topic, json.dumps(payload))
+        except Exception as e:
+            print(f"⚠️ Failed to push config update to node {node.hardware_id}: {e}")
         
     await db.commit()
     await db.refresh(node)

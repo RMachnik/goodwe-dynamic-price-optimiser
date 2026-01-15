@@ -43,7 +43,7 @@ async def send_command(
     await db.refresh(audit)
 
     # 3. Publish to MQTT
-    topic = f"nodes/{node.hardware_id}/commands"
+    topic = f"nodes.{node.hardware_id}.commands"
     payload = {
         "command_id": str(audit.id),
         "command": cmd_in.command,

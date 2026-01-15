@@ -48,6 +48,7 @@ class EnhancedDataCollector:
     
     def __init__(self, config_path: str):
         """Initialize the enhanced data collector"""
+        self.config = {} # Initialize early for stability
         # Support both dict config and file path
         if isinstance(config_path, dict):
             self.config_path = None
@@ -57,7 +58,7 @@ class EnhancedDataCollector:
             # Load config to initialize storage
             try:
                 with open(config_path, 'r') as f:
-                    self.config = yaml.safe_load(f)
+                    self.config = yaml.safe_load(f) or {}
             except Exception as e:
                 logger.error(f"Failed to load config: {e}")
                 self.config = {}

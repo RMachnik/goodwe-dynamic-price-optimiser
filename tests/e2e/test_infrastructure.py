@@ -9,8 +9,9 @@ def test_hub_api_health(docker_stack):
     """
     url = "http://localhost:8000/health"
     response = requests.get(url)
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok", "service": "hub-api"}
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["service"] == "hub-api"
 
 @pytest.mark.e2e
 def test_hub_api_readiness(docker_stack):

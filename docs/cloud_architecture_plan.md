@@ -1,11 +1,13 @@
-# Multi-Tenant Cloud Architecture Plan (V5.0 - Production Live)
+# Multi-Tenant Cloud Architecture Plan (V5.1 - Phase 6.5 Deployment)
 
 Distributed energy optimization with central management and local resilience.
 
 ## 🎯 Implementation Status
 
 **✅ Phase 1-3 COMPLETE**: End-to-end verified system with premium Cloud UI & Real Edge Agent.
-**🚀 Next**: Phase 5 (Advanced Analytics & Scaling)
+**✅ Phase 5 COMPLETE**: Advanced Analytics, Market Prices, and Live Telemetry joined at scale.
+**✅ Phase 6 COMPLETE**: Command Center V2 & Config Sync.
+**✅ Phase 6.5 COMPLETE**: Production Deployment to Mikrus VPS (Restricted Ports).
 
 ---
 
@@ -20,11 +22,13 @@ Distributed energy optimization with central management and local resilience.
 - **Latency**: Near real-time (5s telemetry polling).
 - **Communication Core**: Centralized `MQTTManager` (singleton) for shared broker connection between background workers and API routers.
 - **Authentication**: JWT with `/auth/me` endpoint for user profile retrieval.
+- **Node Authentication**: X-Node-ID/X-Node-Secret headers for Edge API access (Phase 6.5).
 - **CORS**: Configured for localhost dev and production domain.
 
 ### 1.2 Local Dashboard (Raspberry Pi)
 - **Purpose**: Real-time Diagnostics (sub-second polling).
 - **Benefit**: Offline-first. Works even without internet.
+- **Config Visualization**: "Configuration" tab shows effective merged config (Phase 6.5).
 
 ### 1.3 Message Broker - **✅ VERIFIED (AMQP)**
 - **Protocol**: RabbitMQ AMQP (TCP/SSL) used for production to bypass Cloudflare MQTT limitations.
@@ -105,7 +109,7 @@ graph TD
 ### 4.2 Core Pages
 - **Login**: Semantic theming, form validation.
 - **Fleet Overview**: Card grid showing real-time status.
-- **Node Detail**: Performance charts and remote actions.
+- **Node Detail**: Performance charts, remote actions, **Fleet Config** card (Phase 6.5).
 
 ### 4.3 Data Connectivity
 - **TanStack Query**: Aggressive caching, background refetching.
@@ -118,7 +122,8 @@ graph TD
 ---
 
 ## 5. Security - **✅ Hardened**
-- **Node Auth**: Dedicated credentials per node.
+- **Node Auth**: Dedicated credentials per node + X-Node-ID/X-Node-Secret headers.
+- **Timing-Attack Safe**: `secrets.compare_digest` for secret comparison (PE Review).
 - **Encryption**: All traffic over SSL/TLS.
 - **AMQP ACLs**: Strict Broker Access Control. 
 - **Database Migrations**: Alembic manages schema versions.
@@ -133,35 +138,58 @@ graph TD
 | :--- | :--- | :--- |
 | Master Coordinator | RPi | Existing |
 | Management Agent | RPi | **✅ Deployed (AMQP)** |
-| Cloud Hub API | VPS | **✅ Live (Port 40314)** |
-| Hub Dashboard | VPS | **✅ Live (Port 40315)** |
+| Cloud Hub API | VPS | **✅ Live (Port 40316)** |
+| Hub Dashboard | VPS | **✅ Live (Port 40317)** |
 | PostgreSQL | Managed | Configured |
 | Message Broker | RabbitMQ | **✅ Verified (AMQP)** |
 
 ---
 
-## 7. Next Steps & Recommendations
+## 7. Phase 6.5 Deployment Strategy (NEW)
 
-### ✅ Completed Milestones
-- **Backend Deployment**: Running on `srv26.mikr.us` (Port 40314).
-- **Dashboard Deployment**: Running on `srv26.mikr.us` (Port 40315).
-- **Edge Deployment**: Raspberry Pi (`rasp-01`) successfully reporting telemetry.
-- **UX Overhaul**: Full Glassmorphism redesign validation.
+### 7.1 Safe Deployment Checklist
 
-### 🚀 Future Roadmap (Phase 5)
-1.  **SSL/TLS Enforcement**:
-    - Obtain Let's Encrypt certificates for the VPS domain.
-    - Switch RabbitMQ to use MQTTS/AMQPS (8883/5671).
-2.  **Advanced Analytics**:
-    - Add "Cost vs Savings" historical charts to dashboard.
-    - Implement predictive solar forcasting (ML model).
-3.  **Multi-Node Scaling**:
-    - Verify behavior with 10+ mock nodes.
-    - Implement pagination on Nodes table.
+#### Hub API (VPS)
+1. **Pre-flight**: Run `pytest hub-api/tests/ -v` locally.
+2. **Backup**: Snapshot the PostgreSQL database.
+3. **Deploy**: `git pull && docker-compose up -d --build`
+4. **Verify**: `curl http://srv26.mikr.us:40314/health`
+5. **Rollback**: `docker-compose down && git checkout HEAD~1 && docker-compose up -d`
+
+#### Edge Node (RPi)
+1. **Pre-flight**: SSH to node, verify `systemctl status goodwe-*`.
+2. **Trigger**: Send `DEPLOY` command via Hub UI or AMQP.
+3. **Syntax Check**: `self-update.sh` runs `py_compile` on all Python files.
+4. **Abort on Error**: If syntax errors, update is aborted automatically.
+5. **Verify**: Check telemetry in Hub UI within 60s.
+
+### 7.2 Layered Configuration Protection
+- `*_local.yaml` files are protected from `git reset --hard`.
+- `.gitignore` includes `*_local.yaml` pattern.
+- If tracked by accident, user is warned.
+
+### 7.3 Price Data Fallback Chain
+1. **Primary**: Hub API `/stats/market-prices`
+2. **Secondary**: Local price cache (`data/price_cache.json`)
+3. **Tertiary**: Direct PSE API (last resort)
 
 ---
 
-## 8. Success Metrics (Post-Launch)
+## 8. Next Steps & Recommendations
+
+### ✅ Completed Milestones
+- **Phase 6.5.1**: Node Authentication for price API.
+- **Phase 6.5.3**: Config Visualization UI (Edge tab, Hub card).
+- **PE Review**: Security hardening (timing-safe comparison, debug prints removed).
+
+### 🚀 Future Roadmap
+1. **SSL/TLS Enforcement**: Let's Encrypt for VPS, AMQPS for RabbitMQ.
+2. **Multi-Node Scaling**: Pagination, 100+ node stress test.
+3. **Financial Analytics Deep-Dive**: Exportable reports.
+
+---
+
+## 9. Success Metrics (Post-Launch)
 - **Uptime**: Hub API availability (target: 99.9%).
 - **Latency**: Dashboard load time (target: < 2s).
 - **Node Health**: % of nodes online (target: > 95%).
@@ -169,5 +197,5 @@ graph TD
 
 ---
 
-**Document Status**: V5.0 - Production Live
-**Last Updated**: 2026-01-10
+**Document Status**: V6.0 - Production Live
+**Last Updated**: 2026-01-14

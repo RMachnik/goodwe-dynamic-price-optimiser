@@ -5,7 +5,7 @@ from sqlalchemy import select
 from ..database import get_db
 from ..models import User, UserRole
 from ..auth import create_access_token, verify_password, get_password_hash, get_current_user
-from ..schemas import Token, UserResponse
+from ..schemas import Token, UserResponse, UserCreate
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -32,14 +32,14 @@ async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 @router.post("/register", response_model=UserResponse)
-async def register_user(email: str, password: str, db: AsyncSession = Depends(get_db)):
+async def register_user(user_in: UserCreate, db: AsyncSession = Depends(get_db)):
     # Check if user exists
-    result = await db.execute(select(User).where(User.email == email))
+    result = await db.execute(select(User).where(User.email == user_in.email))
     if result.scalars().first():
         raise HTTPException(status_code=400, detail="Email already registered")
     
-    hashed_password = get_password_hash(password)
-    user = User(email=email, hashed_password=hashed_password, role=UserRole.user)
+    hashed_password = get_password_hash(user_in.password)
+    user = User(email=user_in.email, hashed_password=hashed_password, role=user_in.role)
     db.add(user)
     await db.commit()
     await db.refresh(user)

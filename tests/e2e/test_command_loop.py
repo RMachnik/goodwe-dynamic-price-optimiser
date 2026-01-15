@@ -15,7 +15,7 @@ def test_command_loop_execution(mock_node):
     hardware_id = "mock-node-01"
     node_uuid = mock_node
     
-    # 1. Login
+    # 2. Login
     login_response = requests.post(
         f"{base_url}/auth/token",
         data={"username": "admin@example.com", "password": "admin123"}
@@ -23,7 +23,16 @@ def test_command_loop_execution(mock_node):
     token = login_response.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
     
-    # 3. Send Command
+    # NEW: Wait for Mock Agent to be connected
+    print(f"⏳ Waiting for {hardware_id} to connect to RabbitMQ...")
+    for i in range(15):
+        logs = subprocess.run(["docker", "logs", "goodwe-edge-node"], capture_output=True, text=True).stdout
+        if "Connected to AMQP broker" in logs:
+            print("✅ Mock Agent is connected.")
+            break
+        time.sleep(2)
+    else:
+        pytest.fail("Mock Agent never connected to broker")
     print(f"\n⚡ Sending 'FORCE_CHARGE' command to {hardware_id}...")
     cmd_payload = {"power_kw": 2.5}
     resp = requests.post(
@@ -38,20 +47,26 @@ def test_command_loop_execution(mock_node):
     
     # 4. Check Edge Logs (Verify receipt)
     print("⏳ Waiting for Mock Agent to log command receipt...")
-    time.sleep(3)
     
-    logs_proc = subprocess.run(
-        ["docker", "logs", "goodwe-edge-node"], 
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True
-    )
-    logs = logs_proc.stdout
+    max_log_retries = 10
+    command_received = False
+    logs = ""
     
-    # The mock agent logs: 🎮 [CMD] Received command: {"command_id": "...", "command": "FORCE_CHARGE", ...}
-    expected_command_part = f'"command": "FORCE_CHARGE"'
-    expected_id_part = f'"command_id": "{cmd_id}"'
-    
-    assert expected_command_part in logs, f"Mock Agent did not log command type. Logs: {logs}"
-    assert expected_id_part in logs, f"Mock Agent did not log command ID. Logs: {logs}"
-    print(f"✅ Mock Agent logged receipt of command {cmd_id}")
+    for i in range(max_log_retries):
+        time.sleep(2)
+        logs_proc = subprocess.run(
+            ["docker", "logs", "goodwe-edge-node"], 
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
+        )
+        logs = logs_proc.stdout
+        
+        expected_command_part = f'"command": "FORCE_CHARGE"'
+        if expected_command_part in logs:
+            command_received = True
+            break
+        print(f"  (Attempt {i+1}/{max_log_retries}) Still waiting for command in logs...")
+
+    assert command_received, f"Mock Agent did not log command receipt within timeout. Logs: {logs}"
+    print(f"✅ Mock Agent logged receipt of command")

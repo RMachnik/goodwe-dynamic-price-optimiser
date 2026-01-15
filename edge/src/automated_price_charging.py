@@ -43,6 +43,14 @@ class AutomatedPriceCharger:
     
     def __init__(self, config_path: str = None):
         """Initialize the automated charger"""
+        self.config = {}
+        self.adaptive_enabled = False
+        self.sc_component_net = 0.0
+        self.minimum_price_floor = 0.0050
+        self.high_price_threshold = 1.35
+        self.max_critical_price = 0.35
+        self.smart_critical_enabled = True
+        
         # Support both dict config and file path
         if isinstance(config_path, dict):
             # Direct config dict provided (used in tests)
@@ -147,6 +155,11 @@ class AutomatedPriceCharger:
         self.opportunistic_pre_peak_enabled = optimization_rules.get('opportunistic_pre_peak_enabled', True)
         self.evening_peak_hours = optimization_rules.get('evening_peak_hours', [17, 18, 19, 20, 21, 22])
         self.opportunistic_pre_peak_threshold = optimization_rules.get('opportunistic_pre_peak_threshold', 0.9)  # PLN/kWh
+        
+        # Initialize adaptive price thresholds - ensure attribute exists even if config empty
+        self.adaptive_enabled = False
+        adaptive_config = self.config.get('timing_awareness', {}).get('smart_critical_charging', {}).get('adaptive_thresholds', {})
+        self.adaptive_enabled = adaptive_config.get('enabled', False)
         self.evening_price_multiplier = optimization_rules.get('evening_price_multiplier', 1.1)
         self.opportunistic_pre_peak_min_soc = optimization_rules.get('opportunistic_pre_peak_min_soc', 20)  # %
         
@@ -155,6 +168,13 @@ class AutomatedPriceCharger:
         self.super_low_price_threshold = optimization_rules.get('super_low_price_threshold_pln', 0.3)  # PLN/kWh
         self.super_low_price_target_soc = optimization_rules.get('super_low_price_target_soc', 100)  # %
         self.super_low_price_min_duration = optimization_rules.get('super_low_price_min_duration_hours', 1.0)  # hours
+        
+        # Hardware-specific defaults (Safety Layer)
+        self.inverter_ip = self.config.get('inverter', {}).get('ip', '127.0.0.1')
+        self.battery_capacity_kwh = self.config.get('battery_management', {}).get('capacity_kwh', 20.0)
+        
+        # Standard Pricing Setup
+        self._load_pricing_config()
         
         # PV preference during super low prices
         pv_preference_config = optimization_rules.get('super_low_price_pv_preference', {})
@@ -212,6 +232,7 @@ class AutomatedPriceCharger:
         # Tariff configuration for `TariffPricingCalculator` is already passed via `self.config`
         
         # Initialize adaptive price thresholds
+        self.adaptive_enabled = False # Default safely
         adaptive_config = self.config.get('timing_awareness', {}).get('smart_critical_charging', {}).get('adaptive_thresholds', {})
         self.adaptive_enabled = adaptive_config.get('enabled', False)
         

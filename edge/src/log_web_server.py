@@ -575,35 +575,37 @@ class LogWebServer:
             logger.warning(f"Error refreshing coordinator PID: {e}")
     
     def _refresh_price_data(self):
-        """Refresh price data in background thread (uses background storage instance)."""
+        """Refresh price data in background thread (fetches from Hub API)."""
         try:
-            # Extract logic from _get_real_price_data() - fetch from PSE API
-            from automated_price_charging import AutomatedPriceCharger
+            hub_api_url = os.getenv("HUB_API_URL", "http://srv26.mikr.us:40314")
+            logger.info(f"Refreshing price data from Hub API: {hub_api_url}...")
             
-            charger = AutomatedPriceCharger(str(Path(__file__).parent.parent / "config" / "master_coordinator_config.yaml"))
+            # Use requests for simple background fetch
+            import requests
+            # We use the generic market-prices endpoint
+            resp = requests.get(f"{hub_api_url}/stats/market-prices", timeout=30.0)
+            resp.raise_for_status()
+            hub_prices = resp.json()
             
-            today = datetime.now().strftime('%Y-%m-%d')
-            
-            logger.info("Refreshing price data from PSE API...")
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                price_data = loop.run_until_complete(
-                    asyncio.wait_for(charger.fetch_price_data_for_date(today), timeout=30.0)
-                )
-            except Exception as api_err:
-                logger.warning(f"API refresh failed ({api_err}), attempting disk cache fallback...")
-                # Fallback to disk cache if API fails
-                cached = self._load_price_from_disk()
-                if cached:
-                    with self._background_cache_lock:
-                        self._background_cache['price_data'] = cached
-                        self._background_cache['last_price_refresh'] = time.time()
-                        self._background_cache['last_price_error'] = None
-                    return
-                raise api_err  # Re-raise if even disk fallback fails
-            finally:
-                loop.close()
+            if not hub_prices:
+                raise Exception("Hub API returned no price data")
+
+            # Map Hub format [{timestamp, price_pln_kwh}] to internal PSE format for compatibility
+            # { 'value': [ { 'dtime': '...', 'csdac_pln': ... } ] }
+            mapped_values = []
+            for p in hub_prices:
+                # Hub timestamp is ISO UTC
+                try:
+                    dt = datetime.fromisoformat(p['timestamp'].replace('Z', '+00:00'))
+                    dtime_str = dt.strftime('%Y-%m-%d %H:%M')
+                    mapped_values.append({
+                        'dtime': dtime_str,
+                        'csdac_pln': p['price_pln_kwh'] * 1000.0  # Back to PLN/MWh
+                    })
+                except Exception as parse_err:
+                    logger.warning(f"Failed to parse Hub price point {p}: {parse_err}")
+
+            price_data = {'value': mapped_values}
             
             if not price_data or 'value' not in price_data:
                 raise Exception("Price API returned no data")
@@ -1078,7 +1080,133 @@ class LogWebServer:
                     
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
-    
+
+        @self.app.route('/control', methods=['POST'])
+        def control_node():
+            """
+            Bridge for remote control commands.
+            Writes force_action.json and sends SIGUSR1 to coordinator.
+            """
+            # Security: Only allow localhost (called by cloud_reporter)
+            if request.remote_addr != '127.0.0.1':
+                return jsonify({'error': 'Unauthorized - Local access only'}), 403
+            
+            try:
+                data = request.json
+                command = data.get('command') # CHARGE, DISCHARGE, AUTO
+                
+                if not command:
+                    return jsonify({'error': 'Missing command'}), 400
+                
+                # Write force action file
+                project_root = Path(__file__).parent.parent
+                force_file = project_root / 'data' / 'force_action.json'
+                force_file.parent.mkdir(exist_ok=True)
+                
+                with open(force_file, 'w') as f:
+                    json.dump({'command': command, 'timestamp': datetime.now().isoformat()}, f)
+                
+                # Signal coordinator
+                pid = self._background_cache.get('coordinator_pid')
+                if pid:
+                    import os, signal
+                    os.kill(pid, signal.SIGUSR1)
+                    logger.info(f"🚀 Signal SIGUSR1 sent to coordinator (PID: {pid}) for command: {command}")
+                    return jsonify({'status': 'success', 'message': f'Command {command} signaled'})
+                else:
+                    return jsonify({'error': 'Coordinator process not found'}), 503
+                    
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/effective-config')
+        def get_effective_config():
+            """Returns the final merged configuration used by the coordinator"""
+            try:
+                # Get the coordinator instance directly from the log server if available
+                # or load it fresh from the layered logic
+                from master_coordinator import MasterCoordinator
+                project_root = Path(__file__).parent.parent
+                config_path = project_root / 'config' / 'master_coordinator_config.yaml'
+                
+                # We Use a temporary coordinator to load the config logic
+                # This ensures we see the EXACT same merge results as the running process
+                coord = MasterCoordinator(str(config_path))
+                effective = coord._load_config()
+                
+                return jsonify(effective)
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/config', methods=['POST'])
+        def update_config():
+            """
+            Bridge for remote config updates.
+            Writes override_config.yaml and sends SIGHUP to coordinator.
+            """
+            if request.remote_addr != '127.0.0.1':
+                return jsonify({'error': 'Unauthorized - Local access only'}), 403
+            
+            try:
+                new_config = request.json
+                if not new_config:
+                    return jsonify({'error': 'Empty config'}), 400
+                
+                # 🛡️ GAP REMOVAL: Edge Safety Validation
+                # Basic schema check
+                if 'battery_capacity_kwh' in new_config:
+                    val = float(new_config['battery_capacity_kwh'])
+                    if not (1.0 <= val <= 100.0): raise ValueError("Invalid battery capacity")
+                
+                # Write override file
+                project_root = Path(__file__).parent.parent
+                override_file = project_root / 'config' / 'override_config.yaml'
+                
+                # We could use yaml but for simplicity we'll just write JSON, 
+                # coordinator should be updated to handle .json overrides if needed
+                # Actually let's use YAML if available
+                try:
+                    import yaml
+                    with open(override_file, 'w') as f:
+                        yaml.dump(new_config, f)
+                except ImportError:
+                    # Fallback to JSON if yaml is not available (coordinator handles both)
+                    with open(override_file, 'w') as f:
+                        json.dump(new_config, f)
+                
+                # Signal coordinator
+                pid = self._background_cache.get('coordinator_pid')
+                if pid:
+                    import os, signal
+                    os.kill(pid, signal.SIGHUP)
+                    logger.info(f"🔄 Signal SIGHUP sent to coordinator (PID: {pid}) for config reload")
+                
+                return jsonify({'status': 'success', 'message': 'Override config updated'})
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/deploy', methods=['POST'])
+        def deploy_update():
+            """
+            Bridge for remote deployments.
+            Triggers self-update.sh with a delay to allow CMD_ACK to be sent first.
+            """
+            if request.remote_addr != '127.0.0.1':
+                return jsonify({'error': 'Unauthorized - Local access only'}), 403
+            
+            def deferred_deploy():
+                time.sleep(5) # Wait for cloud_reporter to send ACK
+                project_root = Path(__file__).parent.parent
+                script_path = project_root / 'scripts' / 'self-update.sh'
+                if script_path.exists():
+                    logger.info("🎬 Starting deferred deployment script...")
+                    os.system(f"bash {script_path} &")
+                else:
+                    logger.error(f"❌ Deployment script not found at {script_path}")
+
+            threading.Thread(target=deferred_deploy, daemon=True).start()
+            return jsonify({'status': 'success', 'message': 'Deployment initiated (deferred by 5s)'})
+
     def _get_log_file(self, log_name: str) -> Optional[Path]:
         """Get log file path by name"""
         log_files = {
@@ -1931,6 +2059,7 @@ class LogWebServer:
             <div class="tab" onclick="showTab('decisions')">Decisions</div>
             <div class="tab" onclick="showTab('time-series')">Time Series</div>
             <div class="tab" onclick="showTab('prices')">Prices</div>
+            <div class="tab" onclick="showTab('config')">Configuration</div>
             <div class="tab" onclick="showTab('logs')">Logs</div>
         </div>
         
@@ -2075,6 +2204,23 @@ class LogWebServer:
                 </div>
                 <div id="prices-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px;">
                     <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+        
+        <!-- Config Tab -->
+        <div id="config" class="tab-content">
+            <div class="card">
+                <h3>Effective Configuration</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                    This shows the final merged configuration used by the coordinator.
+                    It's a combination of: Base config → Local overrides → Cloud overrides.
+                </p>
+                <div class="controls">
+                    <button onclick="refreshEffectiveConfig()">🔄 Refresh</button>
+                </div>
+                <div id="config-display" class="log-container" style="white-space: pre-wrap; font-family: monospace; font-size: 12px;">
+                    Loading configuration...
                 </div>
             </div>
         </div>
@@ -2836,6 +2982,42 @@ class LogWebServer:
             loadTimeSeries();
         }
         
+        function refreshEffectiveConfig() {
+            const display = document.getElementById('config-display');
+            display.textContent = 'Loading...';
+            fetch('/effective-config')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        display.innerHTML = '<span style="color: var(--error);">Error: ' + data.error + '</span>';
+                        return;
+                    }
+                    // Syntax highlight the JSON
+                    const formatted = JSON.stringify(data, null, 2);
+                    display.innerHTML = syntaxHighlightJSON(formatted);
+                })
+                .catch(error => {
+                    display.innerHTML = '<span style="color: var(--error);">Fetch error: ' + error + '</span>';
+                });
+        }
+        
+        function syntaxHighlightJSON(json) {
+            // Simple JSON syntax highlighting
+            return json
+                .replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?)/g, function(match) {
+                    let cls = 'color: #3498db;'; // strings
+                    if (/^"/.test(match)) {
+                        if (/:$/.test(match)) {
+                            cls = 'color: #e74c3c; font-weight: bold;'; // keys
+                        }
+                    }
+                    return '<span style="' + cls + '">' + match + '</span>';
+                })
+                .replace(/\b(true|false)\b/g, '<span style="color: #27ae60;">$1</span>')
+                .replace(/\b(null)\b/g, '<span style="color: #7f8c8d;">$1</span>')
+                .replace(/\b(\d+)\b/g, '<span style="color: #9b59b6;">$1</span>');
+        }
+        
         function loadMetrics() {
             fetch('/metrics')
                 .then(response => response.json())
@@ -3194,6 +3376,9 @@ class LogWebServer:
             
             // Initialize month selector
             populateMonthSelector();
+            
+            // Load effective config for Config tab
+            refreshEffectiveConfig();
             
             // Add event listeners for decision filters
             const timeRangeSelect = document.getElementById('time-range');

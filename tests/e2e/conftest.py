@@ -14,18 +14,25 @@ def docker_stack():
     subprocess.run(["docker-compose", "down", "-v"], check=True)
     subprocess.run(["docker-compose", "up", "-d", "--build"], check=True)
     
-    # NEW: MQTT Security Setup
-    print("🔐 Configuring MQTT Security...")
-    time.sleep(5) # Wait for mosquitto to start
-    subprocess.run([
-        "docker", "exec", "goodwe-mqtt", 
-        "mosquitto_passwd", "-b", "-c", "/mosquitto/config/password_file", "hub_api", "hub_secret"
-    ], check=True)
-    subprocess.run([
-        "docker", "exec", "goodwe-mqtt", 
-        "mosquitto_passwd", "-b", "/mosquitto/config/password_file", "mock-node-01", "secret123"
-    ], check=True)
-    subprocess.run(["docker", "restart", "goodwe-mqtt"], check=True)
+    # NEW: RabbitMQ & MQTT Setup
+    print("🔐 Configuring RabbitMQ & MQTT plugin...")
+    time.sleep(15) # Wait for rabbitmq to start
+    subprocess.run(["docker", "exec", "goodwe-mqtt", "rabbitmq-plugins", "enable", "rabbitmq_mqtt"], check=True)
+    
+    # Create mock-node user (hub_api is default)
+    subprocess.run(["docker", "exec", "goodwe-mqtt", "rabbitmqctl", "add_user", "mock-node-01", "secret123"], check=False) # ignore if exists
+    
+    # 1. AMQP Permissions (vhost, config, write, read)
+    # mock-node-01 can only write/read its own topics on any exchange (simplified)
+    subprocess.run(["docker", "exec", "goodwe-mqtt", "rabbitmqctl", "set_permissions", "-p", "/", "mock-node-01", ".*", ".*", ".*"], check=True)
+    
+    # 2. Topic Permissions (Strict isolation)
+    # For 'telemetry' exchange (AMQP)
+    subprocess.run(["docker", "exec", "goodwe-mqtt", "rabbitmqctl", "set_topic_permissions", "-p", "/", "mock-node-01", "telemetry", "^nodes\.mock-node-01\..*", "^nodes\.mock-node-01\..*"], check=True)
+    # For 'amq.topic' exchange (MQTT plugin default)
+    subprocess.run(["docker", "exec", "goodwe-mqtt", "rabbitmqctl", "set_topic_permissions", "-p", "/", "mock-node-01", "amq.topic", "^nodes\.mock-node-01\..*", "^nodes\.mock-node-01\..*"], check=True)
+    
+    subprocess.run(["docker", "exec", "goodwe-mqtt", "rabbitmqctl", "set_user_tags", "mock-node-01", "management"], check=True)
 
     # Wait for Hub API to be healthy
     base_url = "http://localhost:8000"

@@ -5,22 +5,31 @@ from src.automated_price_charging import AutomatedPriceCharger
 
 @pytest.fixture
 def charger():
-    """Fixture to create an AutomatedPriceCharger instance with standard config"""
-    charger = AutomatedPriceCharger("config/master_coordinator_config.yaml")
-    # Mock necessary components
-    charger.data_collector = MagicMock()
-    charger.goodwe_charger = MagicMock()
-    charger.master_coordinator = MagicMock()
-    
-    # Enable smart critical charging
-    charger.smart_critical_enabled = True
-    charger.max_critical_price = 1.20
-    charger.high_price_threshold = 1.10
-    charger.wait_at_10_percent_if_high_price = True
-    charger.emergency_battery_threshold = 5.0
-    charger.critical_battery_threshold = 30.0
-    
-    return charger
+    """Fixture to create an AutomatedPriceCharger instance with mocked dependencies"""
+    with patch('src.automated_price_charging.AutomatedPriceCharger._load_config'), \
+         patch('src.automated_price_charging.GoodWeFastCharger'), \
+         patch('src.automated_price_charging.EnhancedDataCollector'):
+        
+        charger = AutomatedPriceCharger("mock_config.yaml")
+        
+        # Mock necessary components
+        charger.data_collector = MagicMock()
+        charger.goodwe_charger = MagicMock()
+        charger.master_coordinator = MagicMock()
+        charger.config = {
+            'price_analysis': {'api_url': 'http://mock'},
+            'battery_management': {'capacity_kwh': 20.0}
+        }
+        
+        # Enable smart critical charging
+        charger.smart_critical_enabled = True
+        charger.max_critical_price = 1.20
+        charger.high_price_threshold = 1.10
+        charger.wait_at_10_percent_if_high_price = True
+        charger.emergency_battery_threshold = 5.0
+        charger.critical_battery_threshold = 30.0
+        
+        return charger
 
 def test_critical_lookahead_delays_charging(charger):
     """

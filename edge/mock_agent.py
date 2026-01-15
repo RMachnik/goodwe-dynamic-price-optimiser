@@ -1,30 +1,27 @@
 import asyncio
 import json
 import os
-import aiomqtt
+import aio_pika
+from aio_pika import ExchangeType
 from datetime import datetime
 
 # Configuration from environment
-MQTT_BROKER = os.getenv("MQTT_BROKER", "mqtt")
-MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
-MQTT_USER = os.getenv("MQTT_USER")
-MQTT_PASS = os.getenv("MQTT_PASS")
+AMQP_BROKER = os.getenv("MQTT_BROKER", "rabbitmq") # Fallback to rabbitmq service name
+AMQP_PORT = int(os.getenv("AMQP_PORT", 5672))
+AMQP_USER = os.getenv("MQTT_USER", "mock-node-01")
+AMQP_PASS = os.getenv("MQTT_PASS", "secret123")
 NODE_ID = os.getenv("NODE_ID", "mock-node-01")
 PUBLISH_INTERVAL = int(os.getenv("PUBLISH_INTERVAL", 5))
 
-TELEMETRY_TOPIC = f"nodes/{NODE_ID}/telemetry"
-COMMANDS_TOPIC = f"nodes/{NODE_ID}/commands"
-
-async def mqtt_publisher(client):
+async def amqp_publisher(exchange):
     while True:
         try:
-            # Simulate dynamic energy states
             now = datetime.now()
             hour = now.hour
             is_peak = 18 <= hour <= 21
             is_cheap = 0 <= hour <= 5
             
-            soc = 45.0 + (hour % 5) * 10 # Mock SOC fluctuation
+            soc = 45.0 + (hour % 5) * 10 
             solar_power = 0 if (hour < 6 or hour > 19) else (2500 if 10 <= hour <= 15 else 800)
 
             payload = {
@@ -48,41 +45,49 @@ async def mqtt_publisher(client):
                     "daily_cost_pln": 3.12
                 }
             }
-            await client.publish(TELEMETRY_TOPIC, payload=json.dumps(payload))
-            print(f"📤 [PUBS] Publishing telemetry to {TELEMETRY_TOPIC}...")
+            routing_key = f"nodes.{NODE_ID}.telemetry"
+            message = aio_pika.Message(
+                body=json.dumps(payload).encode(),
+                content_type="application/json"
+            )
+            await exchange.publish(message, routing_key=routing_key)
+            print(f"📤 [PUBS] Publishing telemetry to {routing_key}...")
             await asyncio.sleep(PUBLISH_INTERVAL)
         except Exception as e:
             print(f"❌ Publisher Error: {e}")
             break
 
-async def mqtt_subscriber(client):
+async def amqp_subscriber(channel, exchange):
     try:
-        await client.subscribe(COMMANDS_TOPIC)
-        print(f"📥 [SUBS] Listening for commands on {COMMANDS_TOPIC}...")
-        async for message in client.messages:
-            payload = message.payload.decode()
-            print(f"🎮 [CMD] Received command: {payload}")
+        queue = await channel.declare_queue(f"commands_{NODE_ID}", durable=True, auto_delete=True)
+        await queue.bind(exchange, routing_key=f"nodes.{NODE_ID}.commands")
+        
+        print(f"📥 [SUBS] Listening for commands on nodes.{NODE_ID}.commands...")
+        async with queue.iterator() as queue_iter:
+            async for message in queue_iter:
+                async with message.process():
+                    payload = message.body.decode()
+                    print(f"🎮 [CMD] Received command: {payload}")
     except Exception as e:
         print(f"❌ Subscriber Error: {e}")
 
 async def main():
     print(f"🚀 Mock Agent {NODE_ID} starting...")
+    amqp_url = f"amqp://{AMQP_USER}:{AMQP_PASS}@{AMQP_BROKER}:{AMQP_PORT}/"
     while True:
         try:
-            async with aiomqtt.Client(
-                hostname=MQTT_BROKER, 
-                port=MQTT_PORT,
-                username=MQTT_USER,
-                password=MQTT_PASS
-            ) as client:
-                print("✅ Connected to MQTT broker")
-                # Run publisher and subscriber concurrently
+            connection = await aio_pika.connect_robust(amqp_url)
+            async with connection:
+                channel = await connection.channel()
+                exchange = await channel.declare_exchange("telemetry", ExchangeType.TOPIC, durable=True)
+                
+                print("✅ Connected to AMQP broker")
                 await asyncio.gather(
-                    mqtt_publisher(client),
-                    mqtt_subscriber(client)
+                    amqp_publisher(exchange),
+                    amqp_subscriber(channel, exchange)
                 )
         except Exception as e:
-            print(f"❌ MQTT Error: {e}. Retrying in 5 seconds...")
+            print(f"❌ AMQP Error: {e}. Retrying in 5 seconds...")
             await asyncio.sleep(5)
 
 if __name__ == "__main__":
