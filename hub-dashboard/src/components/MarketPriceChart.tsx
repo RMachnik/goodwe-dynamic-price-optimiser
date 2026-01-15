@@ -172,6 +172,8 @@ const MarketPriceChart: React.FC = () => {
                                         color: '#fff',
                                         boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
                                     }}
+                                    itemStyle={{ color: '#22d3ee' }}
+                                    labelStyle={{ color: '#fff', fontWeight: 500 }}
                                     formatter={(value: number | undefined) => [`${(value || 0).toFixed(2)} PLN/kWh`, 'Price']}
                                     labelFormatter={(label) => {
                                         const d = new Date(label);
