@@ -1689,27 +1689,7 @@ class AutomatedPriceCharger:
         
         # ACTIVE CHARGING: If already charging, check if we should continue or stop
         if self.is_charging:
-            # Bidirectional flip-flop: prevent stop within 15 minutes of start
-            if self.charging_start_time:
-                minutes_since_start = (datetime.now() - self.charging_start_time).total_seconds() / 60
-                if minutes_since_start < self.flip_flop_protection_minutes:
-                    return {
-                        'should_charge': True,
-                        'reason': f'Flip-flop protection: charging started {minutes_since_start:.1f} min ago (continue)',
-                        'priority': 'high',
-                        'confidence': 0.95
-                    }
-            
-            # Check if we should stop charging (target SOC reached, etc.)
-            if battery_soc >= 90:  # Near full
-                return {
-                    'should_charge': False,
-                    'reason': f'Battery nearly full ({battery_soc}%) - stop charging',
-                    'priority': 'high',
-                    'confidence': 0.95
-                }
-            
-            # Check if current price is too high for continuing (except if emergency)
+            # Price spike check applies to ALL modes - pause if price > threshold
             if battery_soc > 5 and current_price and current_price > self.get_high_price_threshold():
                 return {
                     'should_charge': False,
@@ -1718,13 +1698,17 @@ class AutomatedPriceCharger:
                     'confidence': 0.8
                 }
             
-            # Continue charging if still within reasonable conditions
-            return {
-                'should_charge': True,
-                'reason': f'Charging in progress - continuing (SOC: {battery_soc}%)',
-                'priority': 'medium',
-                'confidence': 0.8
-            }
+            # Sync session tracking with is_charging state if needed
+            if not self.active_charging_session:
+                self.active_charging_session = True
+                if not self.session_start_time:
+                    self.session_start_time = self.charging_start_time or datetime.now()
+                if self.session_start_soc is None:
+                    self.session_start_soc = battery_soc
+                logger.debug(f"Synced hysteresis session with is_charging state (SOC: {battery_soc}%)")
+            
+            # Delegate to hysteresis session handler for proper stop threshold (95%)
+            return self._handle_active_session(battery_soc)
         
         # BIDIRECTIONAL FLIP-FLOP: Prevent start within 15 minutes of stop
         if self.charging_stop_time:

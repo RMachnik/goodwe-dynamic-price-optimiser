@@ -378,36 +378,51 @@ def test_flip_flop_allow_start_after_15_minutes(price_charging, sample_price_dat
 
 
 def test_flip_flop_prevent_stop_after_start(price_charging, sample_price_data):
-    """Test flip-flop prevents stopping charging within 15 min of start."""
+    """Test hysteresis session duration prevents stopping within 30 min of start.
+    
+    Note: With new hysteresis-first approach, session handling uses 
+    min_session_duration_minutes (30 min) instead of legacy flip-flop (15 min).
+    """
     price_charging.charging_start_time = datetime.now() - timedelta(minutes=10)
     price_charging.is_charging = True
+    price_charging.session_start_time = price_charging.charging_start_time  # Sync session
+    price_charging.active_charging_session = True
+    price_charging.session_start_soc = 85
     
-    # Even with high SOC, should continue due to flip-flop
+    # With normal price, should continue due to min session duration
     decision = make_decision(price_charging, 
-        battery_soc=89.0,  # Just below 90% stop threshold
-        current_price=1.50,  # Very high price
-        cheapest_price=0.50,
+        battery_soc=89.0,
+        current_price=0.35,  # Normal price (not spike)
+        cheapest_price=0.30,
         cheapest_hour=datetime.now() + timedelta(hours=6),
         price_data=sample_price_data
     )
     
     assert decision['should_charge'] is True
-    assert 'Flip-flop protection' in decision['reason']
-    assert 'started' in decision['reason']
-    assert '10' in decision['reason']  # Minutes since start
+    # Hysteresis uses 'min duration' instead of 'flip-flop'
+    assert 'min duration' in decision['reason'].lower() or 'continuing' in decision['reason'].lower()
 
 
-def test_flip_flop_allow_stop_after_15_minutes(price_charging, sample_price_data):
-    """Test flip-flop allows stopping after 15+ minutes since start."""
-    price_charging.charging_start_time = datetime.now() - timedelta(minutes=16)
+def test_hysteresis_stops_at_95_not_90(price_charging, sample_price_data):
+    """Test hysteresis stops at 95%, not legacy 90%.
+    
+    Note: With new hysteresis-first approach, charging stops at 
+    normal_stop_threshold (95%), not the old hardcoded 90%.
+    """
+    price_charging.charging_start_time = datetime.now() - timedelta(minutes=35)
     price_charging.is_charging = True
+    price_charging.session_start_time = price_charging.charging_start_time
+    price_charging.active_charging_session = True
+    price_charging.session_start_soc = 85
     
-    # Should allow stop when battery nearly full
-    decision = make_decision(price_charging, 90.0, 1.50, 0.50, datetime.now() + timedelta(hours=6), sample_price_data
-    )
+    # At 90%, should continue (new behavior - stop at 95%)
+    decision_90 = make_decision(price_charging, 90.0, 0.35, 0.30, datetime.now() + timedelta(hours=6), sample_price_data)
+    assert decision_90['should_charge'] is True, "Should continue at 90% (new stop threshold is 95%)"
     
-    assert decision['should_charge'] is False
-    assert 'nearly full' in decision['reason'].lower()
+    # At 95%, should stop
+    decision_95 = make_decision(price_charging, 95.0, 0.35, 0.30, datetime.now() + timedelta(hours=6), sample_price_data)
+    assert decision_95['should_charge'] is False, "Should stop at 95%"
+    assert 'target' in decision_95['reason'].lower() or '95%' in decision_95['reason']
 
 
 # =============================================================================
