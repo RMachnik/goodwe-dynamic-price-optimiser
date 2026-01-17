@@ -1,13 +1,14 @@
 [Unit]
 Description=GoodWe Cloud Reporter
-After=network.target goodwe-coordinator.service
+After=network.target goodwe-master-coordinator.service
 
 [Service]
 Type=simple
 User=rmachnik
-WorkingDirectory=/home/rmachnik/goodwe-edge
-EnvironmentFile=/home/rmachnik/goodwe-edge/.env
-ExecStart=/home/rmachnik/goodwe-edge/venv/bin/python3 cloud_reporter.py
+WorkingDirectory=/home/rmachnik/sources/goodwe-dynamic-price-optimiser
+Environment=PYTHONPATH=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/edge:/home/rmachnik/sources/goodwe-dynamic-price-optimiser/edge/src
+EnvironmentFile=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/.env
+ExecStart=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/venv/bin/python edge/cloud_reporter.py
 Restart=always
 RestartSec=10
 StandardOutput=journal

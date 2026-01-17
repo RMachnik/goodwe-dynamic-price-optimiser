@@ -14,7 +14,7 @@ cd hub-dashboard
 if [ ! -f .env.production ]; then
     echo "⚠️  Warning: .env.production not found, creating from example..."
     cat > .env.production << EOF
-VITE_API_BASE_URL=http://srv26.mikr.us:40314
+VITE_API_BASE_URL=http://srv26.mikr.us:40316
 EOF
     echo "  ✓ Created .env.production"
     echo "  ⚠️  Remember to update VITE_API_BASE_URL with your actual domain!"

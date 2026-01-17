@@ -10,7 +10,10 @@ Type=simple
 User=rmachnik
 Group=rmachnik
 WorkingDirectory=/home/rmachnik/sources/goodwe-dynamic-price-optimiser
-ExecStart=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/run_master_coordinator.sh
+Environment=PYTHONPATH=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/edge/src
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/.env
+ExecStart=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/venv/bin/python edge/src/master_coordinator.py --non-interactive
 ExecStop=/bin/kill -TERM $MAINPID
 KillMode=mixed
 KillSignal=TERM
@@ -19,32 +22,6 @@ RestartSec=30
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=goodwe-master-coordinator
-
-# Environment variables
-Environment=PYTHONPATH=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/src
-Environment=PYTHONUNBUFFERED=1
-Environment=HOME=/home/rmachnik
-Environment=USER=rmachnik
-
-# Security settings (simplified for development)
-# NoNewPrivileges=true
-# PrivateTmp=true
-# ProtectSystem=strict
-# ProtectHome=false
-# ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/logs
-# ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/out
-# ReadWritePaths=/home/rmachnik/sources/goodwe-dynamic-price-optimiser/config
-
-# Network access for web server
-IPAddressAllow=localhost
-IPAddressAllow=10.0.0.0/8
-IPAddressAllow=172.16.0.0/12
-IPAddressAllow=192.168.0.0/16
-
-# Resource limits
-LimitNOFILE=65536
-MemoryMax=512M
-CPUQuota=50%
 
 [Install]
 WantedBy=multi-user.target

@@ -74,24 +74,31 @@ class CloudReporter:
                     config = config_resp.json()
             except: pass
 
-            # 3. Construct Payload
+            # 3. Extract data from nested structure
+            battery_data = state.get("battery", {})
+            pv_data = state.get("photovoltaic", {})
+            pricing_data = state.get("pricing", {})
+            recommendations = state.get("recommendations", {})
+            
+            # 4. Construct Payload
             return {
                 "node_id": NODE_ID,
                 "hw_id": NODE_ID,
                 "timestamp": datetime.utcnow().isoformat(),
                 "battery": {
-                    "soc_percent": state.get("battery_soc", 0),
-                    "voltage": state.get("battery_voltage", 0)
+                    "soc_percent": battery_data.get("soc_percent", 0),
+                    "voltage": battery_data.get("voltage", 0),
+                    "temperature_c": battery_data.get("temperature_c", 0)
                 },
                 "solar": {
-                    "power_w": state.get("pv_power", 0)
+                    "power_w": pv_data.get("current_power_w", 0)
                 },
                 "grid": {
-                    "current_price": prices.get("current_price_pln_kwh", 0),
-                    "mode": state.get("mode", "UNKNOWN")
+                    "current_price": pricing_data.get("current_price_pln_kwh", 0),
+                    "mode": recommendations.get("primary_action", "UNKNOWN")
                 },
                 "optimizer": {
-                    "latest_decision": state.get("latest_decision", ""),
+                    "latest_decision": recommendations.get("primary_action", ""),
                     "daily_savings_pln": state.get("daily_savings", 0),
                     "daily_cost_pln": state.get("daily_cost", 0),
                     "reported_config": config # The loop-back verification

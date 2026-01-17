@@ -577,6 +577,7 @@ class LogWebServer:
     def _refresh_price_data(self):
         """Refresh price data in background thread (fetches from Hub API)."""
         try:
+            charger = self._get_or_create_price_charger()
             hub_api_url = os.getenv("HUB_API_URL", "http://srv26.mikr.us:40314")
             logger.info(f"Refreshing price data from Hub API: {hub_api_url}...")
             

@@ -1,0 +1,744 @@
+# Master Coordinator Configuration for GoodWe Enhanced Energy Management System
+# This configuration orchestrates all components of the energy management system
+# Unified configuration combining master coordinator and fast charging settings
+
+# Global System Configuration
+system:
+  timezone: "Europe/Warsaw"  # System timezone for all time-based operations
+
+# Inverter Configuration
+inverter:
+  vendor: "goodwe"  # Inverter vendor: goodwe, fronius, sma, huawei, etc.
+  ip_address: "192.168.33.6"  # Your inverter IP
+  port: 8899
+  timeout: 1
+  retries: 3
+  retry_delay: 2.0  # Delay between retry attempts in seconds (to avoid overwhelming inverter)
+  family: "ET"  # Inverter family (ET, ES, DT, or null for auto-detect)
+  comm_addr: 0xf7  # Communication address (usually 0xf7 for ET/ES, 0x7f for DT)
+
+# Charging Configuration
+charging:
+  max_power: 10000  # Maximum charging power in Watts
+  safety_voltage_min: 320.0  # Minimum safe battery voltage (GoodWe Lynx-D spec)
+  safety_voltage_max: 480.0  # Maximum safe battery voltage (GoodWe Lynx-D spec)
+  safety_current_max: 32.0   # Maximum safe charging current
+  safety_temp_max: 53.0      # Maximum safe battery temperature (GoodWe Lynx-D spec)
+  safety_temp_min: 0.0       # Minimum safe battery temperature for charging (GoodWe Lynx-D spec)
+
+# Electricity Tariff Configuration
+electricity_tariff:
+  tariff_type: "g12"  # Options: g11, g12, g12as, g12w, g13, g13s, g14dynamic
+  
+  # SC Component (Składnik cenotwórczy) - same for all tariffs
+  sc_component_pln_kwh: 0.0892
+  
+  # Distribution prices by tariff type
+  distribution_pricing:
+    # G12w - Two-zone tariff (time-based)
+    g12w:
+      type: "time_based"
+      peak_hours:
+        start: 6
+        end: 22
+      prices:
+        peak: 0.3566      # Day/Peak (06:00-22:00)
+        off_peak: 0.0749  # Night/Off-peak (22:00-06:00)
+    
+    # G14dynamic - Dynamic tariff (kompas-based)
+    g14dynamic:
+      type: "kompas_based"
+      requires_pse_peak_hours: true
+      prices:
+        normal_usage: 0.0578      # usage_fcst=1 → NORMALNE UŻYTKOWANIE (S2)
+        recommended_usage: 0.0145  # usage_fcst=0 → ZALECANE UŻYTKOWANIE (S1)
+        recommended_saving: 0.4339 # usage_fcst=2 → ZALECANE OSZCZĘDZANIE (S3)
+        required_reduction: 2.8931 # usage_fcst=3 → WYMAGANE OGRANICZANIE (S4)
+      fallback_price: 0.0578  # Use normal_usage if kompas unavailable
+    
+    # G11 - Single-zone tariff (static)
+    g11:
+      type: "static"
+      price: 0.3125
+    
+    # G12 - Two-zone tariff
+    g12:
+      type: "time_based"
+      peak_hours:
+        start: 7
+        end: 22
+      # G12 has two off-peak periods: 22-07 (night) and 13-15 (afternoon valley)
+      off_peak_windows:
+        - start: 13
+          end: 15
+      prices:
+        peak: 0.3566
+        off_peak: 0.0749
+    
+    # G12as - Two-zone tariff with volume-based pricing
+    g12as:
+      type: "time_based"
+      peak_hours:
+        start: 7
+        end: 13
+      prices:
+        peak: 0.3125
+        off_peak: 0.0312
+    
+    # G13 - Three-zone tariff (placeholder for future)
+    g13:
+      type: "static"
+      price: 0.0  # Requires more complex implementation
+      note: "G13 has three zones - morning peak, day, night - needs detailed implementation"
+    
+    # G13s - Seasonal three-zone tariff with day-type awareness
+    g13s:
+      type: "seasonal_time_based"
+      requires_pse_forecast: true
+      
+      seasons:
+        summer:
+          start_month: 4  # April
+          start_day: 1
+          end_month: 9    # September
+          end_day: 30
+          time_zones:
+            # Day peak has TWO separate periods
+            day_peak_morning:
+              start: 7
+              end: 9
+            day_off_peak:
+              start: 9
+              end: 17
+            day_peak_evening:
+              start: 17
+              end: 21
+            night:
+              start: 21
+              end: 7  # wraps to next day
+        winter:
+          start_month: 10  # October
+          start_day: 1
+          end_month: 3     # March
+          end_day: 31
+          time_zones:
+            # Day peak has TWO separate periods
+            day_peak_morning:
+              start: 7
+              end: 10
+            day_off_peak:
+              start: 10
+              end: 15
+            day_peak_evening:
+              start: 15
+              end: 21
+            night:
+              start: 21
+              end: 7  # wraps to next day
+      
+      prices:
+        working_days:
+          summer:
+            day_peak: 0.290      # 7-9h and 17-21h
+            day_off_peak: 0.100  # 9-17h
+            night: 0.110         # 21-7h
+          winter:
+            day_peak: 0.340      # 7-10h and 15-21h
+            day_off_peak: 0.200  # 10-15h
+            night: 0.110         # 21-7h
+        free_days:
+          all_hours: 0.110  # Weekends & holidays
+      
+      note: "G13s requires Polish holiday detection - weekends and holidays use flat 0.110 PLN/kWh"
+
+# Fast Charging Configuration (merged from fast_charge_config.yaml)
+fast_charging:
+  enable: true                # Enable fast charging (true/false)
+  power_percentage: 90        # Charging power as percentage (0-100)
+  target_soc: 100             # Target State of Charge percentage (0-100)
+  max_charging_time: 120      # Maximum charging time in minutes (0 for unlimited)
+
+# Coordinator Configuration
+coordinator:
+  # Decision making intervals
+  decision_interval_minutes: 15        # How often to make charging decisions
+  health_check_interval_minutes: 5     # How often to perform health checks
+  data_collection_interval_seconds: 60 # How often to collect data
+  
+  # Data management
+  data_retention_days: 30              # How long to keep historical data
+  max_charging_sessions_per_day: 4     # Maximum charging sessions per day
+  
+  # Multi-session charging configuration
+  multi_session_charging:
+    enabled: true                       # Enable multi-session daily charging
+    max_sessions_per_day: 3            # Maximum number of charging sessions per day
+    min_session_duration_hours: 1.0    # Minimum duration for a charging session
+    max_session_duration_hours: 4.0    # Maximum duration for a charging session
+    min_savings_percent: 15.0          # Minimum savings percentage to consider a session
+    session_gap_minutes: 30            # Minimum gap between charging sessions
+    daily_planning_time: "06:00"       # Time to plan daily charging schedule
+  
+  # Emergency stop conditions (GoodWe Lynx-D compliant)
+  emergency_stop_conditions:
+    battery_temp_max: 53.0      # Stop if battery temperature exceeds this (GoodWe Lynx-D max)
+    battery_temp_min: 0.0       # Stop charging if battery temperature below this (GoodWe Lynx-D min for charging)
+    battery_voltage_min: 320.0  # Stop if battery voltage below this (GoodWe Lynx-D min)
+    battery_voltage_max: 480.0  # Stop if battery voltage above this (GoodWe Lynx-D max)
+    grid_voltage_min: 200.0     # Stop if grid voltage below this
+    grid_voltage_max: 250.0     # Stop if grid voltage above this
+    # Additional GoodWe Lynx-D safety conditions
+    battery_temp_warning: 50.0  # Warning if battery temperature exceeds this
+    undervoltage_reboot: true   # Enable auto-reboot after undervoltage (GoodWe Lynx-D feature)
+  
+  # Enhanced Aggressive Charging (Revised for Better Price Detection)
+  cheapest_price_aggressive_charging:
+    enabled: true                    # Enable aggressive charging during cheapest periods
+    
+    # PERCENTAGE-BASED THRESHOLDS (not fixed PLN amounts)
+    price_threshold_percent: 10      # Within 10% of cheapest price (adapts to market)
+    
+    # PRICE CATEGORIES (PLN/kWh) - based on Polish market
+    super_cheap_threshold: 0.20      # < 0.20 = super cheap (rare, charge to 100%)
+    very_cheap_threshold: 0.30       # 0.20-0.30 = very cheap (charge to 90%)
+    cheap_threshold: 0.40            # 0.30-0.40 = cheap (charge to 80%)
+    moderate_threshold: 0.60         # 0.40-0.60 = moderate (normal logic)
+    expensive_threshold: 0.80        # 0.60-0.80 = expensive (don't charge)
+    
+    # TARGET SOC BY PRICE CATEGORY
+    super_cheap_target_soc: 100      # Charge to 100% when super cheap
+    very_cheap_target_soc: 90        # Charge to 90% when very cheap
+    cheap_target_soc: 80             # Charge to 80% when cheap
+    
+    # BATTERY SELLING COORDINATION
+    coordinate_with_selling: true    # Reserve capacity for selling opportunities
+    min_selling_reserve_percent: 5   # Keep 5% margin for selling
+    
+    # HISTORICAL PRICE ANALYSIS (compare to median/percentiles)
+    use_percentile_analysis: true    # Only charge at historically cheap prices
+    percentile_threshold: 25         # Bottom 25% of prices = historically cheap
+    
+    # FORECAST INTEGRATION (check tomorrow's prices)
+    use_d1_forecast: true            # Check PSE D+1 forecast before charging
+    min_tomorrow_price_diff_percent: 30  # Wait if tomorrow 30%+ cheaper
+    
+    # SOC RANGES (when to apply aggressive charging)
+    min_battery_soc_for_aggressive: 30  # Minimum SOC to trigger
+    max_battery_soc_for_aggressive: 85  # Maximum SOC to trigger
+
+# Price Analysis Configuration
+price_analysis:
+  api_url: "https://api.raporty.pse.pl/api/csdac-pln"
+  update_interval_minutes: 60
+  api_timeout_seconds: 60  # API timeout for fetching price data
+  price_thresholds:
+    very_low: 200    # PLN/MWh - very low price threshold
+    low: 400         # PLN/MWh - low price threshold
+    medium: 600      # PLN/MWh - medium price threshold
+    high: 800        # PLN/MWh - high price threshold
+
+# Battery Management Configuration (GoodWe Lynx-D compliant)
+battery_management:
+  capacity_kwh: 20             # Battery capacity in kWh (2x GoodWe Lynx-D LX-D5.0-10)
+  battery_type: "LFP"          # Lithium Iron Phosphate (GoodWe Lynx-D technology)
+  voltage_range:
+    min: 320.0                 # Minimum operating voltage (GoodWe Lynx-D spec)
+    max: 480.0                 # Maximum operating voltage (GoodWe Lynx-D spec)
+  soc_thresholds:
+    critical: 12               # Critical level - charge with price awareness
+    emergency: 5               # Emergency level - charge immediately regardless of price
+    low: 40                    # Low level - charge during low/medium prices
+    medium: 70                 # Medium level - charge during low prices only
+    high: 90                   # High level - charge during very low prices only
+  temperature_thresholds:
+    charging_min: 0.0          # Minimum temperature for charging (GoodWe Lynx-D spec)
+    charging_max: 53.0         # Maximum temperature for charging (GoodWe Lynx-D spec)
+    discharging_min: -20.0     # Minimum temperature for discharging (GoodWe Lynx-D spec)
+    discharging_max: 53.0      # Maximum temperature for discharging (GoodWe Lynx-D spec)
+    normal_max: 45.0           # Normal operating temperature
+    warning_max: 50.0          # Warning temperature
+    critical_max: 53.0         # Critical temperature - stop all operations
+  # GoodWe Lynx-D specific features
+  auto_reboot_undervoltage: true  # Auto-reboot after undervoltage (GoodWe Lynx-D feature)
+  bms_integration: true           # Battery Management System integration
+  vde_2510_50_compliance: true    # VDE 2510-50 safety standard compliance
+  
+  # Charging Hysteresis Configuration (Battery Longevity Protection)
+  # Reduces charging sessions from 8-10/night to 2-3/night
+  # Maintains GoodWe warranty compliance (< 365 full cycles/year)
+  charging_hysteresis:
+    enabled: true                # Enable hysteresis-based charging control
+    
+    # Normal tier (SOC 40-100%) - Night charging optimization
+    normal_start_threshold: 85   # Only start charging when SOC < 85%
+    normal_stop_threshold: 95    # Stop charging when SOC >= 95%
+    normal_target_soc: 95        # Target SOC for normal charging
+    
+    # Opportunistic tier (SOC 15-40%) - Daytime cheap price charging
+    opportunistic_start_threshold: 70
+    opportunistic_stop_threshold: 85
+    
+    # Session management - Battery longevity protection
+    min_session_duration_minutes: 30    # Prevent rapid start/stop (inverter protection)
+    min_discharge_depth_percent: 10     # Require 10% discharge before recharge
+    max_sessions_per_day: 4             # Limit to 4 sessions/day (GoodWe warranty: 1 full cycle/day)
+    
+    # Override for critical situations
+    override_on_emergency: true         # Ignore hysteresis if SOC < 5%
+    override_on_critical: true          # Ignore hysteresis if SOC < 12%
+
+# Enhanced Safety Settings (merged from fast_charge_config.yaml)
+safety:
+  # Maximum battery temperature in Celsius (0 to disable)
+  max_battery_temp: 50
+  # Minimum battery SoC before starting charge (0-100)
+  min_battery_soc: 10
+  # Maximum grid power usage in watts (0 to disable)
+  max_grid_power: 10000
+
+# Hybrid Charging Configuration
+hybrid_charging:
+  max_charging_power: 10000    # Absolute cap for total charging power
+  grid_charging_power: 10000   # Cap for grid contribution specifically
+
+# Logging Configuration (unified)
+logging:
+  level: "INFO"                # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  file: "/opt/goodwe-dynamic-price-optimiser/logs/master_coordinator.log"
+
+# Data Storage Configuration
+data_storage:
+  # Database storage (file storage deprecated December 2024)
+  database_storage:
+    enabled: true              # Enable database storage
+    sqlite:
+      # Relative path - resolved from working directory (project root)
+      path: "data/goodwe_energy.db"
+      connection_pool_size: 5
+      timeout: 30.0
+      wal_mode: true           # Write-Ahead Logging for better performance
+    
+    # Future expansion
+    timeseries_db:
+      type: "influxdb"         # or "timescaledb"
+      enabled: false
+      url: "http://localhost:8086"
+      token: "${INFLUXDB_TOKEN}"
+      org: "goodwe-energy"
+      bucket: "energy_data"
+      retention_policy: "30d"  # 30 days retention
+    
+    relational_db:
+      type: "postgresql"       # or "sqlite"
+      enabled: false
+      host: "localhost"
+      port: 5432
+      database: "goodwe_energy"
+      username: "${DB_USERNAME}"
+      password: "${DB_PASSWORD}"
+      ssl_mode: "prefer"
+    
+    # Data archival configuration
+    archival:
+      enabled: false
+      strategy: "tiered"        # hot, warm, cold storage
+      hot_retention_days: 7     # Hot data in database
+      warm_retention_days: 90   # Warm data in compressed files
+      cold_retention_days: 365  # Cold data in cloud storage
+      cloud_storage:
+        provider: "aws_s3"      # or "gcp", "azure"
+        bucket: "goodwe-energy-archive"
+        region: "eu-central-1"
+
+# Weather Integration Configuration
+weather_integration:
+  enabled: true
+  
+  # IMGW API Configuration (Official Polish Weather Service)
+  imgw:
+    enabled: true
+    api_base_url: "https://danepubliczne.imgw.pl/api/data/synop/station"  # IMGW API base URL
+    station: "krakow"  # Nearest station to Mników, Małopolska
+    update_interval_minutes: 15
+    
+  # Open-Meteo API Configuration (Free Weather Forecasts)
+  openmeteo:
+    enabled: true
+    api_url: "https://api.open-meteo.com/v1/forecast"  # Open-Meteo API URL
+    forecast_days: 1  # 1 day forecast for D+1 planning
+    update_interval_minutes: 60
+    
+  # Location Configuration (Mnikov, Małopolska, Poland)
+  location:
+    latitude: 50.1
+    longitude: 19.7
+    # Timezone inherited from system.timezone
+    
+  # Weather Data Processing
+  processing:
+    forecast_hours: 24  # Match D+1 price planning
+    cache_duration_minutes: 30
+    fallback_to_historical: true
+    confidence_threshold: 0.7
+
+# Web Server Configuration
+web_server:
+  enabled: true                # Enable web server for remote log access
+  host: "0.0.0.0"             # Host to bind to (0.0.0.0 for all interfaces)
+  port: 8080                  # Port to bind to
+  cors_enabled: true          # Enable CORS for cross-origin requests
+  
+  # Background refresh configuration for dashboard performance
+  background_refresh_interval_seconds: 30    # Inverter data (coordinator state files)
+  price_refresh_interval_seconds: 300        # Price data (PSE API, 5 min)
+  metrics_refresh_interval_seconds: 60       # Metrics data (database queries, 1 min)
+  coordinator_pid_check_interval_seconds: 60 # PID validation (1 min)
+  cache_staleness_threshold_seconds: 300     # Warn if cache older than this
+  api_timeout_seconds: 60                    # PSE API timeout
+
+# Timing-Aware Charging Configuration
+timing_awareness:
+  enabled: true                # Enable timing-aware charging decisions
+  pv_capacity_kw: 10.0        # PV system capacity in kW
+  charging_rate_kw: 3.0       # Battery charging rate in kW
+  target_battery_soc: 60.0    # Target battery SOC percentage
+  # Note: battery_capacity_kwh is read from battery_management.capacity_kwh
+  critical_battery_threshold: 30.0  # Critical battery level (%) - price aware
+  emergency_battery_threshold: 5.0 # Emergency battery level (%) - always charge
+  low_battery_threshold: 40.0       # Low battery level (%)
+  min_savings_threshold_pln: 50.0   # Minimum savings threshold (PLN/MWh)
+  min_charging_duration_hours: 0.25 # Minimum charging duration (15 minutes)
+  max_charging_duration_hours: 4.0  # Maximum charging duration (4 hours)
+  
+  # Smart Critical Charging Configuration
+  smart_critical_charging:
+    enabled: true                    # Enable smart critical charging logic
+    max_critical_price_pln: 1.20    # Fallback when adaptive_thresholds disabled
+    max_wait_hours: 8               # Maximum hours to wait for better price
+    min_price_savings_percent: 30  # Minimum savings % to wait for better price
+    emergency_override_price: true  # Always charge at emergency level regardless of price
+    
+    # Adaptive Price Thresholds (automatically adjust to seasonal market conditions)
+    adaptive_thresholds:
+      enabled: true                    # Enable adaptive thresholds (true) or use fixed (false)
+      
+      # Historical data collection
+      lookback_days: 7                 # Calculate thresholds from last 7 days
+      min_samples: 24                  # Minimum hourly samples required (1 day)
+      update_interval_hours: 3         # Recalculate thresholds every 3 hours
+      
+      # Calculation method: 'multiplier' or 'percentile'
+      method: 'multiplier'             # Multiplier-based for simplicity and stability
+      
+      # Multiplier-based configuration (recommended)
+      high_price_multiplier: 1.5       # High price = 1.5× median
+      critical_price_multiplier: 1.3   # Critical charging = 1.3× median
+      
+      # Percentile-based configuration (alternative, not used if method='multiplier')
+      high_price_percentile: 75        # High price = 75th percentile (top 25%)
+      critical_price_percentile: 65    # Critical charging = 65th percentile
+      
+      # Seasonal adjustments (adapts to winter/summer price patterns)
+      seasonal_adjustments_enabled: true
+      seasonal_multipliers:
+        winter:                        # November - February
+          multiplier: 1.3              # Increase thresholds by 30% (expect higher prices)
+          months: [11, 12, 1, 2]
+        summer:                        # June - August
+          multiplier: 0.85             # Decrease thresholds by 15% (expect lower prices)
+          months: [6, 7, 8]
+        spring_autumn:                 # March-May, September-October
+          multiplier: 1.0              # Standard thresholds
+          months: [3, 4, 5, 9, 10]
+      
+      # Fallback values (used when insufficient data or system startup)
+      fallback_high_price_pln: 1.10    # Updated for better price awareness
+      fallback_critical_price_pln: 0.70  # Emergency critical pricing (lowered Dec 2024)
+    
+    # Advanced Optimization Rules
+    optimization_rules:
+      # Rule 1: At 10% SOC with high price, always wait for price drop
+      wait_at_10_percent_if_high_price: true
+      high_price_threshold_pln: 1.10  # PLN/kWh - Fallback when adaptive_thresholds disabled
+      
+      # Rule 2: Proactive charging when PV is poor and weather won't improve
+      proactive_charging_enabled: true
+      pv_poor_threshold_w: 200      # PV power below this is considered poor
+      battery_target_threshold: 80   # Charge proactively if battery below this %
+      weather_improvement_hours: 6   # Hours to check for weather improvement
+      max_proactive_price_pln: 0.7  # Maximum price for proactive charging (≤ 0.7 PLN/kWh)
+      
+      # Rule 3: OPPORTUNISTIC tier time-of-day awareness (pre-peak charging)
+      # Charge in afternoon when evening peak prices will be significantly higher
+      opportunistic_pre_peak_enabled: true
+      evening_peak_hours: [17, 18, 19, 20, 21, 22]  # Hours considered evening peak
+      opportunistic_pre_peak_threshold: 0.9         # Max current price for pre-peak charging (PLN/kWh)
+      evening_price_multiplier: 1.1                 # Evening must be > current × this to trigger
+      opportunistic_pre_peak_min_soc: 20            # Only apply pre-peak logic if SOC ≥ this %
+    
+    # Simple Charging Configuration (December 2025)
+    # 4-tier SOC-based charging system
+    flip_flop_protection_minutes: 15  # Bidirectional flip-flop protection
+    opportunistic_tolerance_percent: 15  # Charge within 15% of cheapest in next 12h
+    
+    # Super Low Price Charging
+    super_low_price_charging_enabled: true
+    super_low_price_threshold_pln: 0.3  # PLN/kWh - below this is super low price
+    super_low_price_target_soc: 100     # Target 100% SOC during super low prices
+    super_low_price_min_duration_hours: 1.0  # Minimum duration to trigger super low price charging
+    
+    # PV preference during super low prices
+    super_low_price_pv_preference:
+      pv_excellent_threshold_w: 3000    # PV power above this is considered excellent
+      weather_stable_threshold: 0.8    # Weather stability confidence threshold
+      house_usage_low_threshold_w: 1000 # House usage below this is considered low
+      pv_charging_time_limit_hours: 2.0 # Maximum time to wait for PV charging
+  
+  pv_charging_efficiency: 0.95      # PV charging efficiency (95%)
+  grid_charging_efficiency: 0.90    # Grid charging efficiency (90%)
+  house_consumption_buffer_kw: 0.5   # House consumption buffer (500W)
+  forecast_hours: 4                 # PV forecast hours ahead
+  historical_days: 7                # Historical data days for patterns
+
+# PV vs consumption analysis configuration
+pv_consumption_analysis:
+  enabled: true
+  pv_overproduction_threshold_w: 1500  # Minimum excess PV power to start charging (increased to allow charging during negative prices)
+  consumption_forecast_hours: 4       # Hours ahead to forecast consumption
+  power_balance_check_interval_minutes: 5  # How often to check power balance
+  historical_data_days: 7             # Days of historical data to keep
+  data_directory: "out/energy_data"  # Data storage directory
+  
+  # Night charging strategy for high price day preparation
+  night_charging_enabled: true
+  night_hours: [22, 23, 0, 1, 2, 3, 4, 5]  # 10 PM to 6 AM
+  high_price_threshold_percentile: 0.75     # 75th percentile for high prices
+  min_night_charging_soc: 30.0              # Don't charge if SOC > 30%
+  max_night_charging_soc: 80.0              # Charge up to 80% at night (normal conditions)
+  
+  # Poor PV detection (realistic thresholds)
+  # Poor PV is defined as average hourly production < 0.3 kWh/hour
+  # For a 12-hour daylight period, this means < 3.6 kWh total daily production
+  poor_pv_threshold_kwh_per_hour: 0.3      # Average PV < 0.3 kWh/hour is poor
+  poor_pv_use_consumption_comparison: true # Also compare PV to house consumption
+  night_charging_target_soc_poor_pv: 100   # Charge to 100% when poor PV expected
+  assume_poor_pv_on_api_failure: true      # Conservative fallback if weather API fails
+  
+  # Legacy percentile-based threshold (for backward compatibility)
+  poor_pv_threshold_percentile: 25.0       # 25th percentile for poor PV (25% of capacity)
+
+# Price Window Analysis Configuration
+price_window_analysis:
+  very_low_price_threshold: 150.0   # Very low price threshold (PLN/MWh)
+  low_price_threshold: 250.0         # Low price threshold (PLN/MWh)
+  medium_price_threshold: 400.0      # Medium price threshold (PLN/MWh)
+  high_price_threshold: 600.0        # High price threshold (PLN/MWh)
+  very_high_price_threshold: 800.0  # Very high price threshold (PLN/MWh)
+  reference_price_pln: 400.0        # Reference price for savings calculation
+  min_charging_duration_hours: 0.25 # Minimum charging duration (15 minutes)
+  max_charging_duration_hours: 4.0  # Maximum charging duration (4 hours)
+  min_savings_threshold_pln: 50.0   # Minimum savings threshold (PLN/MWh)
+
+# Weather-Aware Decision Configuration
+weather_aware_decisions:
+  enabled: true                # Enable weather-aware charging decisions
+  trend_analysis_hours: 2      # Hours to analyze for PV trends
+  min_trend_confidence: 0.6    # Minimum confidence for trend-based decisions
+  weather_impact_threshold: 0.3 # Minimum weather impact to consider
+  max_wait_time_hours: 2.0     # Maximum time to wait for PV improvement
+  min_pv_improvement_kw: 1.0   # Minimum PV improvement to wait for
+
+# Battery Energy Selling Configuration (Conservative Safety Parameters)
+battery_selling:
+  enabled: false                   # Enable battery energy selling functionality
+  
+  # Dynamic Minimum Selling Price (adapts to market conditions)
+  dynamic_min_price:
+    enabled: true                  # Enable dynamic pricing based on market average
+    base_multiplier: 1.5           # Base: Sell only when price ≥ 150% of market average
+    seasonal_adjustments:
+      winter:                      # November - February (high demand season)
+        multiplier: 2.0            # Winter: Sell only when price ≥ 200% of market average (≈1.2 PLN if avg=0.6)
+        months: [11, 12, 1, 2]     # November, December, January, February
+      summer:                      # June - August (low demand season)
+        multiplier: 1.3            # Summer: More aggressive selling at ≥ 130% of average
+        months: [6, 7, 8]          # June, July, August
+      spring_autumn:               # March-May, September-October (shoulder seasons)
+        multiplier: 1.5            # Standard: ≥ 150% of market average
+        months: [3, 4, 5, 9, 10]   # Spring and Autumn
+    lookback_days: 7               # Calculate average from last 7 days
+    min_samples: 24                # Minimum price samples needed for reliable average
+    fallback_price_pln: 1.2        # Fallback if dynamic calculation fails (winter-appropriate)
+  
+  # Legacy fixed minimum price (used only if dynamic_min_price.enabled = false)
+  min_selling_price_pln: 0.80     # Minimum price to start selling (PLN/kWh) - used as fallback
+  
+  revenue_factor: 0.8             # Revenue factor (e.g., 0.8 for 80% return on sold energy)
+  # Selling trigger aligned to analysis: sell at ≥ p90 with SOC > 50%
+  use_percentile_trigger: true     # Enable percentile-based trigger
+  sell_percentile_threshold: 90    # p90 (top 10% prices) - more conservative to avoid premature selling
+  min_battery_soc: 50              # Minimum SOC to start selling (%)
+  max_soc_drop_per_session: 20     # Max 20% SOC drop per selling session
+  max_soc_drop_per_day: 40         # Max 40% cumulative SOC drop per day
+  emergency_sell_price_threshold: 1.50  # Above 1.50 PLN/kWh bypass protections
+  min_profit_margin_multiplier: 1.5     # Selling price must be 1.5x min_selling_price
+  daily_tracking_file: "data/daily_soc_drops.json"  # Persist daily SOC drop tracking
+  safety_margin_soc: 50            # Safety margin SOC - never discharge below this (%)
+  max_daily_cycles: 2              # Maximum discharge cycles per day
+  peak_hours: [17, 18, 19, 20, 21] # High price selling hours (5-9 PM)
+  operation_mode: "eco_discharge"   # GoodWe operation mode for selling
+  grid_export_limit_w: 5000        # Max export power (5kW)
+  battery_dod_limit: 50            # Max discharge depth (50% = 50% SOC min)
+  
+  # Sell-then-buy prevention (protects against expensive buy-back scenarios)
+  sell_then_buy_prevention:
+    enabled: true                  # Enable buy-back cost analysis
+    analysis_hours: 12             # Analyze next 12 hours for buy-back risk
+    min_savings_ratio: 2.0         # Selling revenue must be 2.0x buy-back cost - increased to prevent marginal sales
+  
+  # Smart Timing Configuration (Avoid Selling Too Early)
+  smart_timing:
+    enabled: true                          # Enable smart timing logic
+    forecast_lookahead_hours: 12           # Look ahead 12 hours for better prices (Phase 1: extended from 6h)
+    near_peak_threshold_percent: 95        # Sell if within 95% of forecasted peak
+    min_peak_difference_percent: 15        # Wait only if peak is 15%+ higher
+    max_wait_time_hours: 4                 # Maximum 4 hours to wait for better price
+    min_forecast_confidence: 0.6           # Minimum forecast confidence to trust
+    
+    # Phase 2: Dynamic SOC thresholds based on price magnitude
+    dynamic_soc_thresholds:
+      enabled: true                        # Enable dynamic SOC thresholds
+      super_premium_price_threshold: 1.2   # >1.2 PLN/kWh = super premium (rare but highly profitable)
+      super_premium_min_soc: 70            # Conservative: 70% SOC minimum during super premium prices
+      premium_price_threshold: 0.9         # 0.9-1.2 PLN/kWh = premium prices
+      premium_min_soc: 75                  # Conservative: 75% SOC minimum during premium prices
+      very_high_price_threshold: 0.8       # 0.8-0.9 PLN/kWh = very high prices
+      very_high_min_soc: 80                # Conservative: 80% SOC minimum during very high prices
+      high_price_threshold: 0.7            # 0.7-0.8 PLN/kWh = high prices
+      high_min_soc: 80                     # Standard 80% SOC for high prices
+      require_peak_hours: false            # Allow selling outside traditional peak hours
+      require_recharge_forecast: true      # MANDATORY: Require confirmed recharge opportunity
+    
+    # Enhanced percentile-based selling (Phase 1)
+    percentile_thresholds:
+      aggressive_sell: 3                   # Top 3% prices - aggressive immediate selling (more selective)
+      standard_sell: 10                    # Top 10% prices aligns with p90 trigger (more conservative)
+      conditional_sell: 15                 # Top 15% prices - sell if high confidence and good opportunity cost
+      
+    # Opportunity cost thresholds (Phase 1: improved graduated thresholds)
+    opportunity_cost:
+      high_confidence_wait: 20             # 20%+ revenue gain = definitely wait (high confidence)
+      medium_confidence_wait: 10           # 10-20% revenue gain = wait if low risk and <3h to peak
+      low_confidence_wait: 5               # 5-10% revenue gain = consider waiting if very low risk
+      sell_threshold: 5                    # <5% gain = sell now (tightened from 10%)
+      significant_savings_percent: 15      # Legacy: 15%+ revenue gain = significant (definitely wait)
+      marginal_savings_percent: 3          # Legacy: 3%+ revenue gain = marginal (consider waiting)
+      
+    # Trend analysis configuration
+    trend_analysis:
+      enabled: true                        # Enable price trend analysis
+      trend_window_hours: 2                # Analyze 2-hour price trends
+      rising_threshold: 0.02               # 2% increase = rising trend
+      falling_threshold: -0.02             # 2% decrease = falling trend
+      
+    # Multi-session selling configuration (Phase 2)
+    multi_session:
+      enabled: true                        # Enable multiple selling sessions per day
+      max_sessions_per_day: 3              # Maximum 3 selling sessions
+    
+    # Phase 2: Multi-session daily scheduler
+    multi_session_scheduler:
+      enabled: true                        # Enable intelligent daily peak planning
+      min_peak_price: 0.70                 # Minimum price to consider as peak (PLN/kWh)
+      min_peak_separation_hours: 3.0       # Minimum hours between peaks
+      max_sessions_per_day: 3              # Maximum planned sessions per day
+      reserve_for_evening_peak: true       # Reserve energy for evening peak (17-22)
+      evening_peak_start_hour: 17          # Evening peak start hour
+      evening_peak_end_hour: 22            # Evening peak end hour
+      min_session_gap_hours: 1             # Minimum 1 hour between sessions
+      reserve_battery_percent: 20          # Reserve 20% battery for house usage
+    
+    # Phase 3: Risk-adjusted safety margin
+    risk_adjusted_safety_margin:
+      enabled: true                        # Enable dynamic safety margin adjustment
+      conservative_margin: 55              # High risk: evening hours, preserve for house (55%)
+      moderate_margin: 50                  # Medium risk: standard conditions (50%)
+      aggressive_margin: 48                # Low risk: high forecast confidence, daytime (48%)
+      evening_hours_start: 18              # Evening start (6 PM)
+      evening_hours_end: 22                # Evening end (10 PM)
+      min_forecast_confidence_aggressive: 0.8  # Min confidence for aggressive 48% margin
+    
+    # Phase 4: Real-time price spike detection
+    spike_detection:
+      enabled: true                        # Enable real-time spike detection
+      moderate_spike_percent: 15           # 15%+ increase = moderate spike
+      high_spike_percent: 30               # 30%+ increase = high spike
+      extreme_spike_percent: 50            # 50%+ increase = extreme spike
+      critical_price_threshold: 1.5        # >1.5 PLN/kWh = critical (sell immediately)
+      min_price_samples: 3                 # Minimum samples needed for detection
+      lookback_minutes: 60                 # Look back 60 minutes for reference price
+      min_confidence_threshold: 0.7        # Minimum confidence to act on spike
+    
+    # Phase 4: Negative price strategy (aggressive charging)
+    negative_price_strategy:
+      enabled: true                        # Enable negative price charging
+      negative_price_threshold: 0.05       # <0.05 PLN/kWh = negative/very low price
+      aggressive_charge_soc_target: 100    # Charge to 100% during negative prices
+      allow_sell_below_min_soc: true       # Allow selling from lower SOC during spikes
+      spike_sell_min_soc: 60               # Minimum 60% SOC for spike selling
+    
+    # Phase 4: Kompas (G14dynamic) integration
+    kompas_integration:
+      enabled: true                        # Enable Kompas S1-S4 signal integration
+      s4_extreme_sell: true                # S4 signal = extreme prices, sell aggressively
+      s4_min_soc: 60                       # Allow selling from 60% during S4
+      s4_ignore_forecast: true             # Ignore forecast during S4, sell immediately
+      s1_conservative: true                # S1 signal = low prices, be conservative
+      use_kompas_for_charging: true        # Use S1 signal for charging decisions
+  
+  # Safety parameters (GoodWe Lynx-D compliant)
+  safety_checks:
+    battery_temp_max: 50.0          # Max battery temperature (°C)
+    battery_temp_min: -20.0         # Min battery temperature (°C)
+    grid_voltage_min: 200.0         # Min grid voltage (V)
+    grid_voltage_max: 250.0         # Max grid voltage (V)
+    night_hours: [22, 23, 0, 1, 2, 3, 4, 5]  # Preserve night charge (10 PM - 6 AM)
+
+# PSE Price Forecast Configuration
+pse_price_forecast:
+  enabled: true                              # Enable price forecasts
+  api_url: "https://api.raporty.pse.pl/api/energy-prices"  # CSDAC day-ahead prices
+  update_interval_minutes: 60                # Update every 60 minutes
+  forecast_hours_ahead: 24                   # Forecast 24 hours ahead
+  confidence_threshold: 0.7                  # Minimum confidence to use forecasts
+  
+  # D+1 (tomorrow) price fetching for night charging decisions
+  d1_fetch_start_hour: 13                    # Start fetching D+1 prices at 13:00 (PSE publishes ~12:42)
+  d1_retry_interval_minutes: 30              # Retry every 30 minutes if D+1 not available
+  d1_max_retries: 3                          # Maximum retries (13:00, 13:30, 14:00)
+  
+  # Forecast-based decision rules
+  decision_rules:
+    wait_for_better_price_enabled: true      # Wait if forecast shows better prices
+    min_savings_to_wait_percent: 15          # Wait if forecast shows 15%+ savings
+    max_wait_time_hours: 4                   # Maximum time to wait for better price
+    prefer_forecast_over_current: true       # Prefer forecast when available
+    
+  # Fallback configuration
+  fallback:
+    use_csdac_if_unavailable: true          # Use CSDAC if forecast unavailable
+    retry_attempts: 3                        # Retry attempts for API calls
+    retry_delay_seconds: 60                  # Delay between retries
+
+# PSE Peak Hours (Kompas) Configuration
+pse_peak_hours:
+  enabled: true
+  api_url: "https://api.raporty.pse.pl/api/pdgsz"
+  update_interval_minutes: 60
+  decision_weights:
+    recommended_usage_wait_delta_percent: -5
+    recommended_saving_wait_delta_percent: 10
+    required_reduction_block_grid_charging: true
+  fallback:
+    retry_attempts: 3
+    retry_delay_seconds: 60

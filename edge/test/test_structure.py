@@ -21,7 +21,8 @@ def test_project_structure():
     missing_dirs = []
     
     for dir_name in required_dirs:
-        if Path(dir_name).exists():
+        # Check both local and edge/ prefix
+        if Path(dir_name).exists() or Path(f"edge/{dir_name}").exists():
             print(f"✅ {dir_name}/ directory exists")
         else:
             print(f"❌ {dir_name}/ directory missing")
@@ -44,7 +45,8 @@ def test_project_structure():
     
     # Check required files
     for file_path in required_files:
-        if Path(file_path).exists():
+        # Check both local and edge/ prefix
+        if Path(file_path).exists() or Path(f"edge/{file_path}").exists():
             print(f"✅ {file_path} exists")
         else:
             print(f"❌ {file_path} missing")
@@ -52,7 +54,8 @@ def test_project_structure():
     
     # Check required directories
     for dir_path in required_dirs:
-        if Path(dir_path).exists():
+        # Check both local and edge/ prefix
+        if Path(dir_path).exists() or Path(f"edge/{dir_path}").exists():
             print(f"✅ {dir_path} exists")
         else:
             print(f"❌ {dir_path} missing")

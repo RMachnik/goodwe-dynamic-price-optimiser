@@ -45,6 +45,14 @@ class TestBackgroundRefreshThread(unittest.TestCase):
         os.makedirs(self.data_dir, exist_ok=True)
         os.makedirs(self.out_dir, exist_ok=True)
         
+        # Mock requests.get to avoid hangs on Hub API calls
+        self.requests_patcher = patch('requests.get')
+        self.mock_get = self.requests_patcher.start()
+        self.mock_get.return_value.status_code = 200
+        self.mock_get.return_value.json.return_value = [
+            {'timestamp': '2026-01-01T00:00:00Z', 'price_pln_kwh': 0.5}
+        ]
+        
         self.config = {
             'web_server': {
                 'enabled': True,
@@ -65,6 +73,7 @@ class TestBackgroundRefreshThread(unittest.TestCase):
     
     def tearDown(self):
         """Clean up test environment"""
+        self.requests_patcher.stop()
         shutil.rmtree(self.temp_dir, ignore_errors=True)
     
     def test_background_thread_initialization(self):
